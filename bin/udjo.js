@@ -9,7 +9,7 @@ const { values, positionals } = parseArgs({
   options: {
     dedup: { type: 'boolean', short: 'd', default: false },
     'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
-    'no-default-ignores': { type: 'boolean', short: 'n', default: false },
+    'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
   allowPositionals: true,
@@ -28,7 +28,7 @@ Arguments:
 Options:
   -d, --dedup                      Consolidate declarations that are safe to merge automatically, rewriting the file in place
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
-  -n, --no-default-ignores         Disable the built-in selector-hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
+  -n, --no-ignore-selectors-defaults  Disable the built-in selector-hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
   -h, --help                       Show this help`);
   process.exit(values.help ? 0 : 1);
 }
@@ -37,7 +37,7 @@ const file = resolve(positionals[0]);
 const options = {
   from: file,
   ignoreSelectors: values['ignore-selector'].map(pattern => new RegExp(pattern, 'i')),
-  defaultIgnoreSelectors: !values['no-default-ignores'],
+  ignoreSelectorsDefaults: !values['no-ignore-selectors-defaults'],
 };
 
 function printFindings(findings) {

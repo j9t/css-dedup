@@ -1,10 +1,51 @@
 # UDJO, the CSS Declaration De-Duplicator (Beta)
 
-UDJO finds—and, where it’s safe, consolidates—duplicate CSS declarations. It implements [“using declaration just once,”](https://webglossary.info/terms/udjo/) as originally described in [DRY CSS](https://meiert.com/blog/dry-css/): the same normalized property-value pair shouldn’t appear in more than one rule within the same scope. Where it does, UDJO reports it—and can group the affected selectors into a single rule.
+UDJO is a CSS performance optimization tool that finds—and, where it’s safe, consolidates—duplicate CSS declarations. It implements [“using declaration just once,”](https://webglossary.info/terms/udjo/) as originally described in [DRY CSS](https://meiert.com/blog/dry-css/): the same normalized property-value pair shouldn’t appear in more than one rule within the same scope. Where it does, UDJO reports it—and can group the affected selectors into a single rule.
 
-## Example
+## Example Optimization
 
-@@
+Given:
+
+```css
+.a {
+  color: red;
+  font-weight: bold;
+}
+
+.b {
+  margin: 0;
+}
+
+.c {
+  color: red;
+}
+```
+
+```shell
+$ npx udjo styles.css
+(root)
+  duplicate   color: red
+    .a (line 2)
+    .c (line 11)
+
+Summary: 1 finding
+```
+
+Running with `--dedup` folds `.a` and `.c` into a single rule for the shared declaration, and leaves everything else untouched:
+
+```css
+.a {
+  font-weight: bold;
+}
+
+.b {
+  margin: 0;
+}
+
+.a, .c {
+  color: red;
+}
+```
 
 ## Usage
 
@@ -18,8 +59,10 @@ npx udjo [options] <file>
 |---|---|---|
 | `--dedup` | `-d` | Consolidate declarations that are safe to merge automatically, rewriting the file in place |
 | `--ignore-selector <pattern>` | `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
-| `--no-default-ignores` | `-n` | Disable the built-in selector-hack ignore list |
+| `--no-ignore-selectors-defaults` | `-n` | Disable the built-in selector-hack ignore list |
 | `--help` | `-h` | Show usage information |
+
+`--ignore-selector` is singular because it's a repeatable flag—each occurrence (`-i pattern1 -i pattern2`) adds one pattern—rather than one flag taking a comma-separated list, matching the convention ESLint uses for its own `--ignore-pattern`. The corresponding programmatic option, `ignoreSelectors`, is plural because there it's genuinely an array.
 
 Without `--dedup`, UDJO only reports; it never writes to the file. Exit code is `1` if it finds anything to report.
 
@@ -40,7 +83,7 @@ Both functions accept an options object:
 {
   from: 'path/to/file.css',        // used for source-map-style line numbers only
   ignoreSelectors: [/^\.legacy-/], // additional selector patterns to exclude
-  defaultIgnoreSelectors: true,    // set to `false` to disable the built-in hack list
+  ignoreSelectorsDefaults: true,    // set to `false` to disable the built-in hack list
 }
 ```
 
@@ -56,6 +99,25 @@ Both functions accept an options object:
 ```
 
 `dedup()` returns `{ css, applied, skipped }`: `css` is the rewritten stylesheet, `applied` lists the merges it made, and `skipped` lists duplicate groups it left untouched along with why.
+
+### PostCSS Plugin Use
+
+For dropping UDJO into an existing PostCSS pipeline (alongside Autoprefixer, cssnano, etc.) instead of running it as a separate file-based pass, import the plugin from `udjo/plugin`:
+
+```javascript
+import postcss from 'postcss';
+import udjo from 'udjo/plugin';
+
+// Report mode: duplicate/redundant declarations surface as PostCSS warnings
+const result = await postcss([udjo()]).process(css, { from: 'styles.css' });
+console.log(result.warnings());
+
+// Dedup mode: rewrites the root in place; skipped merges still surface as warnings
+const fixed = await postcss([udjo({ dedup: true })]).process(css, { from: 'styles.css' });
+console.log(fixed.css);
+```
+
+The plugin takes the same options as `analyze()`/`dedup()`, plus `dedup: true` to switch it into consolidation mode. Since UDJO is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either mostly duplicates work those tools already do.
 
 ## How It Works
 

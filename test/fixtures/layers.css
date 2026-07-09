@@ -1,0 +1,20 @@
+/* Statement-form `@layer` (no block) just declares an order—nothing to scope */
+@layer reset, base;
+
+/* Duplicate within this layer */
+@layer reset {
+  .a {
+    margin: 0;
+  }
+
+  .b {
+    margin: 0;
+  }
+}
+
+/* Same declaration, but a different layer—not a duplicate */
+@layer base {
+  .c {
+    margin: 0;
+  }
+}

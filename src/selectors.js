@@ -23,7 +23,7 @@ export function splitSelectors(selectorList) {
     if (char === ')' || char === ']') depth--;
 
     if (char === ',' && depth === 0) {
-      selectors.push(current.3());
+      selectors.push(current.trim());
       current = '';
       continue;
     }

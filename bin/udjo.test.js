@@ -84,9 +84,9 @@ describe('analyze()', () => {
     assert.strictEqual(findings.length, 0);
   });
 
-  test('`defaultIgnoreSelectors: false` disables the built-in hack list', () => {
+  test('`ignoreSelectorsDefaults: false` disables the built-in hack list', () => {
     const { findings } = analyze('.a { color: red; } * html .b { color: red; }', {
-      defaultIgnoreSelectors: false,
+      ignoreSelectorsDefaults: false,
     });
     assert.strictEqual(findings.length, 1);
   });
@@ -95,6 +95,41 @@ describe('analyze()', () => {
     const { findings } = analyze('.a { color: red; } .b { color: blue; } .c { color: red; }');
     assert.strictEqual(findings.length, 1);
     assert.deepStrictEqual(findings[0].occurrences.map(o => o.selector), ['.a', '.c']);
+  });
+
+  test('Flags duplicates between nested rules, as their own scope', () => {
+    const { findings } = analyze('.a { color: blue; &:hover { color: red; } &:focus { color: red; } }');
+    assert.strictEqual(findings.length, 1);
+    assert.deepStrictEqual(findings[0].occurrences.map(o => o.selector), ['&:hover', '&:focus']);
+  });
+
+  test('Does not compare a rule’s own declarations against its nested rules’', () => {
+    const { findings } = analyze('.a { color: red; &:hover { color: red; } }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Does not flag duplicates across different `@layer` blocks', () => {
+    const { findings } = analyze(`
+      @layer reset { .a { margin: 0; } }
+      @layer base { .b { margin: 0; } }
+    `);
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Flags duplicates within the same `@layer` block', () => {
+    const { findings } = analyze(`
+      @layer reset {
+        .a { margin: 0; }
+        .b { margin: 0; }
+      }
+    `);
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Does not crash on a statement-form at-rule with no block', () => {
+    assert.doesNotThrow(() => analyze('@layer reset, base;\n.a { color: red; }\n.b { color: red; }'));
+    const { findings } = analyze('@layer reset, base;\n.a { color: red; }\n.b { color: red; }');
+    assert.strictEqual(findings.length, 1);
   });
 });
 
@@ -133,6 +168,19 @@ describe('dedup()', () => {
     assert.strictEqual(applied.length, 0);
     assert.match(css, /\*\s*html \.b/);
   });
+
+  test('Merges duplicate declarations between nested rules', () => {
+    const { css, applied } = dedup('.a { color: blue; &:hover { color: red; } &:focus { color: red; } }');
+    assert.strictEqual(applied.length, 1);
+    assert.match(css, /&:hover,\s*&:focus\s*{\s*color: red;\s*}/);
+  });
+
+  test('Does not merge across different `@layer` blocks', () => {
+    const input = '@layer reset { .a { margin: 0; } }\n@layer base { .b { margin: 0; } }\n';
+    const { applied, css } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(css, input);
+  });
 });
 
 describe('Fixtures', () => {
@@ -154,8 +202,8 @@ describe('Fixtures', () => {
     assert.strictEqual(status, 0);
   });
 
-  test('hacks.css reports a finding with `--no-default-ignores`', () => {
-    const { stdout } = run(['--no-default-ignores', path.join(fixturesDir, 'hacks.css')]);
+  test('hacks.css reports a finding with `--no-ignore-selectors-defaults`', () => {
+    const { stdout } = run(['--no-ignore-selectors-defaults', path.join(fixturesDir, 'hacks.css')]);
     assert.ok(stdout.includes('1 finding'));
   });
 

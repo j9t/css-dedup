@@ -13,9 +13,9 @@ export function isIgnoredSelector(selector, patterns = DEFAULT_IGNORE_PATTERNS) 
   return patterns.some(pattern => pattern.test(selector));
 }
 
-export function resolveIgnorePatterns({ ignoreSelectors = [], defaultIgnoreSelectors = true } = {}) {
+export function resolveIgnorePatterns({ ignoreSelectors = [], ignoreSelectorsDefaults = true } = {}) {
   return [
-    ...(defaultIgnoreSelectors ? DEFAULT_IGNORE_PATTERNS : []),
+    ...(ignoreSelectorsDefaults ? DEFAULT_IGNORE_PATTERNS : []),
     ...ignoreSelectors,
   ];
 }

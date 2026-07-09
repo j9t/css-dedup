@@ -3,17 +3,20 @@ import { normalizeProp, declarationKey } from './normalize.js';
 import { isIgnoredSelector, resolveIgnorePatterns } from './hacks.js';
 import { splitSelectors } from './selectors.js';
 
-// A “scope” is a DRY boundary: the root stylesheet, or the direct contents of
-// one specific `@media`/`@supports`/etc. block. Declarations are only ever
-// compared for duplication within the same scope—never across scopes, since
-// rules in different at-rule blocks can’t share a merged rule.
+// A "scope" is a DRY boundary: the root stylesheet, or the direct contents of
+// one specific `@media`/`@supports`/`@layer`/etc. block, or one specific
+// nested rule (native CSS nesting). Declarations are only ever compared for
+// duplication within the same scope—never across scopes, since rules in
+// different at-rule blocks or different nested rules can't share a merged
+// rule.
 function describeScope(container) {
   if (container.type === 'root') return 'root';
+  if (container.type === 'rule') return container.selector;
 
   const chain = [];
   let node = container;
   while (node && node.type !== 'root') {
-    chain.unshift(`@${node.name} ${node.params}`.trim());
+    chain.unshift(node.type === 'rule' ? node.selector : `@${node.name} ${node.params}`.trim());
     node = node.parent;
   }
   return chain.join(' > ');
@@ -23,11 +26,17 @@ function collectScopes(root) {
   const scopes = [];
 
   function walk(container) {
+    // Statement-form at-rules (`@layer reset, base;`, `@import url(x.css);`)
+    // have no block, so there's nothing to scope or recurse into.
+    if (!container.nodes) return;
+
     const rules = container.nodes.filter(node => node.type === 'rule');
     if (rules.length) scopes.push({ container, rules, label: describeScope(container) });
 
     for (const node of container.nodes) {
-      if (node.type === 'atrule') walk(node);
+      // Recurse into at-rules (`@media`, `@layer`, ...) and into rules
+      // themselves, since native CSS nesting puts rules inside rules.
+      if (node.type === 'atrule' || node.type === 'rule') walk(node);
     }
   }
 
@@ -42,9 +51,8 @@ function eligibleRules(scope, ignorePatterns) {
   });
 }
 
-export function analyze(css, options = {}) {
+export function analyzeRoot(root, options = {}) {
   const ignorePatterns = resolveIgnorePatterns(options);
-  const root = postcss.parse(css, { from: options.from });
   const scopes = collectScopes(root);
   const findings = [];
 
@@ -54,7 +62,9 @@ export function analyze(css, options = {}) {
     for (const rule of eligibleRules(scope, ignorePatterns)) {
       const seenInRule = new Set();
 
-      rule.walkDecls(decl => {
+      // Only compare a rule's own direct declarations—not those of any
+      // nested rules inside it, which belong to their own scope.
+      for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
         const key = declarationKey(decl.prop, decl.value, decl.important);
         const occurrence = { rule, decl };
 
@@ -70,7 +80,7 @@ export function analyze(css, options = {}) {
 
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key).push(occurrence);
-      });
+      }
     }
 
     for (const [key, occurrences] of byKey) {
@@ -88,6 +98,11 @@ export function analyze(css, options = {}) {
   return { findings };
 }
 
+export function analyze(css, options = {}) {
+  const root = postcss.parse(css, { from: options.from });
+  return analyzeRoot(root, options);
+}
+
 function findDecl(occurrences, rule) {
   return occurrences.find(occ => occ.rule === rule).decl;
 }
@@ -102,9 +117,8 @@ function describeOccurrence({ rule, decl }) {
   };
 }
 
-export function dedup(css, options = {}) {
+export function dedupRoot(root, options = {}) {
   const ignorePatterns = resolveIgnorePatterns(options);
-  const root = postcss.parse(css, { from: options.from });
   const scopes = collectScopes(root);
   const applied = [];
   const skipped = [];
@@ -114,11 +128,11 @@ export function dedup(css, options = {}) {
     const byKey = new Map();
 
     for (const rule of rules) {
-      rule.walkDecls(decl => {
+      for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
         const key = declarationKey(decl.prop, decl.value, decl.important);
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key).push({ rule, decl });
-      });
+      }
     }
 
     for (const [key, occurrences] of byKey) {
@@ -140,11 +154,7 @@ export function dedup(css, options = {}) {
       const blockingRule = scope.rules.find((rule, index) => {
         if (index <= firstIndex || index >= lastIndex) return false;
         if (distinctRules.includes(rule)) return false;
-        let touchesProp = false;
-        rule.walkDecls(decl => {
-          if (normalizeProp(decl.prop) === propNormalized) touchesProp = true;
-        });
-        return touchesProp;
+        return rule.nodes.some(node => node.type === 'decl' && normalizeProp(node.prop) === propNormalized);
       });
 
       if (blockingRule) {
@@ -168,9 +178,9 @@ export function dedup(css, options = {}) {
 
       for (const rule of distinctRules) {
         if (rule === target) continue;
-        rule.walkDecls(decl => {
+        for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
           if (declarationKey(decl.prop, decl.value, decl.important) === key) decl.remove();
-        });
+        }
         if (rule.nodes.length === 0) rule.remove();
       }
 
@@ -178,5 +188,11 @@ export function dedup(css, options = {}) {
     }
   }
 
+  return { applied, skipped };
+}
+
+export function dedup(css, options = {}) {
+  const root = postcss.parse(css, { from: options.from });
+  const { applied, skipped } = dedupRoot(root, options);
   return { css: root.toString(), applied, skipped };
 }

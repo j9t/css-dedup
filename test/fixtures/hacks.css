@@ -1,0 +1,14 @@
+/* Alone once hack selectors are excluded—no finding */
+.a {
+  color: red;
+}
+
+/* IE6 star-html hack: excluded by default */
+* html .b {
+  color: red;
+}
+
+/* Vendor-prefixed pseudo-element: excluded by default */
+::-webkit-scrollbar {
+  color: red;
+}

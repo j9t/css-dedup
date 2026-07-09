@@ -1,0 +1,27 @@
+/* Safe: nothing between `.a` and `.c` touches `color` */
+.a {
+  color: red;
+  font-weight: bold;
+}
+
+.b {
+  margin: 0;
+}
+
+.c {
+  color: red;
+}
+
+/* Unsafe: `.y` sits between `.x` and `.z` and also sets `background`, so
+   consolidating `.x`/`.z` could change what `.y` receives from the cascade */
+.x {
+  background: white;
+}
+
+.y {
+  background: black;
+}
+
+.z {
+  background: white;
+}

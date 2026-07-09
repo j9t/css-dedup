@@ -38,9 +38,40 @@ describe('Analysis', () => {
     assert.strictEqual(findings.length, 1);
   });
 
+  test('Normalizes modern viewport/container zero-value units', () => {
+    const { findings } = analyze('.a { width: 0; } .b { width: 0svh; } .c { width: 0cqw; }');
+    assert.strictEqual(findings.length, 1);
+    assert.strictEqual(findings[0].occurrences.length, 3);
+  });
+
+  test('Does not collapse unitless and unit-bearing zero for angle/time units', () => {
+    const { findings } = analyze('.a { transition-delay: 0; } .b { transition-delay: 0s; }');
+    assert.strictEqual(findings.length, 0);
+  });
+
   test('Treats `border: none` and `border: 0` as equivalent', () => {
     const { findings } = analyze('.a { border: none; } .b { border: 0; }');
     assert.strictEqual(findings.length, 1);
+  });
+
+  test('Normalizes leading zero in decimals (`0.5` and `.5`)', () => {
+    const { findings } = analyze('.a { opacity: 0.5; } .b { opacity: .5; }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Normalizes trailing zero in decimals (`1.0` and `1`)', () => {
+    const { findings } = analyze('.a { line-height: 1.0; } .b { line-height: 1; }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Normalizes redundant trailing zeros (`1.50` and `1.5`)', () => {
+    const { findings } = analyze('.a { line-height: 1.50; } .b { line-height: 1.5; }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Does not touch decimal-looking substrings inside `url()`', () => {
+    const { findings } = analyze('.a { background: url(icon-2.0.png); } .b { background: url(icon-2.png); }');
+    assert.strictEqual(findings.length, 0);
   });
 
   test('Does not flag a declaration that only occurs once', () => {

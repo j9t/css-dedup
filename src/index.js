@@ -27,7 +27,7 @@ function collectScopes(root) {
 
   function walk(container) {
     // Statement-form at-rules (`@layer reset, base;`, `@import url(x.css);`)
-    // have no block, so there's nothing to scope or recurse into.
+    // have no block, so there's nothing to scope or recurse into
     if (!container.nodes) return;
 
     const rules = container.nodes.filter(node => node.type === 'rule');
@@ -35,7 +35,7 @@ function collectScopes(root) {
 
     for (const node of container.nodes) {
       // Recurse into at-rules (`@media`, `@layer`, ...) and into rules
-      // themselves, since native CSS nesting puts rules inside rules.
+      // themselves, since native CSS nesting puts rules inside rules
       if (node.type === 'atrule' || node.type === 'rule') walk(node);
     }
   }
@@ -63,7 +63,7 @@ export function analyzeRoot(root, options = {}) {
       const seenInRule = new Set();
 
       // Only compare a rule's own direct declarations—not those of any
-      // nested rules inside it, which belong to their own scope.
+      // nested rules inside it, which belong to their own scope
       for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
         const key = declarationKey(decl.prop, decl.value, decl.important);
         const occurrence = { rule, decl };
@@ -145,7 +145,7 @@ export function dedupRoot(root, options = {}) {
       const firstIndex = scope.rules.indexOf(first);
       const lastIndex = scope.rules.indexOf(last);
 
-      // Conservative safety check: refuse to merge if any other rule sitting
+      // Conservative safety check: Refuse to merge if any other rule sitting
       // between the first and last occurrence also touches this property—
       // for any selector. Moving the declaration past such a rule could
       // change which value wins for whatever that rule matches. This is

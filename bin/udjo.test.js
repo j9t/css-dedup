@@ -74,6 +74,21 @@ describe('Analysis', () => {
     assert.strictEqual(findings.length, 0);
   });
 
+  test('Does not treat different-case `var()` references as duplicates', () => {
+    const { findings } = analyze('.a { color: var(--MyBrandColor); } .b { color: var(--mybrandcolor); }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Does not treat different-case custom property names as duplicates', () => {
+    const { findings } = analyze('.a { --MyColor: red; } .b { --mycolor: red; }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Treats same-case `var()` references as duplicates', () => {
+    const { findings } = analyze('.a { color: var(--brand); } .b { color: var(--brand); }');
+    assert.strictEqual(findings.length, 1);
+  });
+
   test('Does not flag a declaration that only occurs once', () => {
     const { findings } = analyze('.a { color: red; } .b { color: blue; }');
     assert.strictEqual(findings.length, 0);
@@ -170,6 +185,22 @@ describe('Dedup', () => {
     assert.strictEqual(applied.length, 1);
     assert.strictEqual(skipped.length, 0);
     assert.match(css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+  });
+
+  test('Keeps the shortest equivalent value, regardless of which occurrence it came from', () => {
+    const { css, applied } = dedup('.a { opacity: 0.50; }\n.b { opacity: .5; }\n');
+    assert.strictEqual(applied[0].value, '.5');
+    assert.match(css, /\.a,\s*\.b\s*{\s*opacity: \.5;\s*}/);
+  });
+
+  test('Prefers the shortest value even when the target rule’s own text is longer', () => {
+    const { css } = dedup('.a { line-height: 1; }\n.b { line-height: 1.0; }\n');
+    assert.match(css, /\.a,\s*\.b\s*{\s*line-height: 1;\s*}/);
+  });
+
+  test('Does not merge across a `var()` case difference', () => {
+    const { applied } = dedup('.a { color: var(--MyBrandColor); }\n.b { color: var(--mybrandcolor); }\n');
+    assert.strictEqual(applied.length, 0);
   });
 
   test('Removes a rule left empty after consolidation', () => {

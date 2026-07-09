@@ -24,17 +24,21 @@ const ZERO_IS_NONE_PROPS = new Set([
 ]);
 
 export function normalizeProp(prop) {
-  return prop.trim().toLowerCase();
+  const trimmed = prop.trim();
+  // Custom property names are case-sensitive (`--Foo` !== `--foo`); every
+  // other CSS property name is ASCII-case-insensitive
+  return trimmed.startsWith('--') ? trimmed : trimmed.toLowerCase();
 }
 
 export function normalizeValue(prop, rawValue) {
   let value = rawValue.trim().replace(/\s+/g, ' ');
 
-  // Leave string literals and `url()` contents alone for every step below—
-  // those can be case-sensitive (paths, `content` strings, custom idents),
-  // and a stray `0.5`-looking substring in a URL isn’t a number to collapse
-  const hasLiteral = /["']|url\(/i.test(value);
-  if (!hasLiteral) {
+  // Leave string literals, `url()` contents, and `var()` references alone for
+  // every step below—those can be case-sensitive (paths, `content` strings,
+  // custom idents, and custom property names inside `var()`), and a stray
+  // `0.5`-looking substring in a URL isn’t a number to collapse
+  const hasOpaqueValue = /["']|url\(|var\(/i.test(value);
+  if (!hasOpaqueValue) {
     value = value.toLowerCase();
     value = value.replace(ZERO_UNIT_RE, '0');
     value = normalizeDecimals(value);

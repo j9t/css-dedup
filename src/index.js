@@ -176,6 +176,18 @@ export function dedupRoot(root, options = {}) {
       const target = last;
       target.selector = mergedSelectors.join(', ');
 
+      // All occurrences share a normalized key, so they’re equivalent by our
+      // own equivalence rules—pick whichever raw spelling is shortest rather
+      // than whatever the target rule happened to already have. This only
+      // selects among text that already exists in the source; it doesn’t
+      // synthesize a shorter spelling itself (that’s a minifier’s job).
+      const shortestValue = occurrences.reduce((shortest, occ) => (
+        occ.decl.value.length < shortest.length ? occ.decl.value : shortest
+      ), occurrences[0].decl.value);
+
+      const targetDecl = occurrences.find(occ => occ.rule === target).decl;
+      if (targetDecl.value !== shortestValue) targetDecl.value = shortestValue;
+
       for (const rule of distinctRules) {
         if (rule === target) continue;
         for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
@@ -184,7 +196,7 @@ export function dedupRoot(root, options = {}) {
         if (rule.nodes.length === 0) rule.remove();
       }
 
-      applied.push({ scope: scope.label, key, selectors: mergedSelectors });
+      applied.push({ scope: scope.label, key, selectors: mergedSelectors, value: shortestValue });
     }
   }
 

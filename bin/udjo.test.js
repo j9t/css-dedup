@@ -20,7 +20,7 @@ function run(args) {
   };
 }
 
-describe('analyze()', () => {
+describe('Analysis', () => {
   test('Flags declarations that are duplicated across rules in the same scope', () => {
     const { findings } = analyze('.a { color: red; } .b { color: red; }');
     assert.strictEqual(findings.length, 1);
@@ -133,7 +133,7 @@ describe('analyze()', () => {
   });
 });
 
-describe('dedup()', () => {
+describe('Dedup', () => {
   test('Merges a duplicate declaration into the selector list of the last rule', () => {
     const { css, applied, skipped } = dedup('.a { color: red; }\n.b { color: red; }\n');
     assert.strictEqual(applied.length, 1);
@@ -194,6 +194,20 @@ describe('Fixtures', () => {
     const { stdout } = run([path.join(fixturesDir, 'media-queries.css')]);
     assert.ok(stdout.includes('1 finding'));
     assert.ok(stdout.includes('min-width: 768px'));
+  });
+
+  test('nesting.css flags the duplicate between nested rules, not against the parent’s own declaration', () => {
+    const { stdout } = run([path.join(fixturesDir, 'nesting.css')]);
+    assert.ok(stdout.includes('1 finding'));
+    assert.ok(stdout.includes('&:hover'));
+    assert.ok(stdout.includes('&:focus'));
+  });
+
+  test('layers.css flags the duplicate inside the shared `@layer` block and doesn’t crash on the statement form', () => {
+    const { stdout, status } = run([path.join(fixturesDir, 'layers.css')]);
+    assert.strictEqual(status, 1);
+    assert.ok(stdout.includes('1 finding'));
+    assert.ok(stdout.includes('@layer reset'));
   });
 
   test('hacks.css reports no findings once hack selectors are excluded', () => {

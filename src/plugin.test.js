@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import postcss from 'postcss';
 import udjo from './plugin.js';
 
-describe('Plugin: Report mode', () => {
+describe('Plugin: Analysis', () => {
   test('Warns about a duplicate declaration', async () => {
     const result = await postcss([udjo()]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
     const warnings = result.warnings();
@@ -23,7 +23,7 @@ describe('Plugin: Report mode', () => {
   });
 });
 
-describe('Plugin: Dedup mode', () => {
+describe('Plugin: Dedup', () => {
   test('Merges a duplicate declaration in place', async () => {
     const result = await postcss([udjo({ dedup: true })]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
     assert.match(result.css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);

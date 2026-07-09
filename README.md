@@ -124,13 +124,13 @@ The plugin takes the same options as `analyze()`/`dedup()`, plus `dedup: true` t
 UDJO:
 
 1. **parses** the CSS with [PostCSS](https://postcss.org/)
-2. **scopes** rules by their DRY boundary—the root stylesheet, or the direct contents of one specific `@media`/`@supports`/etc. block. Declarations are only ever compared within the same scope, since rules in different at-rule blocks can’t share a merged rule
+2. **scopes** rules by their DRY boundary—the root stylesheet, or the direct contents of one specific `@media`/`@supports`/`@layer`/etc. block, or one specific nested rule (native CSS nesting). Declarations are only ever compared within the same scope: rules in different at-rule blocks or different `@layer`s can’t share a merged rule, and a rule’s own declarations are never compared against those of rules nested inside it. Statement-form at-rules with no block (`@layer reset, base;`) are skipped, not recursed into
 3. **excludes** selectors matching a hack pattern (vendor-prefixed pseudo-classes/elements, legacy IE selector hacks) from analysis by default—grouping those into a shared selector list risks the whole rule being dropped by browsers that don’t recognize the selector
 4. **normalizes** each remaining declaration for comparison: whitespace, value case (except inside quoted strings and `url()`), zero-value units (`0px` → `0`), and the `border`/`outline` `none` ↔ `0` equivalence
 5. **reports** any normalized declaration that occurs in more than one rule within a scope, and separately flags declarations repeated within a single rule
 6. **consolidates** (with `--dedup`) only when it’s provably safe: a duplicate group is merged by folding its selectors into the last occurrence and removing the declaration from the others, but only if no other rule between the first and last occurrence also sets that property, for any selector. If something does, the merge is skipped and reported rather than risking a cascade change—the DRY CSS post is explicit that this kind of refactoring “isn’t automation-friendly due to cascade complexity,” so UDJO is conservative by design and will leave some genuinely safe merges for manual review
 
-`test/fixtures/*.css` contains small example stylesheets that exercise each of these behaviors—run `node bin/udjo.js test/fixtures/<file>.css` (add `--dedup` for `merge-safety.css`) to see them in action.
+`test/fixtures/*.css` contains small example stylesheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/udjo.js test/fixtures/<file>.css` (add `--dedup` for `merge-safety.css`) to see them in action.
 
 ***
 

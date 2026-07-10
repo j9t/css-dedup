@@ -35,6 +35,7 @@
   "scripts": {
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "prepare": "git config core.hooksPath .githooks || true",
     "start": "node ./bin/udjo.js",
     "test": "node --test bin/udjo.test.js src/plugin.test.js"
   },

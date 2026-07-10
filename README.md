@@ -1,6 +1,6 @@
 # UDJO, the CSS Declaration De-Duplicator (Beta)
 
-UDJO is a CSS performance optimization tool that finds—and, where it’s safe, consolidates—duplicate CSS declarations. It implements [“using declaration just once,”](https://webglossary.info/terms/udjo/) as originally described in [DRY CSS](https://meiert.com/blog/dry-css/): the same normalized property-value pair shouldn’t appear in more than one rule within the same scope. Where it does, UDJO reports it—and can group the affected selectors into a single rule.
+UDJO is a CSS performance optimization tool that finds—and, where it’s safe, consolidates—duplicate CSS declarations. It implements the technique of [“using declarations just once,”](https://webglossary.info/terms/udjo/) as originally described in [“DRY CSS”](https://meiert.com/blog/dry-css/) (cf. [_CSS Optimization Basics_](https://meiert.com/blog/css-optimization-basics/)): the same normalized property–value pair shouldn’t appear in more than one rule within the same scope. Where it does, UDJO reports it—and can group the affected selectors into a single rule.
 
 ## Example Optimization
 

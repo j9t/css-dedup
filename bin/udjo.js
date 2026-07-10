@@ -151,11 +151,35 @@ function printFindings(findings) {
 async function processTarget(file, options, { multi }) {
   const isStdin = file === '-';
   const label = isStdin ? '(stdin)' : resolve(file);
-  const css = isStdin ? await readStdin() : await readFile(label, 'utf8');
-  const targetOptions = { ...options, from: isStdin ? undefined : label };
 
   if (multi) console.log(styleText('bold', label));
 
+  let css;
+  try {
+    css = isStdin ? await readStdin() : await readFile(label, 'utf8');
+  } catch (err) {
+    console.error(styleText('red', `Could not read ${label}: ${err.message}`));
+    return true;
+  }
+
+  const targetOptions = { ...options, from: isStdin ? undefined : label };
+
+  // A file that fails to parse (invalid CSS, or a non-standard dialect
+  // PostCSS doesn’t accept) shouldn’t take the rest of the run down with it
+  try {
+    return await processCss(css, targetOptions, { isStdin, label });
+  } catch (err) {
+    if (err.name === 'CssSyntaxError') {
+      console.error(styleText('red', err.message));
+      console.error(err.showSourceCode());
+    } else {
+      console.error(styleText('red', `Error processing ${label}: ${err.message}`));
+    }
+    return true;
+  }
+}
+
+async function processCss(css, targetOptions, { isStdin, label }) {
   if (values.dedup) {
     const { css: output, applied, skipped, bytes } = dedup(css, targetOptions);
     const log = isStdin ? console.error : console.log;

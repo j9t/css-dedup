@@ -653,6 +653,41 @@ describe('CLI', () => {
     }
   });
 
+  test('Reports a concise, zoomed-in error for a CSS syntax error, not the whole source', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_syntax_error');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'bad.css');
+    fs.writeFileSync(file, '.a { color XP_WIN, }\n');
+
+    try {
+      const { stderr, stdout, status } = run([file]);
+      assert.match(stderr, /Unknown word/);
+      assert.match(stderr, /\^/);
+      assert.ok(!stderr.includes('CssSyntaxError\n    at'));
+      assert.strictEqual(stdout, '');
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('A syntax error in one file does not stop the others from being processed', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_syntax_error_multi');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'bad.css'), '.a { color XP_WIN, }\n');
+    fs.writeFileSync(path.join(dirTemp, 'good.css'), '.a { color: red; }\n.b { color: red; }\n');
+
+    try {
+      const { stdout, stderr, status } = run([dirTemp]);
+      assert.match(stderr, /Unknown word/);
+      assert.ok(stdout.includes(path.join(dirTemp, 'good.css')));
+      assert.ok(stdout.includes('1 finding'));
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
   test('Reads from stdin with `-` in report mode', () => {
     const { stdout } = run(['-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
     assert.ok(stdout.includes('1 finding'));

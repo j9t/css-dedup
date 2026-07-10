@@ -82,6 +82,8 @@ Pass one or more files—each is analyzed (and, with `--dedup`, rewritten) indep
 
 Without `--dedup`, UDJO only reports; it never writes to a file. Exit code is `1` if it finds anything to report (or, with `--dedup`, anything it had to skip as unsafe) in any of the given files.
 
+A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported concisely (the offending line, not the whole file) and UDJO moves on to the rest, which is particularly useful when a directory turns up one bad file among many good ones.
+
 ### Config File
 
 For settings that should apply on every run—typically a project’s own `ignoreSelectors`—drop a `.udjo.js` in the working directory (or point `--config` at one elsewhere, under any name). It’s a plain ESM module—no JSON dialect, no `package.json` key—so patterns can be real `RegExp` literals rather than a JSON-safe string, and there’s just the one place to look:

@@ -71,7 +71,7 @@ npx udjo [options] <file…>
 Pass one or more files—each is analyzed (and, with `--dedup`, rewritten) independently; with more than one file, output is grouped under a header per file. A directory is searched recursively for .css files (skipping node_modules and dotfolders); the result is unrolled into that same per-file list, so mixing files and directories works too. Pass `-` instead of a file to read CSS from STDIN (can’t be combined with other file arguments); in `--dedup` mode this prints the consolidated CSS to STDOUT, rather than writing a file, so it composes in a pipeline—status/summary output moves to STDERR in that case, keeping STDOUT pure CSS.
 
 | Option | Short | Description |
-|---|---|---|
+| --- | --- | --- |
 | `--dedup` | `-d` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
 | `--ignore-selector <pattern>` | `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
 | `--no-ignore-selectors-defaults` | `-n` | Disable the built-in selector-hack ignore list |

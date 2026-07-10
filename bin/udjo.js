@@ -40,6 +40,22 @@ const options = {
   ignoreSelectorsDefaults: !values['no-ignore-selectors-defaults'],
 };
 
+function formatBytesSummary({ before, after, saved }) {
+  const percent = before ? (saved / before) * 100 : 0;
+  const sign = saved >= 0 ? '-' : '+';
+  return `${before.toLocaleString()} → ${after.toLocaleString()} bytes (${sign}${Math.abs(saved).toLocaleString()} B, ${sign}${Math.abs(percent).toFixed(1)}%)`;
+}
+
+// A merged selector list can cost more bytes than the declaration it removes
+// saves (e.g., two long, single-use selectors sharing one short declaration),
+// so consolidation isn’t always a net win for transfer size—only ever for
+// maintainability (using the declaration just once). Surface that plainly
+// rather than silently reporting negative “savings.”
+function formatGrowth(bytes) {
+  const percent = bytes.before ? (Math.abs(bytes.saved) / bytes.before) * 100 : 0;
+  return `${Math.abs(bytes.saved).toLocaleString()} bytes (${percent.toFixed(1)}%)`;
+}
+
 function printFindings(findings) {
   const grouped = new Map();
   for (const finding of findings) {
@@ -72,14 +88,20 @@ async function main() {
   const css = await readFile(file, 'utf8');
 
   if (values.dedup) {
-    const { css: output, applied, skipped } = dedup(css, options);
+    const { css: output, applied, skipped, bytes } = dedup(css, options);
     if (applied.length) await writeFile(file, output);
 
     console.log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)} (unsafe to auto-merge)`);
     for (const item of skipped) {
       console.log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
     }
-    if (applied.length) console.log(`\nWrote ${file}`);
+    if (applied.length) {
+      console.log(`\n${formatBytesSummary(bytes)}`);
+      if (bytes.saved < 0) {
+        console.log(styleText('yellow', `Note: this consolidation makes the file ${formatGrowth(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--dedup\` here if you care more about transfer size.`));
+      }
+      console.log(`Wrote ${file}`);
+    }
 
     if (skipped.length) process.exitCode = 1;
     return;
@@ -94,6 +116,19 @@ async function main() {
 
   printFindings(findings);
   console.log(`${styleText('bold', 'Summary:')} ${findings.length} finding${findings.length !== 1 ? 's' : ''}`);
+
+  // A dry-run consolidation, purely to report the payoff—same safety rules
+  // as `--dedup`, just discarded instead of written
+  const { applied, bytes } = dedup(css, options);
+  if (applied.length) {
+    if (bytes.saved > 0) {
+      const percent = bytes.before ? (bytes.saved / bytes.before) * 100 : 0;
+      console.log(`Run with \`--dedup\` to save ${bytes.saved.toLocaleString()} bytes (${percent.toFixed(1)}%).`);
+    } else if (bytes.saved < 0) {
+      console.log(styleText('yellow', `Running \`--dedup\` here would make the file ${formatGrowth(bytes)} bigger, not smaller—worth it for maintainability (using each declaration just once), not for transfer size.`));
+    }
+  }
+
   process.exitCode = 1;
 }
 

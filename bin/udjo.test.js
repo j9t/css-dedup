@@ -317,6 +317,22 @@ describe('Dedup', () => {
     const { css } = dedup(input);
     assert.match(css, /\.a,\n {2}\.b \{/);
   });
+
+  test('Reports byte counts before and after consolidation', () => {
+    const input = '.a { color: red; }\n.b { color: red; }\n';
+    const { css, bytes } = dedup(input);
+    assert.strictEqual(bytes.before, Buffer.byteLength(input, 'utf8'));
+    assert.strictEqual(bytes.after, Buffer.byteLength(css, 'utf8'));
+    assert.strictEqual(bytes.saved, bytes.before - bytes.after);
+    assert.ok(bytes.saved > 0);
+  });
+
+  test('Reports zero bytes saved when nothing is applied', () => {
+    const input = '.a { color: red; }\n.b { color: blue; }\n';
+    const { bytes } = dedup(input);
+    assert.strictEqual(bytes.saved, 0);
+    assert.strictEqual(bytes.before, bytes.after);
+  });
 });
 
 describe('Fixtures', () => {
@@ -372,6 +388,7 @@ describe('Fixtures', () => {
       const { stdout } = run(['--dedup', file]);
       assert.ok(stdout.includes('1 consolidated'));
       assert.ok(stdout.includes('1 skipped'));
+      assert.match(stdout, /\d+ → \d+ bytes \(-\d+ B, -\d+\.\d%\)/);
 
       const output = fs.readFileSync(file, 'utf8');
       assert.match(output, /\.a,\s*\.c\s*{\s*color: red;\s*}/);
@@ -380,6 +397,11 @@ describe('Fixtures', () => {
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
+  });
+
+  test('basic.css report mode suggests the byte savings from running `--dedup`', () => {
+    const { stdout } = run([path.join(fixturesDir, 'basic.css')]);
+    assert.match(stdout, /Run with `--dedup` to save \d+ bytes \(\d+\.\d%\)\./);
   });
 
   test('merge-safety.css -d consolidates the safe pair (short flag)', () => {
@@ -422,6 +444,36 @@ describe('CLI', () => {
     try {
       const { stdout } = run(['-i', '^\\.legacy-', file]);
       assert.ok(stdout.includes('No duplicate declarations found.'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Warns in report mode when merging would grow the file rather than shrink it', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_growth_report');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(file, '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n');
+
+    try {
+      const { stdout } = run([file]);
+      assert.match(stdout, /Running `--dedup` here would make the file \d+ bytes \(\d+\.\d%\) bigger, not smaller/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Warns in `--dedup` mode when consolidation grows the file rather than shrinks it', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_growth_dedup');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(file, '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n');
+
+    try {
+      const { stdout } = run(['--dedup', file]);
+      assert.match(stdout, /\+\d+ B, \+\d+\.\d%/);
+      assert.match(stdout, /Note: this consolidation makes the file \d+ bytes \(\d+\.\d%\) bigger, not smaller/);
+      assert.ok(fs.readFileSync(file, 'utf8').includes('.very-long-selector-name-one, .b'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

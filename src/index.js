@@ -199,6 +199,11 @@ function joinSelectors(selectors, rule, multiline) {
 }
 
 export function dedupRoot(root, options = {}) {
+  // Taken before any mutation, so it reflects the file as it stood on disk—
+  // byte counts, not character counts, since the effectiveness this measures
+  // (fewer bytes over the wire) is a transfer-size concern
+  const before = Buffer.byteLength(root.toString(), 'utf8');
+
   const ignorePatterns = resolveIgnorePatterns(options);
   const scopes = collectScopes(root);
   const multilineSelectors = usesMultilineSelectors(root);
@@ -323,11 +328,12 @@ export function dedupRoot(root, options = {}) {
     }
   }
 
-  return { applied, skipped };
+  const after = Buffer.byteLength(root.toString(), 'utf8');
+  return { applied, skipped, bytes: { before, after, saved: before - after } };
 }
 
 export function dedup(css, options = {}) {
   const root = postcss.parse(css, { from: options.from });
-  const { applied, skipped } = dedupRoot(root, options);
-  return { css: root.toString(), applied, skipped };
+  const { applied, skipped, bytes } = dedupRoot(root, options);
+  return { css: root.toString(), applied, skipped, bytes };
 }

@@ -29,6 +29,7 @@ $ npx udjo styles.css
     .c (line 11)
 
 Summary: 1 finding
+Run with `--dedup` to save 10 bytes (11.8%).
 ```
 
 Running with `--dedup` folds `.a` and `.c` into a single rule for the shared declaration, and leaves everything else untouched:
@@ -46,6 +47,18 @@ Running with `--dedup` folds `.a` and `.c` into a single rule for the shared dec
   color: red;
 }
 ```
+
+```shell
+$ npx udjo --dedup styles.css
+1 consolidated, 0 skipped (unsafe to auto-merge)
+
+85 → 75 bytes (-10 B, -11.8%)
+Wrote styles.css
+```
+
+Since duplicate declarations cost bytes wherever they live—in the stylesheet itself, and (uncompressed) over the wire—the byte counts reflect UDJO’s two payoffs at once: less to maintain, and less to transfer.
+
+The two aren’t always aligned, though: folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. Both modes call this out, so it’s a call you can make consciously—it may be worth it if you value using declarations just once (maintainability), not if you’re optimizing purely for transfer size.
 
 ## Usage
 
@@ -98,7 +111,7 @@ Both functions accept an options object:
 }
 ```
 
-`dedup()` returns `{ css, applied, skipped }`: `css` is the rewritten stylesheet, `applied` lists the merges it made, and `skipped` lists duplicate groups it left untouched along with why.
+`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten stylesheet, `applied` lists the merges it made, `skipped` lists duplicate groups it left untouched along with why, and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the stylesheet before and after, since that’s what changes over the wire, not the character count. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
 
 ### PostCSS Plugin Use
 

@@ -1,25 +1,69 @@
 import postcss from 'postcss';
-import { normalizeProp, declarationKey } from './normalize.js';
+import { normalizeProp, declarationKey } from './normalization.js';
 import { isIgnoredSelector, resolveIgnorePatterns } from './hacks.js';
 import { splitSelectors } from './selectors.js';
+import { propertiesOverlap } from './shorthands.js';
+
+function normalizeScopeSegment(text) {
+  return text.trim().replace(/\s+/g, ' ');
+}
 
 // A "scope" is a DRY boundary: the root stylesheet, or the direct contents of
-// one specific `@media`/`@supports`/`@layer`/etc. block, or one specific
-// nested rule (native CSS nesting). Declarations are only ever compared for
-// duplication within the same scope—never across scopes, since rules in
-// different at-rule blocks or different nested rules can't share a merged
-// rule.
+// one specific `@media`/`@supports`/`@layer`/etc. condition, or one specific
+// selector used as a nesting host (native CSS nesting). Declarations are only
+// ever compared for duplication within the same scope—never across scopes,
+// since rules in different at-rule blocks or different nested rules can’t
+// share a merged rule. Whitespace is normalized here (not case—`@layer` names
+// and selectors can be case-sensitive) so `@media (min-width: 768px)` and
+// `@media (min-width:768px)` are recognized as the same boundary regardless
+// of formatting.
 function describeScope(container) {
   if (container.type === 'root') return 'root';
-  if (container.type === 'rule') return container.selector;
+  if (container.type === 'rule') return normalizeScopeSegment(container.selector);
 
   const chain = [];
   let node = container;
   while (node && node.type !== 'root') {
-    chain.unshift(node.type === 'rule' ? node.selector : `@${node.name} ${node.params}`.trim());
+    chain.unshift(node.type === 'rule'
+      ? normalizeScopeSegment(node.selector)
+      : normalizeScopeSegment(`@${node.name} ${node.params}`));
     node = node.parent;
   }
   return chain.join(' > ');
+}
+
+function compareSourceOrder(a, b) {
+  const aStart = a.source?.start;
+  const bStart = b.source?.start;
+  if (!aStart || !bStart) return 0;
+  return aStart.line !== bStart.line ? aStart.line - bStart.line : aStart.column - bStart.column;
+}
+
+// Two blocks with the same condition are the same DRY boundary even when
+// they’re written separately in the source—e.g., two
+// `@media (min-width: 768px) {}` blocks in different parts of a stylesheet
+// apply under the exact same runtime condition, so a declaration duplicated
+// across them is exactly as redundant as one repeated within a single block.
+// Scopes sharing a label are combined here, with their rules re-sorted into
+// true document order so the merge-safety “intervening rule” check
+// downstream still reflects actual source order across the combined blocks.
+function mergeScopesByLabel(scopes) {
+  const byLabel = new Map();
+  const order = [];
+
+  for (const scope of scopes) {
+    if (!byLabel.has(scope.label)) {
+      byLabel.set(scope.label, { label: scope.label, rules: [] });
+      order.push(scope.label);
+    }
+    byLabel.get(scope.label).rules.push(...scope.rules);
+  }
+
+  for (const label of order) {
+    byLabel.get(label).rules.sort(compareSourceOrder);
+  }
+
+  return order.map(label => byLabel.get(label));
 }
 
 function collectScopes(root) {
@@ -27,11 +71,11 @@ function collectScopes(root) {
 
   function walk(container) {
     // Statement-form at-rules (`@layer reset, base;`, `@import url(x.css);`)
-    // have no block, so there's nothing to scope or recurse into
+    // have no block, so there’s nothing to scope or recurse into
     if (!container.nodes) return;
 
     const rules = container.nodes.filter(node => node.type === 'rule');
-    if (rules.length) scopes.push({ container, rules, label: describeScope(container) });
+    if (rules.length) scopes.push({ rules, label: describeScope(container) });
 
     for (const node of container.nodes) {
       // Recurse into at-rules (`@media`, `@layer`, ...) and into rules
@@ -41,7 +85,7 @@ function collectScopes(root) {
   }
 
   walk(root);
-  return scopes;
+  return mergeScopesByLabel(scopes);
 }
 
 function eligibleRules(scope, ignorePatterns) {
@@ -123,9 +167,41 @@ function describeOccurrence({ rule, decl }) {
   };
 }
 
+function removeIfEmpty(node) {
+  while (node && node.type !== 'root' && node.nodes?.length === 0) {
+    const parent = node.parent;
+    node.remove();
+    node = parent;
+  }
+}
+
+// Detects whether this stylesheet predominantly writes multi-selector rules
+// one selector per line (`.a,\n.b {}`) or comma-separated on one line
+// (`.a, .b {}`), by tallying the existing multi-selector rules already in
+// the source. A merged selector list follows whichever style is prevalent,
+// defaulting to one-line when the file has no existing multi-selector rules
+// to go by (or is tied).
+function usesMultilineSelectors(root) {
+  let multiline = 0;
+  let inline = 0;
+  root.walkRules(rule => {
+    if (splitSelectors(rule.selector).length < 2) return;
+    if (/,\s*\n/.test(rule.selector)) multiline++;
+    else inline++;
+  });
+  return multiline > inline;
+}
+
+function joinSelectors(selectors, rule, multiline) {
+  if (!multiline) return selectors.join(', ');
+  const indent = (rule.raws.before ?? '').match(/[ \t]*$/)[0];
+  return selectors.join(`,\n${indent}`);
+}
+
 export function dedupRoot(root, options = {}) {
   const ignorePatterns = resolveIgnorePatterns(options);
   const scopes = collectScopes(root);
+  const multilineSelectors = usesMultilineSelectors(root);
   const applied = [];
   const skipped = [];
 
@@ -152,22 +228,55 @@ export function dedupRoot(root, options = {}) {
       const lastIndex = scope.rules.indexOf(last);
 
       // Conservative safety check: Refuse to merge if any other rule sitting
-      // between the first and last occurrence also touches this property—
-      // for any selector. Moving the declaration past such a rule could
-      // change which value wins for whatever that rule matches. This is
-      // over-cautious by design: it will leave some genuinely safe merges
+      // between the first and last occurrence also touches this property, or
+      // a shorthand/longhand overlapping it (e.g. `margin-left` overlaps
+      // `margin`)—for any selector. Moving the declaration past such a rule
+      // could change which value wins for whatever that rule matches. This
+      // is over-cautious by design: it will leave some genuinely safe merges
       // for manual review rather than risk breaking the cascade.
-      const blockingRule = scope.rules.find((rule, index) => {
-        if (index <= firstIndex || index >= lastIndex) return false;
-        if (distinctRules.includes(rule)) return false;
-        return rule.nodes.some(node => node.type === 'decl' && normalizeProp(node.prop) === propNormalized);
-      });
+      let blockingRule = null;
+      let blockingProp = null;
+      for (const [index, rule] of scope.rules.entries()) {
+        if (index <= firstIndex || index >= lastIndex || distinctRules.includes(rule)) continue;
+        const conflict = rule.nodes.find(node => node.type === 'decl' && propertiesOverlap(normalizeProp(node.prop), propNormalized));
+        if (conflict) {
+          blockingRule = rule;
+          blockingProp = normalizeProp(conflict.prop);
+          break;
+        }
+      }
 
       if (blockingRule) {
+        const propDescription = blockingProp === propNormalized ? `\`${propNormalized}\`` : `overlapping \`${blockingProp}\``;
         skipped.push({
           scope: scope.label,
           key,
-          reason: `intervening declaration for \`${propNormalized}\` in \`${blockingRule.selector}\` (line ${blockingRule.source?.start?.line})`,
+          reason: `intervening ${propDescription} declaration in \`${blockingRule.selector}\` (line ${blockingRule.source?.start?.line})`,
+        });
+        continue;
+      }
+
+      // Same safety concern, but for a declaration that sits in one of the
+      // rules being merged itself rather than in between them: merging always
+      // relocates the matched declaration to the last occurrence’s position,
+      // so if one of the earlier rules also sets an overlapping property
+      // alongside it, splitting them apart can flip their relative order for
+      // elements the rule matches.
+      const selfConflict = distinctRules
+        .filter(rule => rule !== last)
+        .flatMap(rule => rule.nodes
+          .filter(node => (
+            node.type === 'decl'
+            && declarationKey(node.prop, node.value, node.important) !== key
+            && propertiesOverlap(normalizeProp(node.prop), propNormalized)
+          ))
+          .map(decl => ({ rule, decl })))[0];
+
+      if (selfConflict) {
+        skipped.push({
+          scope: scope.label,
+          key,
+          reason: `\`${selfConflict.rule.selector}\` (line ${selfConflict.rule.source?.start?.line}) also sets an overlapping \`${normalizeProp(selfConflict.decl.prop)}\` declaration`,
         });
         continue;
       }
@@ -180,7 +289,7 @@ export function dedupRoot(root, options = {}) {
       }
 
       const target = last;
-      target.selector = mergedSelectors.join(', ');
+      target.selector = joinSelectors(mergedSelectors, target, multilineSelectors);
 
       // All occurrences share a normalized key, so they’re equivalent by our
       // own equivalence rules—pick whichever raw spelling is shortest rather
@@ -199,7 +308,15 @@ export function dedupRoot(root, options = {}) {
         for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
           if (declarationKey(decl.prop, decl.value, decl.important) === key) decl.remove();
         }
-        if (rule.nodes.length === 0) rule.remove();
+        if (rule.nodes.length === 0) {
+          const parent = rule.parent;
+          rule.remove();
+          // Merging can now pull every rule out of an at-rule block—e.g. two
+          // separate `@media (min-width: 768px) {}` blocks that share the
+          // same scope—so walk up and drop any container left empty by that,
+          // not just the rule itself.
+          removeIfEmpty(parent);
+        }
       }
 
       applied.push({ scope: scope.label, key, selectors: mergedSelectors, value: shortestValue });

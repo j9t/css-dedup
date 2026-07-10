@@ -112,6 +112,23 @@ describe('Analysis', () => {
     assert.strictEqual(findings.length, 1);
   });
 
+  test('Flags duplicates split across two separately-written blocks with the same condition', () => {
+    const { findings } = analyze(`
+      @media (min-width: 768px) { .a { color: red; } }
+      @media (min-width: 768px) { .b { color: red; } }
+    `);
+    assert.strictEqual(findings.length, 1);
+    assert.deepStrictEqual(findings[0].occurrences.map(o => o.selector), ['.a', '.b']);
+  });
+
+  test('Matches scopes regardless of whitespace formatting in the condition', () => {
+    const { findings } = analyze(`
+      @media (min-width: 768px) { .a { color: red; } }
+      @media   (min-width:   768px)   { .b { color: red; } }
+    `);
+    assert.strictEqual(findings.length, 1);
+  });
+
   test('Flags a redundant declaration repeated within one rule', () => {
     const { findings } = analyze('.a { color: red; color: red; }');
     assert.strictEqual(findings.length, 1);
@@ -254,6 +271,51 @@ describe('Dedup', () => {
     const { applied, css } = dedup(input);
     assert.strictEqual(applied.length, 0);
     assert.strictEqual(css, input);
+  });
+
+  test('Merges duplicates split across two separately-written blocks with the same condition', () => {
+    const input = '@media (min-width: 768px) { .a { color: red; } }\n@media (min-width: 768px) { .b { color: red; } }\n';
+    const { css, applied } = dedup(input);
+    assert.strictEqual(applied.length, 1);
+    assert.match(css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+  });
+
+  test('Removes an at-rule block left fully empty after cross-block consolidation', () => {
+    const input = '@media (min-width: 768px) { .a { color: red; } }\n@media (min-width: 768px) { .b { color: red; } }\n';
+    const { css } = dedup(input);
+    assert.strictEqual((css.match(/@media/g) || []).length, 1);
+  });
+
+  test('Skips merging when an intervening rule sets an overlapping shorthand/longhand property', () => {
+    const { applied, skipped } = dedup('.a { margin: 0; }\n.mid { margin-left: 10px; }\n.b { margin: 0; }\n');
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 1);
+    assert.match(skipped[0].reason, /margin-left/);
+  });
+
+  test('Skips merging when a merged-from rule itself also sets an overlapping shorthand/longhand property', () => {
+    const { applied, skipped, css } = dedup('.a { margin: 0; margin-left: 5px; }\n.b { margin: 0; }\n');
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 1);
+    assert.match(skipped[0].reason, /margin-left/);
+    assert.strictEqual(css, '.a { margin: 0; margin-left: 5px; }\n.b { margin: 0; }\n');
+  });
+
+  test('Joins merged selectors on one line by default', () => {
+    const { css } = dedup('.a { color: red; }\n.b { color: red; }\n');
+    assert.match(css, /\.a, \.b \{/);
+  });
+
+  test('Joins merged selectors one per line when that’s the file’s existing convention', () => {
+    const input = '.a,\n.x {\n  color: blue;\n}\n\n.a {\n  color: red;\n}\n\n.b {\n  color: red;\n}\n';
+    const { css } = dedup(input);
+    assert.match(css, /\.a,\n\.b \{/);
+  });
+
+  test('Matches the merged rule’s own indentation when joining selectors one per line', () => {
+    const input = '.a,\n.x {\n  color: blue;\n}\n\n@media (min-width: 768px) {\n  .a {\n    color: red;\n  }\n\n  .b {\n    color: red;\n  }\n}\n';
+    const { css } = dedup(input);
+    assert.match(css, /\.a,\n {2}\.b \{/);
   });
 });
 

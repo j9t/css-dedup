@@ -109,6 +109,40 @@ function collectMergedScopes(root) {
   return mergeScopesByLabel(collectScopes(root));
 }
 
+// At-rules like `@font-face`, `@page`, and `@property` can hold declarations
+// directly, with no selector wrapping them—`collectScopes()` above only ever
+// looks at `rule`-type nodes, so those declarations are otherwise invisible
+// to any duplicate check. Unlike a scope’s rules, these blocks are never
+// compared against each other (there’s no selector list to fold two
+// `@font-face` blocks into, and two such blocks repeating the same
+// declaration usually isn’t a mistake—each still describes its own,
+// independent face). So this only ever looks for a declaration repeated
+// within the same block.
+function collectDeclOnlyContainers(root) {
+  const containers = [];
+
+  function walk(container) {
+    if (!container.nodes) return;
+    if (container.type === 'atrule' && container.nodes.some(node => node.type === 'decl')) {
+      containers.push(container);
+    }
+
+    for (const node of container.nodes) {
+      if (node.type === 'atrule' || node.type === 'rule') walk(node);
+    }
+  }
+
+  walk(root);
+  return containers;
+}
+
+// `@font-face`, `@page`, and similar at-rules have no selector of their
+// own—this stands in for one, both in scope labels and in occurrence/applied
+// output
+function atRuleLabel(atrule) {
+  return `@${atrule.name}${atrule.params ? ` ${atrule.params}` : ''}`;
+}
+
 function eligibleRules(scope, ignorePatterns) {
   return scope.rules.filter(rule => {
     const selectors = splitSelectors(rule.selector);
@@ -165,6 +199,24 @@ export function analyzeRoot(root, options = {}) {
     }
   }
 
+  for (const atrule of collectDeclOnlyContainers(root)) {
+    const seenInAtrule = new Set();
+
+    for (const decl of atrule.nodes.filter(node => node.type === 'decl')) {
+      const key = declarationKey(decl.prop, decl.value, decl.important);
+
+      if (seenInAtrule.has(key)) {
+        findings.push({
+          scope: describeScope(atrule),
+          key,
+          redundant: true,
+          occurrences: [describeAtRuleOccurrence(atrule, decl)],
+        });
+      }
+      seenInAtrule.add(key);
+    }
+  }
+
   return { findings };
 }
 
@@ -181,6 +233,22 @@ function describeOccurrence({ rule, decl }) {
   return {
     selector: rule.selector,
     selectors: splitSelectors(rule.selector),
+    prop: decl.prop,
+    value: decl.value,
+    line: decl.source?.start?.line,
+    decl,
+  };
+}
+
+// Mirrors `describeOccurrence()` for an at-rule with no selector of its
+// own (`@font-face`, `@page`, …)—the at-rule’s own `@name params` stands in
+// for the selector, both for CLI/plugin output and for callers that read
+// `occurrences[].selector`
+function describeAtRuleOccurrence(atrule, decl) {
+  const label = atRuleLabel(atrule);
+  return {
+    selector: label,
+    selectors: [label],
     prop: decl.prop,
     value: decl.value,
     line: decl.source?.start?.line,
@@ -211,6 +279,46 @@ function joinSelectors(selectors, rule, multiline) {
   return selectors.join(`,\n${indent}`);
 }
 
+// A declaration repeated verbatim (after normalization, so `RED`/`red` or
+// `.50`/`.5` count too) within the same rule or the same selector-less
+// at-rule block—`.a { color: red; color: red; }`—is always safe to collapse
+// on its own, unlike the cross-container merge below: Nothing relocates
+// across a rule boundary, so there’s no “intervening rule” risk to check
+// for. Within one container, later wins regardless of what’s earlier, so
+// dropping every occurrence but the last never changes which value applies.
+// Runs first, so the cross-container merge pass below only ever sees one
+// occurrence per container per key.
+function removeRedundantDuplicates(container, scopeLabel, selectors) {
+  const applied = [];
+  const byKey = new Map();
+
+  for (const decl of container.nodes.filter(node => node.type === 'decl')) {
+    const key = declarationKey(decl.prop, decl.value, decl.important);
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(decl);
+  }
+
+  for (const [key, decls] of byKey) {
+    if (decls.length < 2) continue;
+
+    const last = decls[decls.length - 1];
+    // Same “keep whichever raw spelling is shortest” rule as the
+    // cross-container merge below
+    const shortestValue = decls.reduce((shortest, decl) => (
+      decl.value.length < shortest.length ? decl.value : shortest
+    ), decls[0].value);
+    if (last.value !== shortestValue) last.value = shortestValue;
+
+    for (const decl of decls) {
+      if (decl !== last) decl.remove();
+    }
+
+    applied.push({ scope: scopeLabel, key, redundant: true, selectors, value: shortestValue });
+  }
+
+  return applied;
+}
+
 export function dedupRoot(root, options = {}) {
   // Taken before any mutation, so it reflects the file as it stood on disk—
   // byte counts, not character counts, since the effectiveness this measures
@@ -222,6 +330,16 @@ export function dedupRoot(root, options = {}) {
   const multilineSelectors = usesMultilineSelectors(root);
   const applied = [];
   const skipped = [];
+
+  for (const scope of scopes) {
+    for (const rule of eligibleRules(scope, ignorePatterns)) {
+      applied.push(...removeRedundantDuplicates(rule, scope.label, splitSelectors(rule.selector)));
+    }
+  }
+
+  for (const atrule of collectDeclOnlyContainers(root)) {
+    applied.push(...removeRedundantDuplicates(atrule, describeScope(atrule), [atRuleLabel(atrule)]));
+  }
 
   for (const scope of scopes) {
     const rules = eligibleRules(scope, ignorePatterns);

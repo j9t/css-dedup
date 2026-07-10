@@ -12,8 +12,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.join(__dirname, 'udjo.js');
 const fixturesDir = path.join(__dirname, '..', 'test', 'fixtures');
 
-function run(args) {
-  const result = spawnSync('node', [scriptPath, ...args], { encoding: 'utf-8', timeout: 30_000 });
+function run(args, spawnOptions = {}) {
+  const result = spawnSync('node', [scriptPath, ...args], { encoding: 'utf-8', timeout: 30_000, ...spawnOptions });
   return {
     stdout: stripVTControlCharacters(result.stdout),
     stderr: stripVTControlCharacters(result.stderr),
@@ -230,6 +230,25 @@ describe('Analysis', () => {
     const { findings } = analyze('@layer reset, base;\n.a { color: red; }\n.b { color: red; }');
     assert.strictEqual(findings.length, 1);
   });
+
+  test('Flags a declaration repeated within a selector-less at-rule block (`@font-face`)', () => {
+    const { findings } = analyze('@font-face { font-family: Foo; src: url(a.woff); font-family: Foo; }');
+    assert.strictEqual(findings.length, 1);
+    assert.strictEqual(findings[0].redundant, true);
+    assert.strictEqual(findings[0].scope, '@font-face');
+    assert.strictEqual(findings[0].occurrences[0].selector, '@font-face');
+  });
+
+  test('Does not flag two independent `@font-face` blocks repeating the same declaration', () => {
+    const { findings } = analyze('@font-face { font-family: Foo; font-weight: 400; }\n@font-face { font-family: Foo; font-weight: 700; }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Flags a declaration repeated within `@page`', () => {
+    const { findings } = analyze('@page { margin: 1in; margin: 1in; }');
+    assert.strictEqual(findings.length, 1);
+    assert.strictEqual(findings[0].scope, '@page');
+  });
 });
 
 describe('Dedup', () => {
@@ -368,6 +387,52 @@ describe('Dedup', () => {
     const { bytes } = dedup(input);
     assert.strictEqual(bytes.saved, 0);
     assert.strictEqual(bytes.before, bytes.after);
+  });
+
+  test('Removes an exact duplicate declaration repeated within one rule', () => {
+    const { css, applied } = dedup('.a { color: red; color: red; }');
+    assert.strictEqual(css, '.a { color: red; }');
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(applied[0].redundant, true);
+    assert.strictEqual(applied[0].key, 'color: red');
+  });
+
+  test('Catches a same-rule duplicate after normalizing case and equivalent zero values', () => {
+    assert.strictEqual(dedup('.a { color: RED; color: red; }').applied.length, 1);
+    assert.strictEqual(dedup('.a { margin: 0; margin: 0px; }').applied.length, 1);
+  });
+
+  test('Removes a declaration repeated within a selector-less at-rule block (`@font-face`)', () => {
+    const { css, applied } = dedup('@font-face { font-family: Foo; src: url(a.woff); font-family: Foo; }');
+    assert.strictEqual(css, '@font-face { src: url(a.woff); font-family: Foo; }');
+    assert.strictEqual(applied[0].scope, '@font-face');
+    assert.deepStrictEqual(applied[0].selectors, ['@font-face']);
+  });
+
+  test('Keeps the shortest equivalent value among same-rule duplicates', () => {
+    const { css } = dedup('.a { opacity: 0.50; opacity: .5; }');
+    assert.strictEqual(css, '.a { opacity: .5; }');
+  });
+
+  test('Collapses more than two duplicate occurrences within one rule down to one', () => {
+    const { css, applied } = dedup('.a { color: red; color: red; color: red; }');
+    assert.strictEqual(css, '.a { color: red; }');
+    assert.strictEqual(applied.length, 1);
+  });
+
+  test('Never touches a same-rule duplicate on a selector-hack rule', () => {
+    const input = '* html .a { color: red; color: red; }\n';
+    const { css, applied } = dedup(input);
+    assert.strictEqual(css, input);
+    assert.strictEqual(applied.length, 0);
+  });
+
+  test('Cleans up a same-rule duplicate before also merging that rule across the scope', () => {
+    const { css, applied } = dedup('.a { color: red; color: red; }\n.b { color: red; }\n');
+    assert.match(css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+    assert.strictEqual(applied.length, 2);
+    assert.ok(applied.some(item => item.redundant));
+    assert.ok(applied.some(item => !item.redundant));
   });
 });
 
@@ -513,5 +578,140 @@ describe('CLI', () => {
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
+  });
+
+  test('Processes multiple files in one invocation, with a header per file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileA = path.join(dirTemp, 'a.css');
+    const fileB = path.join(dirTemp, 'b.css');
+    fs.writeFileSync(fileA, '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(fileB, '.c { color: blue; }\n');
+
+    try {
+      const { stdout, status } = run([fileA, fileB]);
+      assert.ok(stdout.includes(fileA));
+      assert.ok(stdout.includes(fileB));
+      assert.ok(stdout.includes('No duplicate declarations found.'));
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--dedup` consolidates each of multiple files independently', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_dedup');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileA = path.join(dirTemp, 'a.css');
+    const fileB = path.join(dirTemp, 'b.css');
+    fs.writeFileSync(fileA, '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(fileB, '.c { margin: 0; }\n.d { margin: 0; }\n');
+
+    try {
+      const { stdout } = run(['--dedup', fileA, fileB]);
+      assert.ok(stdout.includes(fileA));
+      assert.ok(stdout.includes(fileB));
+      assert.match(fs.readFileSync(fileA, 'utf8'), /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+      assert.match(fs.readFileSync(fileB, 'utf8'), /\.c,\s*\.d\s*{\s*margin: 0;\s*}/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Recursively finds `.css` files under a directory, skipping `node_modules` and dotfolders', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_dir_scan');
+    fs.mkdirSync(path.join(dirTemp, 'sub', 'node_modules'), { recursive: true });
+    fs.mkdirSync(path.join(dirTemp, 'sub', '.hidden'), { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'one.css'), '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(path.join(dirTemp, 'sub', 'two.css'), '.c { color: blue; }\n');
+    fs.writeFileSync(path.join(dirTemp, 'sub', 'node_modules', 'ignored.css'), '.z { color: red; }\n.y { color: red; }\n');
+    fs.writeFileSync(path.join(dirTemp, 'sub', '.hidden', 'ignored.css'), '.x { color: red; }\n.w { color: red; }\n');
+    fs.writeFileSync(path.join(dirTemp, 'readme.txt'), 'not css');
+
+    try {
+      const { stdout, status } = run([dirTemp]);
+      assert.ok(stdout.includes(path.join(dirTemp, 'one.css')));
+      assert.ok(stdout.includes(path.join(dirTemp, 'sub', 'two.css')));
+      assert.ok(!stdout.includes('node_modules'));
+      assert.ok(!stdout.includes('.hidden'));
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Reports a clean error for a directory with no `.css` files', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_dir_empty');
+    fs.mkdirSync(dirTemp, { recursive: true });
+
+    try {
+      const { stderr, status } = run([dirTemp]);
+      assert.ok(stderr.includes('No `.css` files found'));
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Reads from stdin with `-` in report mode', () => {
+    const { stdout } = run(['-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
+    assert.ok(stdout.includes('1 finding'));
+  });
+
+  test('`--dedup -` writes the consolidated CSS to stdout, and status to stderr', () => {
+    const { stdout, stderr } = run(['--dedup', '-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
+    assert.match(stdout, /^\.a, \.b \{\s*color: red;\s*\}\s*$/);
+    assert.ok(stderr.includes('1 consolidated'));
+  });
+
+  test('Rejects combining `-` with other file arguments', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_stdin_mix');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'a.css');
+    fs.writeFileSync(file, '.a { color: red; }\n');
+
+    try {
+      const { stderr, status } = run([file, '-']);
+      assert.ok(stderr.includes('Cannot combine stdin'));
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Loads `ignoreSelectors` from `.udjo.js` in the working directory', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_config');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, '.udjo.js'), 'export default { ignoreSelectors: [/^\\.legacy-/] };\n');
+    const file = path.join(dirTemp, 'legacy.css');
+    fs.writeFileSync(file, '.a { color: red; }\n.legacy-b { color: red; }\n');
+
+    try {
+      const { stdout } = run([file], { cwd: dirTemp });
+      assert.ok(stdout.includes('No duplicate declarations found.'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Loads a config file from an explicit `--config` path', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_config_explicit');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileConfig = path.join(dirTemp, 'custom.config.js');
+    fs.writeFileSync(fileConfig, 'export default { ignoreSelectors: [/^\\.legacy-/] };\n');
+    const file = path.join(dirTemp, 'legacy.css');
+    fs.writeFileSync(file, '.a { color: red; }\n.legacy-b { color: red; }\n');
+
+    try {
+      const { stdout } = run(['--config', fileConfig, file]);
+      assert.ok(stdout.includes('No duplicate declarations found.'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('An absent `.udjo.js` is silently ignored', () => {
+    const { stdout } = run([path.join(fixturesDir, 'hacks.css')]);
+    assert.ok(stdout.includes('No duplicate declarations found.'));
   });
 });

@@ -1,15 +1,21 @@
 #!/usr/bin/env node
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { parseArgs, styleText } from 'node:util';
-import { resolve } from 'node:path';
+import { resolve, join, extname } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { analyze, dedup } from '../src/index.js';
+
+// Directories skipped when recursing into a target directory
+const DIRS_IGNORED = new Set(['node_modules']);
 
 const { values, positionals } = parseArgs({
   options: {
     dedup: { type: 'boolean', short: 'd', default: false },
     'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
     'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
+    config: { type: 'string', short: 'c' },
     help: { type: 'boolean', short: 'h', default: false },
   },
   allowPositionals: true,
@@ -17,28 +23,81 @@ const { values, positionals } = parseArgs({
 });
 
 if (values.help || !positionals.length) {
-  console.log(`Usage: udjo [options] <file>
+  console.log(`Usage: udjo [options] <file...>
 
 Find (and optionally consolidate) duplicate CSS declarations—use every
 declaration just once (UDJO).
 
 Arguments:
-  file  CSS file to analyze
+  file  One or more CSS files or directories to analyze (directories are searched recursively for .css files, skipping node_modules and dotfolders); pass \`-\` to read from STDIN instead
 
 Options:
-  -d, --dedup                      Consolidate declarations that are safe to merge automatically, rewriting the file in place
+  -d, --dedup                      Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -n, --no-ignore-selectors-defaults  Disable the built-in selector-hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
+  -c, --config <path>              Path to a config file (defaults to \`.udjo.js\` in the working directory, if present)
   -h, --help                       Show this help`);
   process.exit(values.help ? 0 : 1);
 }
 
-const file = resolve(positionals[0]);
-const options = {
-  from: file,
-  ignoreSelectors: values['ignore-selector'].map(pattern => new RegExp(pattern, 'i')),
-  ignoreSelectorsDefaults: !values['no-ignore-selectors-defaults'],
-};
+if (positionals.includes('-') && positionals.length > 1) {
+  console.error('Cannot combine stdin (`-`) with other file arguments.');
+  process.exit(1);
+}
+
+// Settings file
+async function loadConfig(pathConfig) {
+  const pathResolved = resolve(pathConfig ?? '.udjo.js');
+  if (!pathConfig && !existsSync(pathResolved)) return {};
+
+  const { default: config = {} } = await import(pathToFileURL(pathResolved).href);
+  return config;
+}
+
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+// Recursively collects `.css` files under a directory, skipping
+// `node_modules` and dotfolders—not configurable, since a
+// project-specific exclude list belongs in `.udjo.js`’s `ignoreSelectors`
+async function collectCssFiles(dirPath) {
+  const entries = await readdir(dirPath, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || DIRS_IGNORED.has(entry.name)) continue;
+    const entryPath = join(dirPath, entry.name);
+
+    if (entry.isDirectory()) files.push(...await collectCssFiles(entryPath));
+    else if (entry.isFile() && extname(entry.name).toLowerCase() === '.css') files.push(entryPath);
+  }
+
+  return files;
+}
+
+// Expands each positional into one or more file paths: `-` (STDIN) and
+// plain files pass through as-is, a directory recurses into its .css
+// files (sorted, for stable output across runs)
+async function expandTargets(targets) {
+  const expanded = [];
+
+  for (const target of targets) {
+    if (target === '-') {
+      expanded.push(target);
+      continue;
+    }
+
+    const pathResolved = resolve(target);
+    const stats = await stat(pathResolved);
+    if (stats.isDirectory()) expanded.push(...(await collectCssFiles(pathResolved)).sort());
+    else expanded.push(pathResolved);
+  }
+
+  return expanded;
+}
 
 function formatBytesSummary({ before, after, saved }) {
   const percent = before ? (saved / before) * 100 : 0;
@@ -84,34 +143,49 @@ function printFindings(findings) {
   }
 }
 
-async function main() {
-  const css = await readFile(file, 'utf8');
+// Processes one target (a file path, or `-` for STDIN) and returns whether
+// it should count against the process’s exit code. In `--dedup` mode, STDIN
+// is a special case: There is no file to rewrite in place, so the
+// consolidated CSS is printed to STDOUT instead—and, so that stream stays
+// pipeable, the usual status/summary lines go to STDERR rather than STDOUT.
+async function processTarget(file, options, { multi }) {
+  const isStdin = file === '-';
+  const label = isStdin ? '(stdin)' : resolve(file);
+  const css = isStdin ? await readStdin() : await readFile(label, 'utf8');
+  const targetOptions = { ...options, from: isStdin ? undefined : label };
+
+  if (multi) console.log(styleText('bold', label));
 
   if (values.dedup) {
-    const { css: output, applied, skipped, bytes } = dedup(css, options);
-    if (applied.length) await writeFile(file, output);
+    const { css: output, applied, skipped, bytes } = dedup(css, targetOptions);
+    const log = isStdin ? console.error : console.log;
 
-    console.log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)} (unsafe to auto-merge)`);
+    if (isStdin) {
+      if (applied.length) process.stdout.write(output);
+    } else if (applied.length) {
+      await writeFile(label, output);
+    }
+
+    log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)} (unsafe to auto-merge)`);
     for (const item of skipped) {
-      console.log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
+      log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
     }
     if (applied.length) {
-      console.log(`\n${formatBytesSummary(bytes)}`);
+      log(`\n${formatBytesSummary(bytes)}`);
       if (bytes.saved < 0) {
-        console.log(styleText('yellow', `Note: this consolidation makes the file ${formatGrowth(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--dedup\` here if you care more about transfer size.`));
+        log(styleText('yellow', `Note: this consolidation makes the file ${formatGrowth(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--dedup\` here if you care more about transfer size.`));
       }
-      console.log(`Wrote ${file}`);
+      if (!isStdin) log(`Wrote ${label}`);
     }
 
-    if (skipped.length) process.exitCode = 1;
-    return;
+    return skipped.length > 0;
   }
 
-  const { findings } = analyze(css, options);
+  const { findings } = analyze(css, targetOptions);
 
   if (!findings.length) {
     console.log('No duplicate declarations found.');
-    return;
+    return false;
   }
 
   printFindings(findings);
@@ -119,7 +193,7 @@ async function main() {
 
   // A dry-run consolidation, purely to report the payoff—same safety rules
   // as `--dedup`, just discarded instead of written
-  const { applied, bytes } = dedup(css, options);
+  const { applied, bytes } = dedup(css, targetOptions);
   if (applied.length) {
     if (bytes.saved > 0) {
       const percent = bytes.before ? (bytes.saved / bytes.before) * 100 : 0;
@@ -129,7 +203,34 @@ async function main() {
     }
   }
 
-  process.exitCode = 1;
+  return true;
+}
+
+async function main() {
+  const config = await loadConfig(values.config);
+  const options = {
+    ignoreSelectors: [
+      ...(config.ignoreSelectors ?? []),
+      ...values['ignore-selector'].map(pattern => new RegExp(pattern, 'i')),
+    ],
+    ignoreSelectorsDefaults: values['no-ignore-selectors-defaults'] ? false : (config.ignoreSelectorsDefaults ?? true),
+  };
+
+  const files = await expandTargets(positionals);
+  if (!files.length) {
+    console.error(`No \`.css\` files found under ${positionals.join(', ')}.`);
+    process.exit(1);
+  }
+
+  const multi = files.length > 1;
+  let failed = false;
+
+  for (const [index, file] of files.entries()) {
+    if (multi && index > 0) console.log('');
+    if (await processTarget(file, options, { multi })) failed = true;
+  }
+
+  if (failed) process.exitCode = 1;
 }
 
 main().catch(err => {

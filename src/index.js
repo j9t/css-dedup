@@ -8,7 +8,7 @@ function normalizeScopeSegment(text) {
   return text.trim().replace(/\s+/g, ' ');
 }
 
-// A "scope" is a DRY boundary: the root stylesheet, or the direct contents of
+// A “scope” is a DRY boundary: the root stylesheet, or the direct contents of
 // one specific `@media`/`@supports`/`@layer`/etc. condition, or one specific
 // selector used as a nesting host (native CSS nesting). This computes the
 // label identifying that boundary—used both to keep unrelated scopes apart,
@@ -93,7 +93,7 @@ function collectScopes(root) {
     if (rules.length) scopes.push({ rules, label: describeScope(container) });
 
     for (const node of container.nodes) {
-      // Recurse into at-rules (`@media`, `@layer`, ...) and into rules
+      // Recurse into at-rules (`@media`, `@layer`, …) and into rules
       // themselves, since native CSS nesting puts rules inside rules
       if (node.type === 'atrule' || node.type === 'rule') walk(node);
     }
@@ -166,7 +166,7 @@ export function analyzeRoot(root, options = {}) {
     for (const rule of eligibleRules(scope, ignorePatterns)) {
       const seenInRule = new Set();
 
-      // Only compare a rule's own direct declarations—not those of any
+      // Only compare a rule’s own direct declarations—not those of any
       // nested rules inside it, which belong to their own scope
       for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
         const key = declarationKey(decl.prop, decl.value, decl.important);

@@ -23,7 +23,7 @@ const { values, positionals } = parseArgs({
 });
 
 if (values.help || !positionals.length) {
-  console.log(`Usage: udjo [options] <file...>
+  console.log(`Usage: udjo [options] <file…>
 
 Find (and optionally consolidate) duplicate CSS declarations—use every
 declaration just once (UDJO).
@@ -230,7 +230,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
 
   // Findings above don't distinguish safe from unsafe—without this, a
   // duplicate group that `--dedup` would just skip (see its own safety
-  // checks) reads as if nothing follows from it at all, when there's a
+  // checks) reads as if nothing follows from it at all, when there’s a
   // concrete, explainable reason it wasn't offered as a `--dedup` win
   if (skipped.length) {
     console.log(styleText('yellow', `${skipped.length} duplicate group${skipped.length !== 1 ? 's' : ''} considered unsafe to auto-merge:`));

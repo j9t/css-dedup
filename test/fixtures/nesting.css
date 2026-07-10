@@ -1,4 +1,4 @@
-/* Native CSS nesting: `.a`'s own declaration is a different scope from its
+/* Native CSS nesting: `.a`’s own declaration is a different scope from its
    nested rules, and the two nested rules share a duplicate between them */
 .a {
   color: blue;

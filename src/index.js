@@ -47,7 +47,12 @@ function collectScopes(root) {
 function eligibleRules(scope, ignorePatterns) {
   return scope.rules.filter(rule => {
     const selectors = splitSelectors(rule.selector);
-    return !selectors.every(selector => isIgnoredSelector(selector, ignorePatterns));
+    // A rule is only eligible if none of its selectors are ignored—a mixed
+    // list like `.foo, *html .bar` can’t have just the hack part dropped,
+    // since that would silently orphan the hack selector’s declaration, and
+    // it can’t have all parts merged as-is, since that would contaminate the
+    // merged rule with a selector meant to stay isolated
+    return !selectors.some(selector => isIgnoredSelector(selector, ignorePatterns));
   });
 }
 
@@ -114,6 +119,7 @@ function describeOccurrence({ rule, decl }) {
     prop: decl.prop,
     value: decl.value,
     line: decl.source?.start?.line,
+    decl,
   };
 }
 

@@ -19,11 +19,11 @@ export default function udjo(options = {}) {
 
       const { findings } = analyzeRoot(root, options);
       for (const finding of findings) {
-        const node = finding.occurrences[finding.occurrences.length - 1];
+        const occurrence = finding.occurrences[finding.occurrences.length - 1];
         const message = finding.redundant
-          ? `Redundant declaration \`${finding.key}\` repeated in \`${node.selector}\``
+          ? `Redundant declaration \`${finding.key}\` repeated in \`${occurrence.selector}\``
           : `Duplicate declaration \`${finding.key}\` also in ${finding.occurrences.slice(0, -1).map(o => `\`${o.selector}\``).join(', ')}`;
-        root.warn(result, message, { node: node.decl ?? undefined });
+        root.warn(result, message, { node: occurrence.decl });
       }
     },
   };

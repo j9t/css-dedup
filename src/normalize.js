@@ -1,6 +1,9 @@
 // Length/percentage/fr units only—unitless zero isn’t valid for angle, time,
-// frequency, or resolution units (`0deg`, `0s`, …), so those are left alone
-const ZERO_UNIT_RE = /\b0(?:px|em|rem|ex|rex|ch|rch|ic|ric|cap|rcap|lh|rlh|vw|svw|lvw|dvw|vh|svh|lvh|dvh|vi|svi|lvi|dvi|vb|svb|lvb|dvb|vmin|svmin|lvmin|dvmin|vmax|svmax|lvmax|dvmax|cqw|cqh|cqi|cqb|cqmin|cqmax|cm|mm|in|pt|pc|q|fr|%)\b/gi;
+// frequency, or resolution units (`0deg`, `0s`, …), so those are left alone;
+// `%` isn’t a word character, so it needs its own trailing boundary instead
+// of `\b`—otherwise `0%` at the end of a value (or before another symbol)
+// never matches, since `\b` requires a word/non-word transition
+const ZERO_UNIT_RE = /\b0(?:px|em|rem|ex|rex|ch|rch|ic|ric|cap|rcap|lh|rlh|vw|svw|lvw|dvw|vh|svh|lvh|dvh|vi|svi|lvi|dvi|vb|svb|lvb|dvb|vmin|svmin|lvmin|dvmin|vmax|svmax|lvmax|dvmax|cqw|cqh|cqi|cqb|cqmin|cqmax|cm|mm|in|pt|pc|q|fr)\b|\b0%(?!\w)/gi;
 
 // Collapses a decimal number’s redundant leading/trailing zeros, so `0.5`,
 // `.5`, and `0.50` compare equal, as do `1.0` and `1`
@@ -36,8 +39,10 @@ export function normalizeValue(prop, rawValue) {
   // Leave string literals, `url()` contents, and `var()` references alone for
   // every step below—those can be case-sensitive (paths, `content` strings,
   // custom idents, and custom property names inside `var()`), and a stray
-  // `0.5`-looking substring in a URL isn’t a number to collapse
-  const hasOpaqueValue = /["']|url\(|var\(/i.test(value);
+  // `0.5`-looking substring in a URL isn’t a number to collapse; custom
+  // property values are opaque too—they’re substituted verbatim by `var()`,
+  // so casing in a `--*` declaration is significant and can’t be folded
+  const hasOpaqueValue = normalizeProp(prop).startsWith('--') || /["']|url\(|var\(/i.test(value);
   if (!hasOpaqueValue) {
     value = value.toLowerCase();
     value = value.replace(ZERO_UNIT_RE, '0');

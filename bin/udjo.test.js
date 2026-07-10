@@ -137,6 +137,11 @@ describe('Analysis', () => {
     assert.strictEqual(findings.length, 1);
   });
 
+  test('Ignores a rule with a mixed hack/normal selector list', () => {
+    const { findings } = analyze('.a, * html .b { color: red; } .c { color: red; }');
+    assert.strictEqual(findings.length, 0);
+  });
+
   test('Does not treat differing values for the same property as duplicates', () => {
     const { findings } = analyze('.a { color: red; } .b { color: blue; } .c { color: red; }');
     assert.strictEqual(findings.length, 1);
@@ -229,6 +234,13 @@ describe('Dedup', () => {
     const { applied, css } = dedup('.a { color: red; }\n* html .b { color: red; }\n');
     assert.strictEqual(applied.length, 0);
     assert.match(css, /\*\s*html \.b/);
+  });
+
+  test('Never merges a rule with a mixed hack/normal selector list, and never drops its hack selector', () => {
+    const input = '.a, * html .b { color: red; }\n.c { color: red; }\n';
+    const { applied, css } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(css, input);
   });
 
   test('Merges duplicate declarations between nested rules', () => {

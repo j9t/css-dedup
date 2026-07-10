@@ -410,26 +410,45 @@ export function dedupRoot(root, options = {}) {
       }
 
       // Same safety concern, but for a declaration that sits in one of the
-      // rules being merged itself rather than in between them: merging always
-      // relocates the matched declaration to the last occurrence’s position,
-      // so if one of the earlier rules also sets an overlapping property
-      // alongside it, splitting them apart can flip their relative order for
-      // elements the rule matches.
-      const selfConflict = distinctRules
-        .filter(rule => rule !== last)
-        .flatMap(rule => rule.nodes
-          .filter(node => (
-            node.type === 'decl'
-            && declarationKey(node.prop, node.value, node.important) !== key
-            && propertiesOverlap(normalizeProp(node.prop), propNormalized)
-          ))
-          .map(decl => ({ rule, decl })))[0];
+      // rules being merged itself rather than in between them: merging folds
+      // every group selector onto the target rule’s existing declaration
+      // block, so if any group member—including the target itself—carries an
+      // extra property overlapping the one being merged, naively including
+      // it would either newly apply the target’s own extra to every other
+      // group member’s selector (which never had it), or leave a non-
+      // target’s extra behind at its original, now out-of-order position
+      // relative to the (now later, at the target’s slot) merged
+      // declaration. Rather than skip the merge outright, each such extra is
+      // split out into its own residual rule.
+      //
+      // Exception: An extra that’s itself part of another multi-
+      // occurrence duplicate group in this scope is left alone, and the
+      // whole merge is skipped instead—relocating it here would leave that
+      // other group’s own, already-captured occurrence pointing at a rule it
+      // no longer lives in, by the time that other key gets processed.
+      const extrasByRule = new Map();
+      let unsplittableExtra = null;
+      for (const rule of distinctRules) {
+        const extras = rule.nodes.filter(node => (
+          node.type === 'decl'
+          && declarationKey(node.prop, node.value, node.important) !== key
+          && propertiesOverlap(normalizeProp(node.prop), propNormalized)
+        ));
+        if (!extras.length) continue;
+        extrasByRule.set(rule, extras);
+        if (!unsplittableExtra) {
+          const conflicting = extras.find(decl => (
+            (byKey.get(declarationKey(decl.prop, decl.value, decl.important))?.length ?? 0) >= 2
+          ));
+          if (conflicting) unsplittableExtra = { rule, decl: conflicting };
+        }
+      }
 
-      if (selfConflict) {
+      if (unsplittableExtra) {
         skipped.push({
           scope: scope.label,
           key,
-          reason: `\`${selfConflict.rule.selector}\` (line ${selfConflict.rule.source?.start?.line}) also sets an overlapping \`${normalizeProp(selfConflict.decl.prop)}\` declaration`,
+          reason: `\`${unsplittableExtra.rule.selector}\` (line ${unsplittableExtra.rule.source?.start?.line}) also sets an overlapping \`${normalizeProp(unsplittableExtra.decl.prop)}\` declaration`,
         });
         continue;
       }
@@ -442,6 +461,7 @@ export function dedupRoot(root, options = {}) {
       }
 
       const target = last;
+      const targetOriginalSelector = target.selector;
       target.selector = joinSelectors(mergedSelectors, target, multilineSelectors);
 
       // All occurrences share a normalized key, so they’re equivalent by our
@@ -461,8 +481,38 @@ export function dedupRoot(root, options = {}) {
         for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
           if (declarationKey(decl.prop, decl.value, decl.important) === key) decl.remove();
         }
-        if (rule.nodes.length === 0) rule.remove();
       }
+
+      // Split out each group member’s overlapping extras (see the comment
+      // above) into its own residual rule, immediately after the merged
+      // rule and in the same relative order the members themselves had
+      let insertPoint = target;
+      const residualRules = [];
+      for (const rule of distinctRules) {
+        const extras = extrasByRule.get(rule);
+        if (!extras) continue;
+
+        const residual = target.clone({ nodes: [] });
+        residual.selector = rule === target ? targetOriginalSelector : rule.selector;
+        for (const decl of extras) {
+          decl.remove();
+          residual.append(decl);
+        }
+
+        insertPoint.after(residual);
+        insertPoint = residual;
+        residualRules.push(residual);
+      }
+
+      for (const rule of distinctRules) {
+        if (rule === target || rule.nodes.length > 0) continue;
+        rule.remove();
+      }
+
+      // Later keys in this same scope also scan `scope.rules` for
+      // intervening/self conflicts, and need to see these new residuals to
+      // stay accurate
+      if (residualRules.length) scope.rules.splice(lastIndex + 1, 0, ...residualRules);
 
       applied.push({ scope: scope.label, key, selectors: mergedSelectors, value: shortestValue });
     }

@@ -431,12 +431,11 @@ describe('Dedup', () => {
     assert.match(skipped[0].reason, /margin-left/);
   });
 
-  test('Skips merging when a merged-from rule itself also sets an overlapping shorthand/longhand property', () => {
+  test('Splits a non-target occurrence’s overlapping extra into its own residual rule after the merge', () => {
     const { applied, skipped, css } = dedup('.a { margin: 0; margin-left: 5px; }\n.b { margin: 0; }\n');
-    assert.strictEqual(applied.length, 0);
-    assert.strictEqual(skipped.length, 1);
-    assert.match(skipped[0].reason, /margin-left/);
-    assert.strictEqual(css, '.a { margin: 0; margin-left: 5px; }\n.b { margin: 0; }\n');
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a, .b { margin: 0; }\n.a { margin-left: 5px; }\n');
   });
 
   test('Skips merging when an intervening rule sets a property overlapping only via a shared longhand (`border-top`/`border-color`)', () => {
@@ -445,6 +444,29 @@ describe('Dedup', () => {
     assert.strictEqual(applied.length, 0);
     assert.strictEqual(skipped.length, 1);
     assert.match(skipped[0].reason, /border-color/);
+  });
+
+  test('Splits the target (last) occurrence’s own overlapping extra into its own residual rule after the merge', () => {
+    const { applied, skipped, css } = dedup('.a { margin: 0; }\n.b { margin: 0; margin-left: 5px; }\n');
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a, .b { margin: 0; }\n.b { margin-left: 5px; }\n');
+  });
+
+  test('Splits overlapping extras from multiple group members into residual rules, in their original relative order', () => {
+    const input = '.a { margin: 0; margin-left: 3px; }\n.b { margin: 0; margin-right: 7px; }\n.c { margin: 0; }\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a, .b, .c { margin: 0; }\n.a { margin-left: 3px; }\n.b { margin-right: 7px; }\n');
+  });
+
+  test('Falls back to skipping when a group member’s overlapping extra is itself duplicated elsewhere in scope', () => {
+    const input = '.a { margin: 0; margin-left: 5px; }\n.b { margin: 0; }\n.c { margin-left: 5px; }\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.ok(skipped.some(item => /margin-left/.test(item.reason)));
+    assert.strictEqual(css, input);
   });
 
   test('Joins merged selectors on one line by default', () => {

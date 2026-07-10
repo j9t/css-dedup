@@ -256,8 +256,8 @@ function describeAtRuleOccurrence(atrule, decl) {
   };
 }
 
-const MULTILINE_SELECTOR_SEPARATOR_RE = /,\s*\n/;
-const TRAILING_INDENT_RE = /[ \t]*$/;
+const RE_MULTILINE_SELECTOR_SEPARATOR = /,\s*\n/;
+const RE_TRAILING_INDENT = /[ \t]*$/;
 
 // Detects whether this stylesheet predominantly writes multi-selector rules
 // one selector per line (`.a,\n.b {}`) or comma-separated on one line
@@ -270,7 +270,7 @@ function usesMultilineSelectors(root) {
   let inline = 0;
   root.walkRules(rule => {
     if (splitSelectors(rule.selector).length < 2) return;
-    if (MULTILINE_SELECTOR_SEPARATOR_RE.test(rule.selector)) multiline++;
+    if (RE_MULTILINE_SELECTOR_SEPARATOR.test(rule.selector)) multiline++;
     else inline++;
   });
   return multiline > inline;
@@ -278,7 +278,7 @@ function usesMultilineSelectors(root) {
 
 function joinSelectors(selectors, rule, multiline) {
   if (!multiline) return selectors.join(', ');
-  const indent = (rule.raws.before ?? '').match(TRAILING_INDENT_RE)[0];
+  const indent = (rule.raws.before ?? '').match(RE_TRAILING_INDENT)[0];
   return selectors.join(`,\n${indent}`);
 }
 

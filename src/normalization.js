@@ -1,13 +1,13 @@
 // Length/fr units only—unitless zero isn’t valid for angle, time, frequency,
 // or resolution units (`0deg`, `0s`, …), so those are left alone. Percentage
-// zero is handled separately below, via `ZERO_PERCENT_RE`: unlike these units,
+// zero is handled separately below, via `RE_ZERO_PERCENT`: unlike these units,
 // `0%` isn’t always interchangeable with unitless `0`.
-const ZERO_LENGTH_UNIT_RE = /\b0(?:px|em|rem|ex|rex|ch|rch|ic|ric|cap|rcap|lh|rlh|vw|svw|lvw|dvw|vh|svh|lvh|dvh|vi|svi|lvi|dvi|vb|svb|lvb|dvb|vmin|svmin|lvmin|dvmin|vmax|svmax|lvmax|dvmax|cqw|cqh|cqi|cqb|cqmin|cqmax|cm|mm|in|pt|pc|q|fr)\b/gi;
+const RE_ZERO_LENGTH_UNIT = /\b0(?:px|em|rem|ex|rex|ch|rch|ic|ric|cap|rcap|lh|rlh|vw|svw|lvw|dvw|vh|svh|lvh|dvh|vi|svi|lvi|dvi|vb|svb|lvb|dvb|vmin|svmin|lvmin|dvmin|vmax|svmax|lvmax|dvmax|cqw|cqh|cqi|cqb|cqmin|cqmax|cm|mm|in|pt|pc|q|fr)\b/gi;
 
 // `%` isn’t a word character, so it needs its own trailing boundary instead
 // of `\b`—otherwise `0%` at the end of a value (or before another symbol)
 // never matches, since `\b` requires a word/non-word transition
-const ZERO_PERCENT_RE = /\b0%(?!\w)/g;
+const RE_ZERO_PERCENT = /\b0%(?!\w)/g;
 
 // Properties whose percentage value resolves against a reference size that
 // can be indefinite (e.g., a block-level box whose height depends on its own
@@ -22,10 +22,10 @@ const ZERO_PERCENT_SENSITIVE_PROPS = new Set([
 
 // Collapses a decimal number’s redundant leading/trailing zeros, so `0.5`,
 // `.5`, and `0.50` compare equal, as do `1.0` and `1`
-const DECIMAL_RE = /(-?)(\d*)\.(\d+)/g;
+const RE_DECIMAL = /(-?)(\d*)\.(\d+)/g;
 
 function normalizeDecimals(value) {
-  return value.replace(DECIMAL_RE, (_match, sign, intPart, fracPart) => {
+  return value.replace(RE_DECIMAL, (_match, sign, intPart, fracPart) => {
     const trimmedFrac = fracPart.replace(/0+$/, '');
     const int = intPart === '' ? '0' : intPart;
     if (trimmedFrac === '') return `${sign}${int}`;
@@ -85,8 +85,8 @@ export function normalizeValue(prop, rawValue) {
   if (!hasOpaqueValue) {
     value = value.replace(/\s+/g, ' ');
     if (!CASE_SENSITIVE_VALUE_PROPS.has(propNormalized)) value = value.toLowerCase();
-    value = value.replace(ZERO_LENGTH_UNIT_RE, '0');
-    if (!ZERO_PERCENT_SENSITIVE_PROPS.has(propNormalized)) value = value.replace(ZERO_PERCENT_RE, '0');
+    value = value.replace(RE_ZERO_LENGTH_UNIT, '0');
+    if (!ZERO_PERCENT_SENSITIVE_PROPS.has(propNormalized)) value = value.replace(RE_ZERO_PERCENT, '0');
     value = normalizeDecimals(value);
   }
 

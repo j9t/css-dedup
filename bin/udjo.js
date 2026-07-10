@@ -190,7 +190,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       await writeFile(label, output);
     }
 
-    log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)} (unsafe to auto-merge)`);
+    log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)} (considered unsafe to auto-merge)`);
     for (const item of skipped) {
       log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
     }
@@ -217,13 +217,24 @@ async function processCss(css, targetOptions, { isStdin, label }) {
 
   // A dry-run consolidation, purely to report the payoff—same safety rules
   // as `--dedup`, just discarded instead of written
-  const { applied, bytes } = dedup(css, targetOptions);
+  const { applied, skipped, bytes } = dedup(css, targetOptions);
   if (applied.length) {
     if (bytes.saved > 0) {
       const percent = bytes.before ? (bytes.saved / bytes.before) * 100 : 0;
       console.log(`Run with \`--dedup\` to save ${bytes.saved.toLocaleString()} bytes (${percent.toFixed(1)}%).`);
     } else if (bytes.saved < 0) {
       console.log(styleText('yellow', `Running \`--dedup\` here would make the file ${formatGrowth(bytes)} bigger, not smaller—worth it for maintainability (using each declaration just once), not for transfer size.`));
+    }
+  }
+
+  // Findings above don't distinguish safe from unsafe—without this, a
+  // duplicate group that `--dedup` would just skip (see its own safety
+  // checks) reads as if nothing follows from it at all, when there's a
+  // concrete, explainable reason it wasn't offered as a `--dedup` win
+  if (skipped.length) {
+    console.log(styleText('yellow', `${skipped.length} duplicate group${skipped.length !== 1 ? 's' : ''} considered unsafe to auto-merge:`));
+    for (const item of skipped) {
+      console.log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
     }
   }
 

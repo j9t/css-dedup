@@ -6,7 +6,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { stripVTControlCharacters } from 'node:util';
 import { analyze, dedup } from '../src/index.js';
-import { splitSelectors } from '../src/selectors.js';
+import { splitSelectors, selectorsAreMutuallyExclusive } from '../src/selectors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.join(__dirname, 'udjo.js');
@@ -28,6 +28,51 @@ describe('Selectors', () => {
 
   test('Does not let an unmatched closing bracket misclassify a later top-level comma as nested', () => {
     assert.deepStrictEqual(splitSelectors(':is(a, b)) , .c'), [':is(a, b))', '.c']);
+  });
+});
+
+describe('selectorsAreMutuallyExclusive', () => {
+  test('Recognizes an exact-match attribute value difference as mutually exclusive', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('html[lang=\'da\'] a', 'html[lang=\'de\'] a'), true);
+  });
+
+  test('Works with unquoted attribute values', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('[lang=da]', '[lang=de]'), true);
+  });
+
+  test('Recognizes exclusivity from any one of several differing attributes', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('[lang=da][dir=ltr]', '[lang=de][dir=ltr]'), true);
+    assert.strictEqual(selectorsAreMutuallyExclusive('[lang=da][region=eu]', '[lang=de][region=us]'), true);
+  });
+
+  test('Ignores an identical presence-only attribute alongside a differing one', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('[lang=da][hidden]', '[lang=de][hidden]'), true);
+  });
+
+  test('Does not assume exclusivity for a different attribute name', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('[lang=da]', '[region=de]'), false);
+  });
+
+  test('Does not treat identical selectors as mutually exclusive', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('[lang=da]', '[lang=da]'), false);
+  });
+
+  test('Does not assume exclusivity for `~=` (multi-value) attribute selectors', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('[class~=da]', '[class~=de]'), false);
+  });
+
+  test('Does not assume exclusivity for `^=`/`$=`/`*=`/`|=` attribute selectors', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('[class^=da]', '[class^=de]'), false);
+    assert.strictEqual(selectorsAreMutuallyExclusive('[lang|=en]', '[lang|=en-US]'), false);
+  });
+
+  test('Does not assume exclusivity for values differing only in case', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('[lang=DA]', '[lang=da]'), false);
+  });
+
+  test('Does not assume exclusivity when anything else about the selectors differs', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('.a[lang=da]', '.b[lang=de]'), false);
+    assert.strictEqual(selectorsAreMutuallyExclusive('[lang=da][hidden]', '[lang=de]'), false);
   });
 });
 
@@ -291,6 +336,29 @@ describe('Dedup', () => {
     assert.strictEqual(skipped.length, 1);
   });
 
+  test('Merges past an intervening rule whose selector is provably mutually exclusive with the group’s', () => {
+    const input = 'html[lang=\'da\'] p { content: \'A\'; }\nhtml[lang=\'de\'] p { content: \'B\'; }\nhtml[lang=\'id\'] p { content: \'A\'; }\n';
+    const { css, applied, skipped } = dedup(input);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.match(css, /html\[lang='da'\] p, html\[lang='id'\] p\s*{\s*content: 'A';\s*}/);
+    assert.ok(css.includes('html[lang=\'de\'] p { content: \'B\'; }'));
+  });
+
+  test('Still skips when the intervening rule’s selector is not provably exclusive from the group’s', () => {
+    const input = '.a[lang=\'da\'] { content: \'A\'; }\n.mid { content: \'B\'; }\n.a[lang=\'id\'] { content: \'A\'; }\n';
+    const { applied, skipped } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 1);
+  });
+
+  test('Still skips a multi-selector intervening rule if any one of its selectors isn’t provably exclusive', () => {
+    const input = 'html[lang=\'da\'] p { content: \'A\'; }\nhtml[lang=\'de\'] p, .generic { content: \'B\'; }\nhtml[lang=\'id\'] p { content: \'A\'; }\n';
+    const { applied, skipped } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 1);
+  });
+
   test('Leaves the file untouched when nothing is applied', () => {
     const input = '.a { color: red; }\n.b { color: blue; }\n.c { color: red; }\n';
     const { css } = dedup(input);
@@ -477,6 +545,13 @@ describe('Fixtures', () => {
   test('hacks.css reports a finding with `-n`', () => {
     const { stdout } = run(['-n', path.join(fixturesDir, 'hacks.css')]);
     assert.ok(stdout.includes('1 finding'));
+  });
+
+  test('merge-safety.css report mode explains the unsafe group alongside the safe one’s savings estimate', () => {
+    const { stdout } = run([path.join(fixturesDir, 'merge-safety.css')]);
+    assert.match(stdout, /Run with `--dedup` to save \d+ bytes \(\d+\.\d%\)\./);
+    assert.ok(stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
+    assert.match(stdout, /background: white — intervening `background` declaration in `\.y`/);
   });
 
   test('merge-safety.css --dedup consolidates the safe pair and skips the unsafe one', () => {

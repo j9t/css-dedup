@@ -1,7 +1,7 @@
 import postcss from 'postcss';
 import { normalizeProp, declarationKey } from './normalization.js';
 import { isIgnoredSelector, resolveIgnorePatterns } from './hacks.js';
-import { splitSelectors } from './selectors.js';
+import { splitSelectors, selectorsAreMutuallyExclusive } from './selectors.js';
 import { propertiesOverlap } from './shorthands.js';
 
 function normalizeScopeSegment(text) {
@@ -370,16 +370,30 @@ export function dedupRoot(root, options = {}) {
       // could change which value wins for whatever that rule matches. This
       // is over-cautious by design: it will leave some genuinely safe merges
       // for manual review rather than risk breaking the cascade.
+      //
+      // One narrow exception: if every one of the intervening rule’s
+      // selectors is provably mutually exclusive with every one of the
+      // group’s own selectors (see `selectorsAreMutuallyExclusive()`—e.g.
+      // `html[lang="da"] a` vs. `html[lang="de"] a`), it can never match an
+      // element the group’s rules do, so it isn’t actually a threat to this
+      // particular merge and scanning continues past it for a real blocker.
+      const groupSelectors = distinctRules.flatMap(rule => splitSelectors(rule.selector));
       let blockingRule = null;
       let blockingProp = null;
       for (const [index, rule] of scope.rules.entries()) {
         if (index <= firstIndex || index >= lastIndex || distinctRules.includes(rule)) continue;
         const conflict = rule.nodes.find(node => node.type === 'decl' && propertiesOverlap(normalizeProp(node.prop), propNormalized));
-        if (conflict) {
-          blockingRule = rule;
-          blockingProp = normalizeProp(conflict.prop);
-          break;
-        }
+        if (!conflict) continue;
+
+        const candidateSelectors = splitSelectors(rule.selector);
+        const provablyDisjoint = candidateSelectors.every(candidateSelector => (
+          groupSelectors.every(groupSelector => selectorsAreMutuallyExclusive(candidateSelector, groupSelector))
+        ));
+        if (provablyDisjoint) continue;
+
+        blockingRule = rule;
+        blockingProp = normalizeProp(conflict.prop);
+        break;
       }
 
       if (blockingRule) {

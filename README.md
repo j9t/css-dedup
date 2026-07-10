@@ -50,7 +50,7 @@ Running with `--dedup` folds `.a` and `.c` into a single rule for the shared dec
 
 ```shell
 $ npx udjo --dedup default.css
-1 consolidated, 0 skipped (unsafe to auto-merge)
+1 consolidated, 0 skipped (considered unsafe to auto-merge)
 
 85 → 75 bytes (-10 B, -11.8%)
 Wrote default.css
@@ -80,7 +80,7 @@ Pass one or more files—each is analyzed (and, with `--dedup`, rewritten) indep
 
 `--ignore-selector` is singular because it’s a repeatable flag—each occurrence (`-i pattern1 -i pattern2`) adds one pattern—rather than one flag taking a comma-separated list, matching the convention ESLint uses for its own `--ignore-pattern`. The corresponding programmatic option, `ignoreSelectors`, is plural because there it’s genuinely an array.
 
-Without `--dedup`, UDJO only reports; it never writes to a file. Exit code is `1` if it finds anything to report (or, with `--dedup`, anything it had to skip as unsafe) in any of the given files.
+Without `--dedup`, UDJO only reports; it never writes to a file. Report mode still runs the same safety checks `--dedup` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--dedup`, anything it had to skip as unsafe) in any of the given files.
 
 A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported concisely (the offending line, not the whole file) and UDJO moves on to the rest, which is particularly useful when a directory turns up one bad file among many good ones.
 
@@ -179,7 +179,8 @@ UDJO:
    - Then, a duplicate group spread across separate rules is merged by folding its selectors into the last occurrence—one line per selector if that’s already how the file writes multi-selector rules, comma-separated on one line otherwise.
    - Keeps whichever of the group’s equivalent raw spellings is shortest (e.g. `.5` over `0.50`)—UDJO only picks among spellings already present in the source, so it doesn’t synthesize a shorter one, which would be a minifier’s job.
    - Removes the declaration from the other occurrences—but only if no other rule between the first and last occurrence, and no other declaration within one of the merged rules itself, also sets that property or a shorthand/longhand overlapping it (`margin` and `margin-left`, `border-color` and `border-top-color`, etc.), for any selector.
-   - If something does, the merge is skipped and reported rather than risking a cascade change.
+   - One narrow exception to “any other rule”: If that rule’s selector is provably mutually exclusive with the group’s—right now, that only covers an exact-match attribute value on the same attribute (`html[lang="da"] a` vs. `html[lang="de"] a`, since an attribute can only ever hold one value)—it can’t actually match the same element, so it’s not a threat to this particular merge and doesn’t block it.
+   - If something does block it, the merge is skipped and reported rather than risking a cascade change.
 
 Overall, UDJO is conservative by design and will leave some safe merges for manual review.
 

@@ -26,6 +26,27 @@ const ZERO_IS_NONE_PROPS = new Set([
   'outline',
 ]);
 
+// Properties whose value can contain one or more author-defined custom
+// idents—`@keyframes`/counter/container/etc. names—which are ASCII
+// case-sensitive per the CSS custom-ident grammar, unlike the predefined
+// keywords everywhere else in CSS (which fold safely). `animation-name: Foo`
+// and `animation-name: foo` can reference two entirely different
+// `@keyframes` blocks, so lowercasing them could turn a real distinction
+// into a false duplicate—and, in `--dedup` mode, an unsafe merge that changes
+// which animation plays. Shorthands that mix such an ident with ordinary
+// case-insensitive keywords (`animation`, `container`) are included whole,
+// since there’s no reliable way to fold just the keyword part without
+// parsing the value. Not exhaustive—extend as needed.
+const CASE_SENSITIVE_VALUE_PROPS = new Set([
+  'animation', 'animation-name',
+  'counter-reset', 'counter-increment', 'counter-set',
+  'container', 'container-name',
+  'view-transition-name',
+  'timeline-scope', 'scroll-timeline-name', 'view-timeline-name',
+  'anchor-name', 'position-anchor', 'position-try', 'position-try-fallbacks',
+  'list-style-type',
+]);
+
 export function normalizeProp(prop) {
   const trimmed = prop.trim();
   // Custom property names are case-sensitive (`--Foo` !== `--foo`); every
@@ -35,6 +56,7 @@ export function normalizeProp(prop) {
 
 export function normalizeValue(prop, rawValue) {
   let value = rawValue.trim();
+  const propNormalized = normalizeProp(prop);
 
   // Leave string literals, `url()` contents, and `var()` references alone for
   // every step below—those can be case-sensitive (paths, `content` strings,
@@ -44,15 +66,15 @@ export function normalizeValue(prop, rawValue) {
   // so casing in a `--*` declaration is significant and can’t be folded;
   // whitespace is significant there, too (e.g. `content: "a  b"`), so it’s
   // only collapsed in the non-opaque branch below, not on the raw value
-  const hasOpaqueValue = normalizeProp(prop).startsWith('--') || /["']|url\(|var\(/i.test(value);
+  const hasOpaqueValue = propNormalized.startsWith('--') || /["']|url\(|var\(/i.test(value);
   if (!hasOpaqueValue) {
     value = value.replace(/\s+/g, ' ');
-    value = value.toLowerCase();
+    if (!CASE_SENSITIVE_VALUE_PROPS.has(propNormalized)) value = value.toLowerCase();
     value = value.replace(ZERO_UNIT_RE, '0');
     value = normalizeDecimals(value);
   }
 
-  if (ZERO_IS_NONE_PROPS.has(normalizeProp(prop)) && (value === '0' || value === 'none')) {
+  if (ZERO_IS_NONE_PROPS.has(propNormalized) && (value === '0' || value === 'none')) {
     value = 'none';
   }
 

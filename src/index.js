@@ -10,13 +10,14 @@ function normalizeScopeSegment(text) {
 
 // A "scope" is a DRY boundary: the root stylesheet, or the direct contents of
 // one specific `@media`/`@supports`/`@layer`/etc. condition, or one specific
-// selector used as a nesting host (native CSS nesting). Declarations are only
-// ever compared for duplication within the same scope—never across scopes,
-// since rules in different at-rule blocks or different nested rules can’t
-// share a merged rule. Whitespace is normalized here (not case—`@layer` names
-// and selectors can be case-sensitive) so `@media (min-width: 768px)` and
-// `@media (min-width:768px)` are recognized as the same boundary regardless
-// of formatting.
+// selector used as a nesting host (native CSS nesting). This computes the
+// label identifying that boundary—used both to keep unrelated scopes apart,
+// and (see `mergeScopesByLabel()` below) to recognize the same boundary
+// when it’s written as two separate physical blocks. Whitespace is
+// normalized here (not case—`@layer` names and selectors can be
+// case-sensitive) so `@media (min-width: 768px)` and
+// `@media (min-width:768px)` produce the same label regardless of
+// formatting.
 function describeScope(container) {
   if (container.type === 'root') return 'root';
   if (container.type === 'rule') return normalizeScopeSegment(container.selector);
@@ -45,8 +46,22 @@ function compareSourceOrder(a, b) {
 // apply under the exact same runtime condition, so a declaration duplicated
 // across them is exactly as redundant as one repeated within a single block.
 // Scopes sharing a label are combined here, with their rules re-sorted into
-// true document order so the merge-safety “intervening rule” check
-// downstream still reflects actual source order across the combined blocks.
+// true document order.
+//
+// This is only safe for reporting a duplicate, not for merging one:
+// Merging always keeps the last occurrence’s rule in its own original
+// container and deletes the others, so within a single, already-contiguous
+// container that never changes any rule’s position relative to anything
+// outside it—the container is a firewall the merge-safety “intervening rule”
+// check can reason about using just that container’s own rules. Once two
+// separate containers are folded into one scope, that firewall is gone: A
+// rule sitting between the two containers in the raw document (in some other
+// scope entirely, e.g. a plain root-level rule between two `@media` blocks)
+// can matter for the merge without the intervening-rule check ever seeing
+// it, since that check only looks within the merged scope. So `dedupRoot`
+// uses `collectScopes()` directly (one scope per physical container, never
+// merged) and only `analyzeRoot`—which never moves anything—uses the merged
+// view via `collectMergedScopes()`.
 function mergeScopesByLabel(scopes) {
   const byLabel = new Map();
   const order = [];
@@ -85,7 +100,13 @@ function collectScopes(root) {
   }
 
   walk(root);
-  return mergeScopesByLabel(scopes);
+  return scopes;
+}
+
+// See the comment on `mergeScopesByLabel()`: safe for `analyzeRoot()`
+// (read-only reporting), not for `dedupRoot()` (which mutates).
+function collectMergedScopes(root) {
+  return mergeScopesByLabel(collectScopes(root));
 }
 
 function eligibleRules(scope, ignorePatterns) {
@@ -102,7 +123,7 @@ function eligibleRules(scope, ignorePatterns) {
 
 export function analyzeRoot(root, options = {}) {
   const ignorePatterns = resolveIgnorePatterns(options);
-  const scopes = collectScopes(root);
+  const scopes = collectMergedScopes(root);
   const findings = [];
 
   for (const scope of scopes) {
@@ -165,14 +186,6 @@ function describeOccurrence({ rule, decl }) {
     line: decl.source?.start?.line,
     decl,
   };
-}
-
-function removeIfEmpty(node) {
-  while (node && node.type !== 'root' && node.nodes?.length === 0) {
-    const parent = node.parent;
-    node.remove();
-    node = parent;
-  }
 }
 
 // Detects whether this stylesheet predominantly writes multi-selector rules
@@ -313,15 +326,7 @@ export function dedupRoot(root, options = {}) {
         for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
           if (declarationKey(decl.prop, decl.value, decl.important) === key) decl.remove();
         }
-        if (rule.nodes.length === 0) {
-          const parent = rule.parent;
-          rule.remove();
-          // Merging can now pull every rule out of an at-rule block—e.g. two
-          // separate `@media (min-width: 768px) {}` blocks that share the
-          // same scope—so walk up and drop any container left empty by that,
-          // not just the rule itself.
-          removeIfEmpty(parent);
-        }
+        if (rule.nodes.length === 0) rule.remove();
       }
 
       applied.push({ scope: scope.label, key, selectors: mergedSelectors, value: shortestValue });

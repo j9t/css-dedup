@@ -20,7 +20,10 @@ export function splitSelectors(selectorList) {
     }
 
     if (char === '(' || char === '[') depth++;
-    if (char === ')' || char === ']') depth--;
+    // Clamped at “0” rather than allowed to go negative—an unmatched closing
+    // bracket in malformed input would otherwise make depth negative, and a
+    // later, genuinely top-level comma would then be misread as nested
+    if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
 
     if (char === ',' && depth === 0) {
       selectors.push(current.trim());

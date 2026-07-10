@@ -6,6 +6,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { stripVTControlCharacters } from 'node:util';
 import { analyze, dedup } from '../src/index.js';
+import { splitSelectors } from '../src/selectors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.join(__dirname, 'udjo.js');
@@ -19,6 +20,16 @@ function run(args) {
     status: result.status,
   };
 }
+
+describe('Selectors', () => {
+  test('Splits top-level commas, ignoring ones nested in `:is()`/`[]`', () => {
+    assert.deepStrictEqual(splitSelectors(':is(a, b) .c, .d'), [':is(a, b) .c', '.d']);
+  });
+
+  test('Does not let an unmatched closing bracket misclassify a later top-level comma as nested', () => {
+    assert.deepStrictEqual(splitSelectors(':is(a, b)) , .c'), [':is(a, b))', '.c']);
+  });
+});
 
 describe('Analysis', () => {
   test('Flags declarations that are duplicated across rules in the same scope', () => {
@@ -86,6 +97,26 @@ describe('Analysis', () => {
 
   test('Treats same-case `var()` references as duplicates', () => {
     const { findings } = analyze('.a { color: var(--brand); } .b { color: var(--brand); }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Does not treat different-case `animation-name` as duplicates (custom ident, case-sensitive)', () => {
+    const { findings } = analyze('.a { animation-name: Foo; } .b { animation-name: foo; }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Still treats same-case `animation-name` as duplicates', () => {
+    const { findings } = analyze('.a { animation-name: Foo; } .b { animation-name: Foo; }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Does not treat different-case `counter-reset` as duplicates (custom ident, case-sensitive)', () => {
+    const { findings } = analyze('.a { counter-reset: Section; } .b { counter-reset: section; }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Still normalizes case for ordinary keyword values', () => {
+    const { findings } = analyze('.a { color: RED; } .b { color: red; }');
     assert.strictEqual(findings.length, 1);
   });
 
@@ -273,17 +304,22 @@ describe('Dedup', () => {
     assert.strictEqual(css, input);
   });
 
-  test('Merges duplicates split across two separately-written blocks with the same condition', () => {
+  test('Does not merge duplicates split across two separately-written blocks with the same condition', () => {
+    // `analyze()` reports this (see the “Analysis” suite)—merging across two
+    // physically separate blocks isn’t safe, since a rule sitting between
+    // them (in a different scope entirely) can matter for the merge without
+    // the intervening-rule check ever seeing it
     const input = '@media (min-width: 768px) { .a { color: red; } }\n@media (min-width: 768px) { .b { color: red; } }\n';
     const { css, applied } = dedup(input);
-    assert.strictEqual(applied.length, 1);
-    assert.match(css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(css, input);
   });
 
-  test('Removes an at-rule block left fully empty after cross-block consolidation', () => {
-    const input = '@media (min-width: 768px) { .a { color: red; } }\n@media (min-width: 768px) { .b { color: red; } }\n';
-    const { css } = dedup(input);
-    assert.strictEqual((css.match(/@media/g) || []).length, 1);
+  test('Does not merge duplicates split across two separately-written nesting hosts with the same selector', () => {
+    const input = '.a { &:hover { color: red; } }\n.a:hover { color: green; }\n.a { &:focus { color: red; } }\n';
+    const { css, applied } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(css, input);
   });
 
   test('Skips merging when an intervening rule sets an overlapping shorthand/longhand property', () => {

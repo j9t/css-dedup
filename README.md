@@ -138,15 +138,28 @@ UDJO:
 
 1. …**parses** the CSS with [PostCSS](https://postcss.org/).
 
-2. …**scopes** rules by their DRY boundary—the root stylesheet, or the contents of an `@media`/`@supports`/`@layer`/etc. condition, or one specific nested rule (native CSS nesting). Declarations are only ever compared within the same scope: a rule’s own declarations are never compared against those of rules nested inside it, and rules in different `@layer`s (or different `@media`/`@supports` conditions) can’t share a merged rule. Two blocks with the _same_ condition are the same scope even when written separately in the source (e.g., two `@media (min-width: 768px) {}` blocks in different parts of the file)—matching is whitespace-insensitive but case-sensitive, since `@layer` names and selectors can be case-significant. Statement-form at-rules with no block (`@layer reset, base;`) are skipped, not recursed into.
+2. …**scopes** rules by their DRY boundary—the root stylesheet, the contents of an `@media`/`@supports`/`@layer`/etc. condition, or one specific nested rule (native CSS nesting).
+   - Declarations are only ever compared within the same scope: a rule’s own declarations are never compared against those of rules nested inside it, and rules in different `@layer`s (or different `@media`/`@supports` conditions) can’t share a merged rule.
+   - For _reporting_, two blocks with the _same_ condition are the same scope even when written separately in the source (e.g., two `@media (min-width: 768px) {}` blocks in different parts of the file)—matching is whitespace-insensitive but case-sensitive, since `@layer` names and selectors can be case-significant.
+   - `--dedup` is more conservative here: it only ever folds rules that already live in the same physical block, since merging across two separate blocks would relocate a declaration past whatever sits between those blocks in the source—including rules in an entirely different scope, which the merge-safety check (step 6) has no visibility into. A duplicate split across two same-condition blocks is therefore reported, not auto-merged.
+   - Statement-form at-rules with no block (`@layer reset, base;`) are skipped, not recursed into.
 
 3. …**excludes** selectors matching a hack pattern (vendor-prefixed pseudo-classes/elements, legacy IE selector hacks) from analysis by default—grouping those into a shared selector list risks the whole rule being dropped by browsers that don’t recognize the selector.
 
-4. …**normalizes** each remaining declaration for comparison (skipping the contents of quoted strings, `url()`, and `var()` throughout—custom property names and references are case-sensitive, so `var(--Foo)`/`var(--foo)` and `--Foo`/`--foo` are never treated as equal): whitespace, value case, zero-value length/percentage units (`0px`/`0svh`/`0cqw` → `0`—angle/time/frequency/resolution units like `0deg`/`0s` are left alone, since unitless zero isn’t valid there), redundant decimal zeros (`.5`/`0.5`/`0.50` → `.5`, `1.0` → `1`), and the `border`/`outline` `none` ↔ `0` equivalence.
+4. …**normalizes** each remaining declaration for comparison.
+   - Skips the contents of quoted strings, `url()`, and `var()` throughout—custom property names and references are case-sensitive, so `var(--Foo)`/`var(--foo)` and `--Foo`/`--foo` are never treated as equal.
+   - Collapses whitespace and folds value case—except for properties whose value is (or can contain) an author-defined custom ident (`animation-name`, `counter-reset`, `container-name`, and similar), since those are case-*sensitive* per CSS, unlike the predefined keywords everywhere else; `animation-name: Foo` and `animation-name: foo` can name two different `@keyframes` blocks, so folding them would risk a false duplicate.
+   - Collapses zero-value length/percentage units (`0px`/`0svh`/`0cqw` → `0`)—angle/time/frequency/resolution units like `0deg`/`0s` are left alone, since unitless zero isn’t valid there.
+   - Collapses redundant decimal zeros (`.5`/`0.5`/`0.50` → `.5`, `1.0` → `1`).
+   - Treats the `border`/`outline` `none` and `0` values as equivalent.
 
 5. …**reports** any normalized declaration that occurs in more than one rule within a scope, and separately flags declarations repeated within a single rule.
 
-6. …**consolidates** (with `--dedup`) only when it’s provably safe: a duplicate group is merged by folding its selectors into the last occurrence—one line per selector if that’s already how the file writes multi-selector rules, comma-separated on one line otherwise—keeping whichever of the group’s equivalent raw spellings is shortest (e.g. `.5` over `0.50`—UDJO only picks among spellings already present in the source, so it doesn’t synthesize a shorter one which would be a minifier’s job), and removing the declaration from the others—but only if no other rule between the first and last occurrence, and no other declaration within one of the merged rules itself, also sets that property or a shorthand/longhand overlapping it (`margin` and `margin-left`, `border-color` and `border-top-color`, etc.), for any selector. If something does, the merge is skipped and reported rather than risking a cascade change.
+6. …**consolidates** (with `--dedup`) only when it’s provably safe.
+   - A duplicate group is merged by folding its selectors into the last occurrence—one line per selector if that’s already how the file writes multi-selector rules, comma-separated on one line otherwise.
+   - Keeps whichever of the group’s equivalent raw spellings is shortest (e.g. `.5` over `0.50`)—UDJO only picks among spellings already present in the source, so it doesn’t synthesize a shorter one, which would be a minifier’s job.
+   - Removes the declaration from the other occurrences—but only if no other rule between the first and last occurrence, and no other declaration within one of the merged rules itself, also sets that property or a shorthand/longhand overlapping it (`margin` and `margin-left`, `border-color` and `border-top-color`, etc.), for any selector.
+   - If something does, the merge is skipped and reported rather than risking a cascade change.
 
 Overall, UDJO is conservative by design and will leave some safe merges for manual review.
 

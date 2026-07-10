@@ -125,7 +125,7 @@ Both functions accept an options object:
 {
   scope,        // `root`, or the at-rule chain the rules live in, e.g. `@media (min-width: 768px)`
   key,          // normalized `prop: value` (plus ` !important` if set)
-  redundant,    // true if the same declaration repeats within one rule, absent otherwise
+  redundant,    // “true” if the same declaration repeats within one rule, absent otherwise
   occurrences,  // [{ selector, selectors, prop, value, line }, …]
 }
 ```

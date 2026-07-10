@@ -461,12 +461,55 @@ describe('Dedup', () => {
     assert.strictEqual(css, '.a, .b, .c { margin: 0; }\n.a { margin-left: 3px; }\n.b { margin-right: 7px; }\n');
   });
 
-  test('Falls back to skipping when a group member’s overlapping extra is itself duplicated elsewhere in scope', () => {
+  test('Coordinates a merge across two entangled groups sharing a single hub rule', () => {
+    // `.a` holds both the `margin` and `margin-left` duplicate groups’ own
+    // shared declarations, entangling them—merging either independently
+    // would mutate `.a`’s selector out from under the other. The hub gets
+    // split into one rule per key, in the same order those declarations
+    // had within `.a`’s own original rule.
     const input = '.a { margin: 0; margin-left: 5px; }\n.b { margin: 0; }\n.c { margin-left: 5px; }\n';
     const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a, .b { margin: 0; }\n.a, .c { margin-left: 5px; }\n');
+  });
+
+  test('Coordinates a merge across two entangled groups with unrelated (non-overlapping) properties', () => {
+    // `.c` holds both the `font-weight` and `text-align` duplicate groups’
+    // own shared declarations. The properties don’t overlap each other, so
+    // there’s no cascade-order constraint between the two resulting
+    // rules—but `.c` still can’t independently become two different
+    // selector lists, so this still needs the coordinated hub merge, not
+    // two independent ones.
+    const input = '.a { font-weight: bold; }\n.b { text-align: center; }\n.c { font-weight: bold; text-align: center; }\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a, .c { font-weight: bold; }\n.b, .c { text-align: center; }\n');
+  });
+
+  test('Falls back to skipping every group in a cluster with no single rule connecting them all', () => {
+    // `.a` entangles the `color` and `margin` groups; `.c` entangles the
+    // `margin` and `border` groups—but no single rule is a member of all
+    // three groups, so there’s no one hub position that could satisfy
+    // every pairwise ordering constraint at once.
+    const input = '.a { color: red; margin: 0; }\n.b { color: red; }\n.c { margin: 0; border: none; }\n.d { border: none; }\n';
+    const { applied, skipped, css } = dedup(input);
     assert.strictEqual(applied.length, 0);
-    assert.ok(skipped.some(item => /margin-left/.test(item.reason)));
+    assert.strictEqual(skipped.length, 3);
+    assert.ok(skipped.every(item => /entangled/.test(item.reason)));
     assert.strictEqual(css, input);
+  });
+
+  test('Places a target’s pre-shared extra in a residual before the merge, preserving its original within-rule order', () => {
+    // Within `.a`’s own original rule, `margin-left` (declared after `margin`)
+    // already won—so after the split, the residual carrying `margin` must
+    // stay before the merged `margin-left` rule, not after, or `.a` would
+    // end up with `margin-left: 0` instead of `5px`.
+    const { applied, skipped, css } = dedup('.a { margin: 0; margin-left: 5px; }\n.b { margin-left: 5px; }\n');
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a { margin: 0; }\n.a, .b { margin-left: 5px; }\n');
   });
 
   test('Joins merged selectors on one line by default', () => {

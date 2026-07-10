@@ -564,12 +564,28 @@ describe('Fixtures', () => {
       const { stdout } = run(['--dedup', file]);
       assert.ok(stdout.includes('1 consolidated'));
       assert.ok(stdout.includes('1 skipped'));
+      assert.ok(stdout.includes('1 skipped (considered unsafe to auto-merge)'));
       assert.match(stdout, /\d+ → \d+ bytes \(-\d+ B, -\d+\.\d%\)/);
 
       const output = fs.readFileSync(file, 'utf8');
       assert.match(output, /\.a,\s*\.c\s*{\s*color: red;\s*}/);
       assert.ok(output.includes('.x {'));
       assert.ok(output.includes('.z {'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--dedup` omits the “unsafe to auto-merge” qualifier when nothing was skipped', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_nothing_skipped');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'clean.css');
+    fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n');
+
+    try {
+      const { stdout } = run(['--dedup', file]);
+      assert.ok(stdout.includes('1 consolidated, 0 skipped'));
+      assert.ok(!stdout.includes('unsafe to auto-merge'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

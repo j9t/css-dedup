@@ -50,7 +50,7 @@ Running with `--dedup` folds `.a` and `.c` into a single rule for the shared dec
 
 ```shell
 $ npx udjo --dedup default.css
-1 consolidated, 0 skipped (considered unsafe to auto-merge)
+1 consolidated, 0 skipped
 
 85 → 75 bytes (-10 B, -11.8%)
 Wrote default.css

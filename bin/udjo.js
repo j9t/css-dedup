@@ -190,7 +190,8 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       await writeFile(label, output);
     }
 
-    log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)} (considered unsafe to auto-merge)`);
+    const skippedNote = skipped.length ? ' (considered unsafe to auto-merge)' : '';
+    log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
     for (const item of skipped) {
       log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
     }

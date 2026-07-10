@@ -94,11 +94,16 @@ function expandProperty(prop) {
 
 // “True” if setting one of the two (already-normalized) properties can affect
 // the same underlying longhand as the other—either because they’re the same
-// property, or one is a shorthand that expands into the other. Checking both
-// directions means the shorthand doesn’t need a reverse longhand → shorthand
-// map: expanding `margin` already contains `margin-left`, so the pair is
-// caught regardless of which one is `a` and which is `b`.
+// property, one is a shorthand that expands into the other, or their
+// expansions share a longhand (e.g., `border-top` and `border-color` both
+// expand to include `border-top-color`, even though neither raw name is a
+// member of the other’s expansion)
 export function propertiesOverlap(a, b) {
   if (a === b) return true;
-  return expandProperty(a).has(b) || expandProperty(b).has(a);
+  const expandedA = expandProperty(a);
+  const expandedB = expandProperty(b);
+  for (const prop of expandedA) {
+    if (expandedB.has(prop)) return true;
+  }
+  return false;
 }

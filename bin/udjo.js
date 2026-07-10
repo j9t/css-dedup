@@ -224,7 +224,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       const percent = bytes.before ? (bytes.saved / bytes.before) * 100 : 0;
       console.log(`Run with \`--dedup\` to save ${bytes.saved.toLocaleString()} bytes (${percent.toFixed(1)}%).`);
     } else if (bytes.saved < 0) {
-      console.log(styleText('yellow', `Running \`--dedup\` here would make the file ${formatGrowth(bytes)} bigger, not smaller—worth it for maintainability (using each declaration just once), not for transfer size.`));
+      console.log(styleText('yellow', `Running \`--dedup\` here would make the file ${formatGrowth(bytes)} bigger, not smaller (worth it for maintainability but not for transfer size).`));
     }
   }
 

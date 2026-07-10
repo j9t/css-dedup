@@ -105,6 +105,21 @@ describe('Analysis', () => {
     assert.strictEqual(findings.length, 0);
   });
 
+  test('Does not collapse `0%` and unitless `0` for `flex-basis`', () => {
+    const { findings } = analyze('.a { flex-basis: 0; } .b { flex-basis: 0%; }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Does not collapse `0%` and unitless `0` for `height`', () => {
+    const { findings } = analyze('.a { height: 0; } .b { height: 0%; }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Still collapses `0%` and unitless `0` for properties not in the percentage-sensitive set', () => {
+    const { findings } = analyze('.a { border-radius: 0; } .b { border-radius: 0%; }');
+    assert.strictEqual(findings.length, 1);
+  });
+
   test('Treats `border: none` and `border: 0` as equivalent', () => {
     const { findings } = analyze('.a { border: none; } .b { border: 0; }');
     assert.strictEqual(findings.length, 1);
@@ -422,6 +437,14 @@ describe('Dedup', () => {
     assert.strictEqual(skipped.length, 1);
     assert.match(skipped[0].reason, /margin-left/);
     assert.strictEqual(css, '.a { margin: 0; margin-left: 5px; }\n.b { margin: 0; }\n');
+  });
+
+  test('Skips merging when an intervening rule sets a property overlapping only via a shared longhand (`border-top`/`border-color`)', () => {
+    const input = '.a { border-top: 1px solid red; }\n.mid { border-color: blue; }\n.b { border-top: 1px solid red; }\n';
+    const { applied, skipped } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 1);
+    assert.match(skipped[0].reason, /border-color/);
   });
 
   test('Joins merged selectors on one line by default', () => {

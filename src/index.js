@@ -256,6 +256,9 @@ function describeAtRuleOccurrence(atrule, decl) {
   };
 }
 
+const MULTILINE_SELECTOR_SEPARATOR_RE = /,\s*\n/;
+const TRAILING_INDENT_RE = /[ \t]*$/;
+
 // Detects whether this stylesheet predominantly writes multi-selector rules
 // one selector per line (`.a,\n.b {}`) or comma-separated on one line
 // (`.a, .b {}`), by tallying the existing multi-selector rules already in
@@ -267,7 +270,7 @@ function usesMultilineSelectors(root) {
   let inline = 0;
   root.walkRules(rule => {
     if (splitSelectors(rule.selector).length < 2) return;
-    if (/,\s*\n/.test(rule.selector)) multiline++;
+    if (MULTILINE_SELECTOR_SEPARATOR_RE.test(rule.selector)) multiline++;
     else inline++;
   });
   return multiline > inline;
@@ -275,7 +278,7 @@ function usesMultilineSelectors(root) {
 
 function joinSelectors(selectors, rule, multiline) {
   if (!multiline) return selectors.join(', ');
-  const indent = (rule.raws.before ?? '').match(/[ \t]*$/)[0];
+  const indent = (rule.raws.before ?? '').match(TRAILING_INDENT_RE)[0];
   return selectors.join(`,\n${indent}`);
 }
 
@@ -301,7 +304,7 @@ function removeRedundantDuplicates(container, scopeLabel, selectors) {
   for (const [key, decls] of byKey) {
     if (decls.length < 2) continue;
 
-    const last = decls[decls.length - 1];
+    const last = decls.at(-1);
     // Same “keep whichever raw spelling is shortest” rule as the
     // cross-container merge below
     const shortestValue = decls.reduce((shortest, decl) => (

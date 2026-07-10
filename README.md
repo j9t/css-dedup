@@ -168,7 +168,7 @@ UDJO:
 4. …**normalizes** each remaining declaration for comparison.
    - Skips the contents of quoted strings, `url()`, and `var()` throughout—custom property names and references are case-sensitive, so `var(--Foo)`/`var(--foo)` and `--Foo`/`--foo` are never treated as equal.
    - Collapses whitespace and folds value case—except for properties whose value is (or can contain) an author-defined custom ident (`animation-name`, `counter-reset`, `container-name`, and similar), since those are case-*sensitive* per CSS, unlike the predefined keywords everywhere else; `animation-name: Foo` and `animation-name: foo` can name two different `@keyframes` blocks, so folding them would risk a false duplicate.
-   - Collapses zero-value length/percentage units (`0px`/`0svh`/`0cqw` → `0`)—angle/time/frequency/resolution units like `0deg`/`0s` are left alone, since unitless zero isn’t valid there.
+   - Collapses zero-value length units (`0px`/`0svh`/`0cqw` → `0`)—angle/time/frequency/resolution units like `0deg`/`0s` are left alone, since unitless zero isn’t valid there. Zero percentages (`0%`) are collapsed to `0`, too, except for a short list of properties where a percentage can resolve against an indefinite reference size.
    - Collapses redundant decimal zeros (`.5`/`0.5`/`0.50` → `.5`, `1.0` → `1`).
    - Treats the `border`/`outline` `none` and `0` values as equivalent.
 

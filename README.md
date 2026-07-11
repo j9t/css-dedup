@@ -56,9 +56,9 @@ $ npx udjo --dedup default.css
 Wrote default.css
 ```
 
-Since duplicate declarations cost bytes wherever they live—in the stylesheet itself, and (uncompressed) over the wire—the byte counts reflect UDJO’s two payoffs at once: less to maintain, and less to transfer.
+Since duplicate declarations cost bytes wherever they live—in the stylesheet itself, and (uncompressed) over the wire—the byte counts reflect two payoffs at once: less to maintain, and less to transfer.
 
-The two aren’t always aligned, though: folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. Both modes call this out, so it’s a call you can make consciously—it may be worth it if you value using declarations just once (maintainability), not if you’re optimizing purely for transfer size.
+The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. UDJO’s two modes call this out, so it’s a call you can make consciously—it may be worth it if you value using declarations just once (maintainability), not if you’re optimizing purely for transfer size.
 
 ## Usage
 
@@ -70,29 +70,29 @@ npx udjo [options] <file…>
 
 Pass one or more files—each is analyzed (and, with `--dedup`, rewritten) independently; with more than one file, output is grouped under a header per file. A directory is searched recursively for .css files (skipping node_modules and dotfolders); the result is unrolled into that same per-file list, so mixing files and directories works too. Pass `-` instead of a file to read CSS from STDIN (can’t be combined with other file arguments); in `--dedup` mode this prints the consolidated CSS to STDOUT, rather than writing a file, so it composes in a pipeline—status/summary output moves to STDERR in that case, keeping STDOUT pure CSS.
 
-| Option | Short | Description |
-| --- | --- | --- |
-| `--dedup` | `-d` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
-| `--ignore-selector <pattern>` | `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
-| `--no-ignore-selectors-defaults` | `-n` | Disable the built-in selector-hack ignore list |
-| `--config <path>` | `-c` | Path to a config file (defaults to `.udjo.js` in the working directory, if present) |
-| `--help` | `-h` | Show usage information |
+| Option | Description |
+| --- | --- |
+| `--dedup`, `-d` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
+| `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
+| `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector-hack ignore list |
+| `--config <path>`, `-c <path>` | Path to a config file (defaults to `.udjo.js` in the working directory, if present) |
+| `--help`, `-h` | Show usage information |
 
-`--ignore-selector` is singular because it’s a repeatable flag—each occurrence (`-i pattern1 -i pattern2`) adds one pattern—rather than one flag taking a comma-separated list, matching the convention ESLint uses for its own `--ignore-pattern`. The corresponding programmatic option, `ignoreSelectors`, is plural because there it’s genuinely an array.
+`--ignore-selector` is singular because it’s a repeatable flag—each occurrence (`-i pattern1 -i pattern2`) adds one pattern. The corresponding programmatic option, `ignoreSelectors`, takes an array.
 
-Without `--dedup`, UDJO only reports; it never writes to a file. Report mode still runs the same safety checks `--dedup` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--dedup`, anything it had to skip as unsafe) in any of the given files.
+Without `--dedup`, UDJO only reports. Report mode still runs the same safety checks `--dedup` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--dedup`, anything skipped as unsafe) in any of the given files.
 
-A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported concisely (the offending line, not the whole file) and UDJO moves on to the rest, which is particularly useful when a directory turns up one bad file among many good ones.
+A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported and UDJO moves on to the rest.
 
 ### Config File
 
-For settings that should apply on every run—typically a project’s own `ignoreSelectors`—drop a `.udjo.js` in the working directory (or point `--config` at one elsewhere, under any name). It’s a plain ESM module—no JSON dialect, no `package.json` key—so patterns can be real `RegExp` literals rather than a JSON-safe string, and there’s just the one place to look:
+For settings that should apply on every run—typically a project’s own `ignoreSelectors`—drop a `.udjo.js` in the working directory (or point `--config` at one elsewhere, under any name):
 
 ```javascript
 // .udjo.js
 export default {
   ignoreSelectors: [/^\.legacy-/],
-  ignoreSelectorsDefaults: true, // set to `false` to disable the built-in hack list
+  ignoreSelectorsDefaults: true
 };
 ```
 
@@ -113,8 +113,8 @@ Both functions accept an options object:
 
 ```javascript
 {
-  from: 'path/to/file.css',        // used for source-map-style line numbers only
-  ignoreSelectors: [/^\.legacy-/], // additional selector patterns to exclude
+  from: 'path/to/file.css',         // used for source-map-style line numbers only
+  ignoreSelectors: [/^\.legacy-/],  // additional selector patterns to exclude
   ignoreSelectorsDefaults: true,    // set to `false` to disable the built-in hack list
 }
 ```
@@ -142,16 +142,16 @@ For dropping UDJO into an existing PostCSS pipeline (alongside Autoprefixer, css
 import postcss from 'postcss';
 import udjo from 'udjo/plugin';
 
-// Report mode: duplicate/redundant declarations surface as PostCSS warnings
+// Report mode: Duplicate/redundant declarations surface as PostCSS warnings
 const result = await postcss([udjo()]).process(css, { from: 'default.css' });
 console.log(result.warnings());
 
-// Dedup mode: rewrites the root in place; skipped merges still surface as warnings
+// Dedup mode: Rewrites the root in place; skipped merges still surface as warnings
 const fixed = await postcss([udjo({ dedup: true })]).process(css, { from: 'default.css' });
 console.log(fixed.css);
 ```
 
-The plugin takes the same options as `analyze()`/`dedup()`, plus `dedup: true` to switch it into consolidation mode. Since UDJO is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either mostly duplicates work those tools already do.
+The plugin takes the same options as `analyze()`/`dedup()`, plus `dedup: true` to switch it into consolidation mode. Since UDJO is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may duplicate work those tools do.
 
 ## How It Works
 
@@ -159,11 +159,11 @@ UDJO:
 
 1. …**parses** the CSS with [PostCSS](https://postcss.org/).
 
-2. …**scopes** rules by their DRY boundary—the root stylesheet, the contents of an `@media`/`@supports`/`@layer`/etc. condition, or one specific nested rule (native CSS nesting).
-   - Declarations are only ever compared within the same scope: a rule’s own declarations are never compared against those of rules nested inside it, and rules in different `@layer`s (or different `@media`/`@supports` conditions) can’t share a merged rule.
+2. …**scopes** rules by their DRY boundary—the root stylesheet, the contents of an `@media`/`@supports`/`@layer` condition, or one specific nested rule (native CSS nesting).
+   - Declarations are only ever compared within the same scope: A rule’s own declarations are never compared against those of rules nested inside it, and rules in different `@layer`s (or different `@media`/`@supports` conditions) can’t share a merged rule.
    - For _reporting_, two blocks with the _same_ condition are the same scope even when written separately in the source (e.g., two `@media (min-width: 768px) {}` blocks in different parts of the file)—matching is whitespace-insensitive but case-sensitive, since `@layer` names and selectors can be case-significant.
-   - `--dedup` is more conservative here: it only ever folds rules that already live in the same physical block, since merging across two separate blocks would relocate a declaration past whatever sits between those blocks in the source—including rules in an entirely different scope, which the merge-safety check (step 6) has no visibility into. A duplicate split across two same-condition blocks is therefore reported, not auto-merged.
-   - Statement-form at-rules with no block (`@layer reset, base;`) are skipped, not recursed into.
+   - `--dedup` is more conservative here: It only ever folds rules that already live in the same physical block, since merging across two separate blocks would relocate a declaration past whatever sits between those blocks in the source—including rules in an entirely different scope, which the merge-safety check (step 6) has no visibility into. A duplicate split across two same-condition blocks is therefore reported, not auto-merged.
+   - Statement-form at-rules with no block (`@layer reset, base;`) are skipped.
 
 3. …**excludes** selectors matching a hack pattern (vendor-prefixed pseudo-classes/elements, legacy IE selector hacks) from analysis by default—grouping those into a shared selector list risks the whole rule being dropped by browsers that don’t recognize the selector.
 
@@ -188,7 +188,7 @@ UDJO:
    - Keeps whichever of the group’s equivalent raw spellings is shortest (e.g. `.5` over `0.50`)—UDJO only picks among spellings already present in the source, so it doesn’t synthesize a shorter one, which would be a minifier’s job.
    - Removes the declaration from the other occurrences—but only if no other rule between the first and last occurrence also sets that property or a shorthand/longhand overlapping it (`margin` and `margin-left`, `border-color` and `border-top-color`, etc.), for any selector.
    - One narrow exception to “any other rule”: If that rule’s selector is provably mutually exclusive with the group’s—right now, that only covers an exact-match attribute value on the same attribute, on what is provably the same element (`html[lang="da"] a` vs. `html[lang="de"] a`, since an attribute can only ever hold one value and `html` is unique per document)—it can’t actually match the same element, so it’s not a threat to this particular merge and doesn’t block it. “Provably the same element” means the differing attribute sits on the selector’s subject, is connected to it purely through `>`/`+` combinators, or sits on `html`/`:root`; across a descendant or `~` combinator, `.x[data-v="1"] p` and `.x[data-v="2"] p` can match the very same `p` (nested `.x` wrappers), so those don’t count as exclusive.
-   - If a merged rule (including the last occurrence itself) also carries a declaration for an overlapping property, that declaration is split out into its own small rule—keeping that occurrence’s own, original selector—placed right after the merged rule, rather than blocking the merge outright: folding every selector onto one shared declaration block would otherwise hand that overlapping extra to selectors that never had it. Exception: If that extra is itself duplicated elsewhere in the same scope, it’s left alone and the whole merge is skipped instead, since splitting it here would orphan that other duplicate’s own merge.
+   - If a merged rule (including the last occurrence itself) also carries a declaration for an overlapping property, that declaration is split out into its own small rule—keeping that occurrence’s own, original selector—placed right after the merged rule, rather than blocking the merge outright: Folding every selector onto one shared declaration block would otherwise hand that overlapping extra to selectors that never had it. Exception: If that extra is itself duplicated elsewhere in the same scope, it’s left alone and the whole merge is skipped instead, since splitting it here would orphan that other duplicate’s own merge.
    - If something does block it, the merge is skipped and reported rather than risking a cascade change.
 
 Overall, UDJO is conservative by design and will leave some safe merges for manual review.

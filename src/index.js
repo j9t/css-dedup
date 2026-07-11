@@ -41,26 +41,22 @@ function compareSourceOrder(a, b) {
 }
 
 // Two blocks with the same condition are the same DRY boundary even when
-// they’re written separately in the source—e.g., two
-// `@media (min-width: 768px) {}` blocks in different parts of a stylesheet
-// apply under the exact same runtime condition, so a declaration duplicated
-// across them is exactly as redundant as one repeated within a single block.
-// Scopes sharing a label are combined here, with their rules re-sorted into
-// true document order.
+// written separately in the source—two `@media (min-width: 768px) {}`
+// blocks apply under the exact same runtime condition, so a declaration
+// duplicated across them is exactly as redundant as one repeated within a
+// single block. Scopes sharing a label are combined here, with their rules
+// re-sorted into true document order.
 //
-// This is only safe for reporting a duplicate, not for merging one:
-// Merging always keeps the last occurrence’s rule in its own original
-// container and deletes the others, so within a single, already-contiguous
-// container that never changes any rule’s position relative to anything
-// outside it—the container is a firewall the merge-safety “intervening rule”
-// check can reason about using just that container’s own rules. Once two
-// separate containers are folded into one scope, that firewall is gone: A
-// rule sitting between the two containers in the raw document (in some other
-// scope entirely, e.g. a plain root-level rule between two `@media` blocks)
-// can matter for the merge without the intervening-rule check ever seeing
-// it, since that check only looks within the merged scope. So `dedupRoot`
-// uses `collectScopes()` directly (one scope per physical container, never
-// merged) and only `analyzeRoot`—which never moves anything—uses the merged
+// Safe for reporting, not for merging: A merge keeps the last occurrence’s
+// rule in its own original container and deletes the others, so within one
+// already-contiguous container nothing’s position relative to the outside
+// changes—the container is a firewall the merge-safety “intervening rule”
+// check can reason about using just its own rules. Fold two containers into
+// one scope and that firewall is gone: A rule sitting between them in the
+// raw document (in some other scope entirely) can matter for the merge
+// without the intervening-rule check ever seeing it. So `dedupRoot` uses
+// `collectScopes()` directly (one scope per physical container, never
+// merged); only `analyzeRoot`, which never moves anything, uses the merged
 // view via `collectMergedScopes()`.
 function mergeScopesByLabel(scopes) {
   const byLabel = new Map();
@@ -104,20 +100,19 @@ function collectScopes(root) {
 }
 
 // See the comment on `mergeScopesByLabel()`: safe for `analyzeRoot()`
-// (read-only reporting), not for `dedupRoot()` (which mutates).
+// (read-only reporting), not for `dedupRoot()` (which mutates)
 function collectMergedScopes(root) {
   return mergeScopesByLabel(collectScopes(root));
 }
 
 // At-rules like `@font-face`, `@page`, and `@property` can hold declarations
 // directly, with no selector wrapping them—`collectScopes()` above only ever
-// looks at `rule`-type nodes, so those declarations are otherwise invisible
-// to any duplicate check. Unlike a scope’s rules, these blocks are never
-// compared against each other (there’s no selector list to fold two
-// `@font-face` blocks into, and two such blocks repeating the same
-// declaration usually isn’t a mistake—each still describes its own,
-// independent face). So this only ever looks for a declaration repeated
-// within the same block.
+// looks at `rule`-type nodes, so those declarations would otherwise be
+// invisible to any duplicate check. Unlike a scope’s rules, these blocks are
+// never compared against each other (there’s no selector list to fold two
+// `@font-face` blocks into, and repeating the same declaration across two
+// of them usually isn’t a mistake—each still describes its own, independent
+// face). This only looks for a declaration repeated within one block.
 function collectDeclOnlyContainers(root) {
   const containers = [];
 
@@ -327,7 +322,7 @@ function joinSelectors(selectors, rule, multiline) {
 // at-rule block—`.a { color: red; color: red; }`—is always safe to collapse
 // on its own, unlike the cross-container merge below: Nothing relocates
 // across a rule boundary, so there’s no “intervening rule” risk to check
-// for. Within one container, later wins regardless of what’s earlier, so
+// for. Later wins regardless of what’s earlier within one container, so
 // dropping every occurrence but the last never changes which value applies.
 // Runs first, so the cross-container merge pass below only ever sees one
 // occurrence per container per key.
@@ -365,7 +360,7 @@ function removeRedundantDuplicates(container, scopeLabel, selectors) {
 // “True” if a declaration overlapping `propNormalized` (and not itself the
 // declaration matching `excludeKey`) is a candidate “extra”—one that
 // doesn’t participate in the merge but sits close enough to it, within the
-// same rule, to affect the outcome.
+// same rule, to affect the outcome
 function isOverlappingExtra(node, propNormalized, excludeKey) {
   return node.type === 'decl'
     && declarationKey(node.prop, node.value, node.important) !== excludeKey
@@ -375,23 +370,22 @@ function isOverlappingExtra(node, propNormalized, excludeKey) {
 // Refuse to merge if any other rule sitting between the group’s first and
 // last occurrence also touches this property, or a shorthand/longhand
 // overlapping it (e.g. `margin-left` overlaps `margin`)—for any selector.
-// Moving the declaration past such a rule could change which value wins
-// for whatever that rule matches. This is over-cautious by design: It will
-// leave some genuinely safe merges for manual review rather than risk
-// breaking the cascade.
+// Moving the declaration past such a rule could change which value wins for
+// whatever that rule matches. Over-cautious by design: It leaves some
+// genuinely safe merges for manual review rather than risk breaking the
+// cascade.
 //
-// One narrow exception: If every one of the intervening rule’s selectors
-// is provably mutually exclusive with every one of the group’s own
-// selectors (see `selectorsAreMutuallyExclusive()`—e.g. `html[lang="da"]
-// a` vs. `html[lang="de"] a`), it can never match an element the group’s
-// rules do, so it isn’t actually a threat to this particular merge and
-// scanning continues past it for a real blocker.
+// One exception: If every one of the intervening rule’s selectors is
+// provably mutually exclusive with every one of the group’s own selectors
+// (see `selectorsAreMutuallyExclusive()`—e.g. `html[lang="da"] a` vs.
+// `html[lang="de"] a`), it can never match an element the group’s rules do,
+// so scanning continues past it for a real blocker.
 //
 // `exemptRules` widens the “is this rule part of the merge” exclusion
-// beyond this one group’s own members, to every rule in its entangled
+// beyond this one group’s own members to every rule in its entangled
 // cluster (see `mergeCluster()`): A fellow cluster member isn’t a real
 // intervening threat, since it’s being absorbed into the same coordinated
-// merge rather than staying behind in its original position.
+// merge rather than staying behind.
 function findBlockingRule(scope, distinctRules, exemptRules, firstIndex, lastIndex, propNormalized) {
   const groupSelectors = distinctRules.flatMap(rule => splitSelectors(rule.selector));
   for (const [index, rule] of scope.rules.entries()) {
@@ -438,16 +432,15 @@ export function dedupRoot(root, options = {}) {
   // rule, in source order, which preserves every same-selector cascade
   // outcome; each move only happens if no intervening rule (with a selector
   // that isn’t provably disjoint) touches any of the moved properties—the
-  // same check declaration merges use. Sources are processed nearest to the
-  // target first, so an earlier rule’s span check always sees any
-  // same-selector rule that could *not* be folded still sitting in the way
-  // (and correctly refuses), never one that has already moved. Only rules
-  // holding nothing but declarations participate as sources—nested rules
-  // and comments stay put; the target itself may hold anything, since its
-  // own content doesn’t move. Runs before the declaration merges below, so
-  // a duplicate declaration the fold brings into one rule is collapsed
-  // right here (same-rule duplicates are unconditionally safe) rather than
-  // ever forming a cross-rule group.
+  // same check declaration merges use below. Sources are processed nearest
+  // the target first, so an earlier rule’s span check always sees any
+  // same-selector rule that could *not* be folded still sitting in the way,
+  // never one that has already moved. Only rules holding nothing but
+  // declarations participate as sources—nested rules and comments stay put;
+  // the target itself may hold anything, since its own content doesn’t
+  // move. Runs before the declaration merges below, so a duplicate the fold
+  // brings into one rule is collapsed right here rather than ever forming a
+  // cross-rule group.
   for (const scope of scopes) {
     const bySelector = new Map();
     for (const rule of eligibleRules(scope, ignorePatterns)) {
@@ -509,13 +502,11 @@ export function dedupRoot(root, options = {}) {
   // merge—fold every rule’s selector onto the last occurrence, drop the
   // declaration from the others.
   //
-  // Two distinct concerns, both handled the same way—splitting an extra
-  // declaration out into its own residual rule—but for different reasons:
-  //
-  //   - The target’s own other declarations, overlapping or not, always
-  //     need to move.
-  //   - A non-target occurrence’s own extra only needs to move if it
-  //     overlaps the shared property and was declared after it.
+  // Two concerns, both handled by splitting an extra declaration out into
+  // its own residual rule, but for different reasons: the target’s own
+  // other declarations always need to move, overlapping or not, while a
+  // non-target occurrence’s own extra only needs to move if it overlaps the
+  // shared property and was declared after it.
   //
   // The caller’s intervening-rule check already confirmed nothing between
   // the group’s first and last occurrence (with a non-disjoint selector)
@@ -622,8 +613,8 @@ export function dedupRoot(root, options = {}) {
   // Twin rules are the copy-paste pattern: Two or more rules that all carry
   // exactly the same set of shared declarations (`.a { margin: 0; color:
   // red; } .b { margin: 0; color: red; }`). As a cluster they have several
-  // full-membership rules, so no hub split applies—but no split is needed:
-  // The rules can be folded whole into the last one, keeping its declaration
+  // full-membership rules, so no hub split applies—but none is needed: The
+  // rules can be folded whole into the last one, keeping its declaration
   // order, when that’s provably safe. Every rule must consist of nothing but
   // the cluster’s own shared declarations (an extra would leak to the other
   // rules’ selectors), and the keys must either appear in the same order in
@@ -689,22 +680,20 @@ export function dedupRoot(root, options = {}) {
 
   // A cluster is two or more duplicate-key groups that share a rule—one
   // rule holding declarations for more than one of the group’s keys.
-  // That’s unsafe to merge independently, key by key: Whichever key’s
-  // merge runs first mutates that rule’s selector, and the next key’s
-  // merge would then naively fold in that already-expanded selector list,
-  // leaking its own declaration to selectors that were never meant to
-  // have it.
+  // That’s unsafe to merge independently, key by key: Whichever key’s merge
+  // runs first mutates that rule’s selector, and the next key’s merge would
+  // then naively fold in that already-expanded selector list, leaking its
+  // own declaration to selectors that were never meant to have it.
   //
-  // This only handles the “star” case: A single rule (the hub) is a
-  // member of every group in the cluster, and no other rule is shared
-  // between any two of them. The hub is split into one rule per cluster
-  // key, in the same order those keys’ declarations already had within
-  // the hub’s own rule—always a valid order, since it’s read straight off
-  // one rule’s own declaration sequence, the same way a solo merge’s
-  // before/after placement is. Anything else in the hub (declarations
-  // that aren’t any cluster key’s own shared value) travels along as its
-  // own small residual, in the same relative slot, using the hub’s own
-  // original selector.
+  // This only handles the “star” case: A single rule (the hub) is a member
+  // of every group in the cluster, and no other rule is shared between any
+  // two of them. The hub is split into one rule per cluster key, in the
+  // same order those keys’ declarations already had within the hub’s own
+  // rule—always a valid order, read straight off one rule’s own
+  // declaration sequence, the same way a solo merge’s before/after
+  // placement is. Anything else in the hub travels along as its own small
+  // residual, in the same relative slot, using the hub’s own original
+  // selector.
   //
   // Any other topology—a chain with no single shared rule, multiple
   // candidate hubs—has no single anchor position that could satisfy every
@@ -820,7 +809,7 @@ export function dedupRoot(root, options = {}) {
       // position for this key is the hub’s original slot, which may sit
       // either before or after a given member, so which side an extra
       // needs to end up on depends on that direction too—not always
-      // “after,” the way a solo merge’s non-target always is.
+      // “after,” the way a solo merge’s non-target always is
       const beforeExtras = [];
       const afterExtras = [];
       for (const rule of distinctRules) {
@@ -924,14 +913,13 @@ export function dedupRoot(root, options = {}) {
     }
 
     // The intervening-rule check runs per cluster, against the file as it
-    // stood before any of this scope’s merges start (blocking is purely
-    // about what originally sat between a group’s own first and last
-    // occurrence)—but exempts every rule in the cluster, not just this one
-    // group’s own two members, since a fellow cluster member is being
-    // absorbed into the same coordinated merge rather than staying behind.
-    // If a genuine outsider blocks any one group in a multi-group cluster,
-    // the whole cluster is left untouched, rather than trying to salvage a
-    // partial coordinated merge around the blocked piece.
+    // stood before any of this scope’s merges start—but exempts every rule
+    // in the cluster, not just this one group’s own two members, since a
+    // fellow cluster member is being absorbed into the same coordinated
+    // merge rather than staying behind. If a genuine outsider blocks any
+    // one group in a multi-group cluster, the whole cluster is left
+    // untouched, rather than trying to salvage a partial merge around the
+    // blocked piece.
     for (const cluster of clusters.values()) {
       const clusterRules = new Set(cluster.flatMap(group => group.distinctRules));
       let outsideBlocker = null;

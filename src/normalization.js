@@ -43,19 +43,18 @@ const ZERO_IS_NONE_PROPS = new Set([
   'outline',
 ]);
 
-// Properties whose value can contain one or more author-defined custom
-// idents—`@keyframes`/counter/container/etc. names—which are ASCII
-// case-sensitive per the CSS custom-ident grammar, unlike the predefined
-// keywords everywhere else in CSS (which fold safely). `animation-name: Foo`
-// and `animation-name: foo` can reference two entirely different
-// `@keyframes` blocks, so lowercasing them could turn a real distinction
-// into a false duplicate—and, in `--dedup` mode, an unsafe merge that changes
-// which animation plays. Shorthands that mix such an ident with ordinary
-// case-insensitive keywords (`animation`, `container`) are included whole,
-// since there’s no reliable way to fold just the keyword part without
-// parsing the value; likewise `content` (a `counter()` argument names a
-// case-sensitive counter) and the grid properties (line names are custom
-// idents, too). Not exhaustive—extend as needed.
+// Properties whose value can contain an author-defined custom ident—
+// `@keyframes`/counter/container names, etc.—which are ASCII case-sensitive
+// per the CSS custom-ident grammar, unlike ordinary keywords elsewhere
+// (which fold safely). `animation-name: Foo` and `animation-name: foo` can
+// name two different `@keyframes` blocks, so lowercasing them risks a false
+// duplicate—or, in `--dedup` mode, an unsafe merge that changes which
+// animation plays. Shorthands mixing such an ident with case-insensitive
+// keywords (`animation`, `container`) are included whole, since there’s no
+// reliable way to fold just the keyword part without parsing the value;
+// likewise `content` (a `counter()` argument names a case-sensitive counter)
+// and the grid properties (line names are idents too). Not exhaustive—
+// extend as needed.
 const CASE_SENSITIVE_VALUE_PROPS = new Set([
   'animation', 'animation-name',
   'counter-reset', 'counter-increment', 'counter-set',
@@ -160,14 +159,14 @@ export function normalizeProp(prop) {
 // (`content` text, quoted font/path names), `url()` (paths are
 // case-sensitive, and a `2.0`-looking substring in a file name isn’t a
 // number to collapse), and custom property names (`--Foo` !== `--foo`, both
-// inside `var()` and standalone, as in `transition-property: --fade`); these
-// are masked behind placeholders before the steps in `normalizeValue()`
-// below run, and restored afterwards—so everything *around* them (the
-// `var(`/`VAR(` function name, a fallback value, the rest of the value)
-// still normalizes like any other value text. The `url()` branch tries the
-// quoted forms first, since a quoted path may legitimately contain a closing
-// parenthesis (`url("a)b.png")`)—the generic form would otherwise stop at
-// that `)` and leave the path’s tail exposed to normalization.
+// inside `var()` and standalone, as in `transition-property: --fade`).
+// These are masked behind placeholders before `normalizeValue()` runs, and
+// restored afterwards—so everything *around* them (the `var(`/`VAR(`
+// function name, a fallback value, the rest of the value) still normalizes
+// like any other value text. The `url()` branch tries the quoted forms
+// first, since a quoted path may legitimately contain a closing parenthesis
+// (`url("a)b.png")`)—the generic form would otherwise stop at that `)` and
+// leave the path’s tail exposed to normalization.
 const RE_OPAQUE_SEGMENT = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|url\(\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:\\.|[^)\\])*)\s*\)|--[^\s,)]+/gi;
 
 // U+E000 (private use) brackets the placeholder indices—a character with no

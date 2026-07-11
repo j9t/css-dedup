@@ -682,7 +682,7 @@ describe('Dedup', () => {
     // `padding` participates in neither duplicate group, but sits between
     // the two anchors within the hub’s own rule—it has to survive the
     // hub’s split, in its original relative position, under the hub’s
-    // own original selector.
+    // own original selector
     const input = '.hub { color: red; padding: 1px; background: blue; }\n.a { color: red; }\n.b { background: blue; }\n';
     const { applied, skipped, css } = dedup(input);
     assert.strictEqual(applied.length, 2);
@@ -728,7 +728,7 @@ describe('Dedup', () => {
     // Both rules hold both groups’ shared declarations, in opposite
     // order—splitting around either hub would reorder the overlapping
     // `margin`/`margin-left` pair for whichever rule isn’t the hub,
-    // changing which value wins for its elements.
+    // changing which value wins for its elements
     const input = '.h1 { margin: 0; margin-left: 5px; }\n.h2 { margin-left: 5px; margin: 0; }\n';
     const { applied, skipped, css } = dedup(input);
     assert.strictEqual(applied.length, 0);
@@ -740,8 +740,8 @@ describe('Dedup', () => {
   test('Falls back to skipping every group in a cluster with no single rule connecting them all', () => {
     // `.a` entangles the `color` and `margin` groups; `.c` entangles the
     // `margin` and `border` groups—but no single rule is a member of all
-    // three groups, so there’s no one hub position that could satisfy
-    // every pairwise ordering constraint at once.
+    // three groups, so there’s no one-hub position that could satisfy
+    // every pairwise ordering constraint at once
     const input = '.a { color: red; margin: 0; }\n.b { color: red; }\n.c { margin: 0; border: none; }\n.d { border: none; }\n';
     const { applied, skipped, css } = dedup(input);
     assert.strictEqual(applied.length, 0);
@@ -754,7 +754,7 @@ describe('Dedup', () => {
     // Within `.a`’s own original rule, `margin-left` (declared after `margin`)
     // already won—so after the split, the residual carrying `margin` must
     // stay before the merged `margin-left` rule, not after, or `.a` would
-    // end up with `margin-left: 0` instead of `5px`.
+    // end up with `margin-left: 0` instead of `5px`
     const { applied, skipped, css } = dedup('.a { margin: 0; margin-left: 5px; }\n.b { margin-left: 5px; }\n');
     assert.strictEqual(applied.length, 1);
     assert.strictEqual(skipped.length, 0);

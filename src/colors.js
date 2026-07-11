@@ -1,6 +1,6 @@
 // The CSS named colors (CSS Color Module Level 4), mapped to their six-digit hex
 // equivalents. Used only to canonicalize a value for comparison—output always
-// keeps a spelling that already exists in the source, so UDJO never rewrites
+// keeps a spelling that already exists in the source, so CSS Dedup never rewrites
 // `white` to `#ffffff` (or vice versa) on its own.
 const NAMED_COLORS = {
   aliceblue: 'f0f8ff', antiquewhite: 'faebd7', aqua: '00ffff', aquamarine: '7fffd4',

@@ -194,7 +194,7 @@ function attributeBindsSameElement(selector, scan, match) {
 // different attribute name, operator, case-sensitivity flag, or values that
 // differ only in case—falls back to “can’t prove it,” not “assume
 // exclusive.” A false negative here just leaves a safe merge for manual
-// review, same as the rest of UDJO’s merge-safety checks; a false positive
+// review, same as the rest of CSS Dedup’s merge-safety checks; a false positive
 // would let a merge change the cascade.
 export function selectorsAreMutuallyExclusive(a, b) {
   const selectorA = a.trim();

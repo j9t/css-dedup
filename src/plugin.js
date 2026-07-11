@@ -1,13 +1,13 @@
 import { analyzeRoot, dedupRoot } from './index.js';
 
 // A thin PostCSS plugin wrapper around `analyzeRoot`/`dedupRoot`, for
-// dropping UDJO into an existing `postcss([…])` pipeline (e.g. alongside
+// dropping CSS Dedup into an existing `postcss([…])` pipeline (e.g. alongside
 // Autoprefixer, cssnano) instead of running it as a separate file-based pass.
 // By default it only reports, via `result.warn()`—pass `dedup: true` to
 // rewrite the root in place, same as the CLI’s `--dedup`.
-export default function udjo(options = {}) {
+export default function cssdedup(options = {}) {
   return {
-    postcssPlugin: 'udjo',
+    postcssPlugin: 'css-dedup',
     OnceExit(root, { result }) {
       if (options.dedup) {
         const { skipped } = dedupRoot(root, options);
@@ -34,4 +34,4 @@ export default function udjo(options = {}) {
   };
 }
 
-udjo.postcss = true;
+cssdedup.postcss = true;

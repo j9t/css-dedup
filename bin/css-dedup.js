@@ -23,10 +23,9 @@ const { values, positionals } = parseArgs({
 });
 
 if (values.help || !positionals.length) {
-  console.log(`Usage: udjo [options] <file…>
+  console.log(`Usage: css-dedup [options] <file…>
 
-Find (and optionally consolidate) duplicate CSS declarations—use every
-declaration just once (UDJO).
+Find (and optionally consolidate) duplicate CSS declarations.
 
 Arguments:
   file  One or more CSS files or directories to analyze (directories are searched recursively for .css files, skipping node_modules and dotfolders); pass \`-\` to read from STDIN instead
@@ -35,7 +34,7 @@ Options:
   -d, --dedup                      Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -n, --no-ignore-selectors-defaults  Disable the built-in selector-hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
-  -c, --config <path>              Path to a config file (defaults to \`.udjo.js\` in the working directory, if present)
+  -c, --config <path>              Path to a config file (defaults to \`.css-dedup.js\` in the working directory, if present)
   -h, --help                       Show this help`);
   process.exit(values.help ? 0 : 1);
 }
@@ -47,7 +46,7 @@ if (positionals.includes('-') && positionals.length > 1) {
 
 // Settings file
 async function loadConfig(pathConfig) {
-  const pathResolved = resolve(pathConfig ?? '.udjo.js');
+  const pathResolved = resolve(pathConfig ?? '.css-dedup.js');
   if (!pathConfig && !existsSync(pathResolved)) return {};
 
   const { default: config = {} } = await import(pathToFileURL(pathResolved).href);
@@ -62,7 +61,7 @@ async function readStdin() {
 
 // Recursively collects `.css` files under a directory, skipping
 // `node_modules` and dotfolders—not configurable, since a
-// project-specific exclude list belongs in `.udjo.js`’s `ignoreSelectors`
+// project-specific exclude list belongs in `.css-dedup.js`’s `ignoreSelectors`
 async function collectCssFiles(dirPath) {
   const entries = await readdir(dirPath, { withFileTypes: true });
   const files = [];

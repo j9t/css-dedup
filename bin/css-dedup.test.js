@@ -9,7 +9,7 @@ import { analyze, dedup } from '../src/index.js';
 import { splitSelectors, selectorsAreMutuallyExclusive } from '../src/selectors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const scriptPath = path.join(__dirname, 'udjo.js');
+const scriptPath = path.join(__dirname, 'css-dedup.js');
 const fixturesDir = path.join(__dirname, '..', 'test', 'fixtures');
 
 function run(args, spawnOptions = {}) {
@@ -1256,10 +1256,10 @@ describe('CLI', () => {
     }
   });
 
-  test('Loads `ignoreSelectors` from `.udjo.js` in the working directory', () => {
+  test('Loads `ignoreSelectors` from `.css-dedup.js` in the working directory', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_config');
     fs.mkdirSync(dirTemp, { recursive: true });
-    fs.writeFileSync(path.join(dirTemp, '.udjo.js'), 'export default { ignoreSelectors: [/^\\.legacy-/] };\n');
+    fs.writeFileSync(path.join(dirTemp, '.css-dedup.js'), 'export default { ignoreSelectors: [/^\\.legacy-/] };\n');
     const file = path.join(dirTemp, 'legacy.css');
     fs.writeFileSync(file, '.a { color: red; }\n.legacy-b { color: red; }\n');
 
@@ -1287,7 +1287,7 @@ describe('CLI', () => {
     }
   });
 
-  test('An absent `.udjo.js` is silently ignored', () => {
+  test('An absent `.css-dedup.js` is silently ignored', () => {
     const { stdout } = run([path.join(fixturesDir, 'hacks.css')]);
     assert.ok(stdout.includes('No duplicate declarations found.'));
   });

@@ -1,8 +1,8 @@
-# UDJO, the CSS Declaration De-Duplicator
+# CSS Dedup, the CSS Declaration De-Duplicator
 
-[![npm version](https://img.shields.io/npm/v/udjo.svg)](https://www.npmjs.com/package/udjo) [![Build status](https://github.com/j9t/udjo/workflows/Tests/badge.svg)](https://github.com/j9t/udjo/actions) [![Socket](https://badge.socket.dev/npm/package/udjo)](https://socket.dev/npm/package/udjo) [![GitHub Sponsors](https://badgen.net/static/Support/Open%20Source/cyan)](https://github.com/j9t/udjo?sponsor=1)
+[![npm version](https://img.shields.io/npm/v/css-dedup.svg)](https://www.npmjs.com/package/css-dedup) [![Build status](https://github.com/j9t/css-dedup/workflows/Tests/badge.svg)](https://github.com/j9t/css-dedup/actions) [![Socket](https://badge.socket.dev/npm/package/css-dedup)](https://socket.dev/npm/package/css-dedup) [![GitHub Sponsors](https://badgen.net/static/Support/Open%20Source/cyan)](https://github.com/j9t/css-dedup?sponsor=1)
 
-UDJO is a CSS maintainability and performance optimization tool that finds—and, when requested and where safe, consolidates—duplicate CSS declarations. It implements the technique of [“using declarations just once”](https://webglossary.info/terms/udjo/) as originally described in [“DRY CSS”](https://meiert.com/blog/dry-css/) (cf. [_CSS Optimization Basics_](https://meiert.com/blog/css-optimization-basics/)): the same normalized property–value pair shouldn’t appear in more than one rule within the same scope. Where it does, UDJO reports it—and can group the affected selectors into a single rule.
+CSS Dedup is a CSS maintainability and performance optimization tool that finds—and, when requested and where safe, consolidates—duplicate CSS declarations. It implements the technique of [“using declarations just once” (UDJO)](https://webglossary.info/terms/udjo/) as originally described in [“DRY CSS”](https://meiert.com/blog/dry-css/) (cf. [_CSS Optimization Basics_](https://meiert.com/blog/css-optimization-basics/)): the same normalized property–value pair shouldn’t appear in more than one rule within the same scope. Where it does, CSS Dedup reports it—and allows to optimize the respective style sheet.
 
 ## Example Optimization
 
@@ -24,7 +24,7 @@ Given:
 ```
 
 ```shell
-$ npx udjo default.css
+$ npx css-dedup default.css
 (root)
   duplicate   color: red
     .a (line 2)
@@ -51,7 +51,7 @@ Running with `--dedup` folds `.a` and `.c` into a single rule for the shared dec
 ```
 
 ```shell
-$ npx udjo --dedup default.css
+$ npx css-dedup --dedup default.css
 1 consolidated, 0 skipped
 
 85 → 75 bytes (-10 B, -11.8%)
@@ -60,14 +60,14 @@ Wrote default.css
 
 Since duplicate declarations cost bytes wherever they live—in the stylesheet itself, and (uncompressed) over the wire—the byte counts reflect two payoffs at once: less to maintain, and less to transfer.
 
-The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. UDJO’s two modes call this out, so it’s a call you can make consciously—it may be worth it if you value using declarations just once (maintainability), not if you’re optimizing purely for transfer size.
+The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. CSS Dedup’s two modes call this out, so it’s a call you can make consciously—it may be worth it if you value using declarations just once (maintainability), not if you’re optimizing purely for transfer size.
 
 ## Usage
 
 ### CLI Use
 
 ```shell
-npx udjo [options] <file…>
+npx css-dedup [options] <file…>
 ```
 
 Pass one or more files—each is analyzed (and, with `--dedup`, rewritten) independently; with more than one file, output is grouped under a header per file. A directory is searched recursively for .css files (skipping node_modules and dotfolders); the result is unrolled into that same per-file list, so mixing files and directories works too. Pass `-` instead of a file to read CSS from STDIN (can’t be combined with other file arguments); in `--dedup` mode this prints the consolidated CSS to STDOUT, rather than writing a file, so it composes in a pipeline—status/summary output moves to STDERR in that case, keeping STDOUT pure CSS.
@@ -77,21 +77,21 @@ Pass one or more files—each is analyzed (and, with `--dedup`, rewritten) indep
 | `--dedup`, `-d` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
 | `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
 | `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector-hack ignore list |
-| `--config <path>`, `-c <path>` | Path to a config file (defaults to `.udjo.js` in the working directory, if present) |
+| `--config <path>`, `-c <path>` | Path to a config file (defaults to `.css-dedup.js` in the working directory, if present) |
 | `--help`, `-h` | Show usage information |
 
 `--ignore-selector` is singular because it’s a repeatable flag—each occurrence (`-i pattern1 -i pattern2`) adds one pattern. The corresponding programmatic option, `ignoreSelectors`, takes an array.
 
-Without `--dedup`, UDJO only reports. Report mode still runs the same safety checks `--dedup` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--dedup`, anything skipped as unsafe) in any of the given files.
+Without `--dedup`, CSS Dedup only reports. Report mode still runs the same safety checks `--dedup` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--dedup`, anything skipped as unsafe) in any of the given files.
 
-A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported and UDJO moves on to the rest.
+A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported and CSS Dedup moves on to the rest.
 
 ### Config File
 
-For settings that should apply on every run—typically a project’s own `ignoreSelectors`—drop a `.udjo.js` in the working directory (or point `--config` at one elsewhere, under any name):
+For settings that should apply on every run—typically a project’s own `ignoreSelectors`—drop a `.css-dedup.js` in the working directory (or point `--config` at one elsewhere, under any name):
 
 ```javascript
-// .udjo.js
+// .css-dedup.js
 export default {
   ignoreSelectors: [/^\.legacy-/],
   ignoreSelectorsDefaults: true
@@ -102,10 +102,10 @@ CLI flags layer on top of the config file rather than replacing it: `--ignore-se
 
 ### Programmatic Use
 
-Install UDJO in your project, e.g., via `npm i -D udjo`, then import and use what you need:
+Install CSS Dedup in your project, e.g., via `npm i -D css-dedup`, then import and use what you need:
 
 ```javascript
-import { analyze, dedup } from 'udjo';
+import { analyze, dedup } from 'css-dedup';
 
 const { findings } = analyze(css);
 const { css: output, applied, skipped } = dedup(css);
@@ -138,26 +138,26 @@ Both functions accept an options object:
 
 ### PostCSS Plugin Use
 
-For dropping UDJO into an existing PostCSS pipeline (alongside Autoprefixer, cssnano, etc.) instead of running it as a separate file-based pass, import the plugin from `udjo/plugin`:
+For dropping CSS Dedup into an existing PostCSS pipeline (alongside Autoprefixer, cssnano, etc.) instead of running it as a separate file-based pass, import the plugin from `css-dedup/plugin`:
 
 ```javascript
 import postcss from 'postcss';
-import udjo from 'udjo/plugin';
+import cssdedup from 'css-dedup/plugin';
 
 // Report mode: Duplicate/redundant declarations surface as PostCSS warnings
-const result = await postcss([udjo()]).process(css, { from: 'default.css' });
+const result = await postcss([cssdedup()]).process(css, { from: 'default.css' });
 console.log(result.warnings());
 
 // Dedup mode: Rewrites the root in place; skipped merges still surface as warnings
-const fixed = await postcss([udjo({ dedup: true })]).process(css, { from: 'default.css' });
+const fixed = await postcss([cssdedup({ dedup: true })]).process(css, { from: 'default.css' });
 console.log(fixed.css);
 ```
 
-The plugin takes the same options as `analyze()`/`dedup()`, plus `dedup: true` to switch it into consolidation mode. Since UDJO is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may duplicate work those tools do.
+The plugin takes the same options as `analyze()`/`dedup()`, plus `dedup: true` to switch it into consolidation mode. Since CSS Dedup is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may duplicate work those tools do.
 
 ## How It Works
 
-UDJO:
+CSS Dedup:
 
 1. …**parses** the CSS with [PostCSS](https://postcss.org/).
 
@@ -188,21 +188,21 @@ UDJO:
    - Identical rules—two or more rules whose declarations are exactly the same set of shared declarations—are folded into one rule with the combined selector list, rather than being split per declaration, provided their declaration order agrees wherever the properties overlap (and the usual intervening-rule check clears).
    - Entangled duplicate groups (groups sharing rules) that fit no coordinated shape aren’t simply abandoned: Each group’s safe stretches of occurrences still consolidate individually, into a fresh rule placed at the stretch’s end. No shared rule’s selector is ever rewritten, so nothing leaks between the groups, and a member whose own later declarations overlap the shared property sits the merge out (relocating the declaration past its own tail would flip which one wins).
    - Then, a duplicate group spread across separate rules is merged by folding its selectors into the last occurrence—one line per selector if that’s already how the file writes multi-selector rules, comma-separated on one line otherwise.
-   - Keeps whichever of the group’s equivalent raw spellings is shortest (e.g. `.5` over `0.50`)—UDJO only picks among spellings already present in the source, so it doesn’t synthesize a shorter one, which would be a minifier’s job.
+   - Keeps whichever of the group’s equivalent raw spellings is shortest (e.g. `.5` over `0.50`)—CSS Dedup only picks among spellings already present in the source, so it doesn’t synthesize a shorter one, which would be a minifier’s job.
    - Removes the declaration from the other occurrences—but only if no other rule between the first and last occurrence also sets that property or a shorthand/longhand overlapping it (`margin` and `margin-left`, `border-color` and `border-top-color`, etc.), for any selector.
    - One narrow exception to “any other rule”: If that rule’s selector is provably mutually exclusive with the group’s—right now, that only covers an exact-match attribute value on the same attribute, on what is provably the same element (`html[lang="da"] a` vs. `html[lang="de"] a`, since an attribute can only ever hold one value and `html` is unique per document)—it can’t actually match the same element, so it’s not a threat to this particular merge and doesn’t block it. “Provably the same element” means the differing attribute sits on the selector’s subject, is connected to it purely through `>`/`+` combinators, or sits on `html`/`:root`; across a descendant or `~` combinator, `.x[data-v="1"] p` and `.x[data-v="2"] p` can match the very same `p` (nested `.x` wrappers), so those don’t count as exclusive.
    - If a merged rule (including the last occurrence itself) also carries a declaration for an overlapping property, that declaration is split out into its own small rule—keeping that occurrence’s own, original selector—placed right after the merged rule, rather than blocking the merge outright: Folding every selector onto one shared declaration block would otherwise hand that overlapping extra to selectors that never had it. Exception: If that extra is itself duplicated elsewhere in the same scope, it’s left alone and the whole merge is skipped instead, since splitting it here would orphan that other duplicate’s own merge.
    - If something does block it, the merge is skipped and reported rather than risking a cascade change. A blocker fences, though—it doesn’t forbid: Occurrences on the same side of it still consolidate among themselves (their own spans are clean, so the same safety argument applies), and the group is reported as skipped either way, since the duplicate keeps existing across the blocker.
    - Consolidation runs to a fixed point: One merge can unblock or create another (a fresh merged rule may repeat an existing rule’s selector list, an emptied rule stops fencing a span), so the passes repeat until nothing changes.
 
-Overall, UDJO is conservative by design and will leave some safe merges for manual review.
+Overall, CSS Dedup is conservative by design and will leave some safe merges for manual review.
 
-`test/fixtures/*.css` contains small example stylesheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/udjo.js test/fixtures/<file>.css` (add `--dedup` for `merge-safety.css`) to see them in action.
+`test/fixtures/*.css` contains small example stylesheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/css-dedup.js test/fixtures/<file>.css` (add `--dedup` for `merge-safety.css`) to see them in action.
 
 ***
 
 You might like some of my other work:
 
-* Optimization tools: [hihtml](https://github.com/j9t/hihtml) · [HTML Minifier Next](https://github.com/j9t/html-minifier-next) · [ObsoHTML](https://github.com/j9t/obsohtml) · UDJO · [Image Guard](https://github.com/j9t/image-guard) · [Compressor.js Next](https://github.com/j9t/compressorjs-next) · [.htaccess Punk](https://github.com/j9t/htaccess-punk)
+* Optimization tools: [hihtml](https://github.com/j9t/hihtml) · [HTML Minifier Next](https://github.com/j9t/html-minifier-next) · [ObsoHTML](https://github.com/j9t/obsohtml) · CSS Dedup · [Image Guard](https://github.com/j9t/image-guard) · [Compressor.js Next](https://github.com/j9t/compressorjs-next) · [.htaccess Punk](https://github.com/j9t/htaccess-punk)
 * Defense tools: [IA Defensa](https://iadefensa.com/solutions/)
 * Resources for quality web development: [Articles](https://meiert.com/topics/development/) · [Books](https://meiert.com/topics/books/) (including [_On Web Development_](https://meiert.com/blog/on-web-development-2/)) · [News](https://frontenddogma.com/) · [Terminology](https://webglossary.info/)

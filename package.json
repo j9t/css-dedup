@@ -1,7 +1,7 @@
 {
   "author": "Jens Oliver Meiert",
   "bin": {
-    "udjo": "bin/udjo.js"
+    "css-dedup": "bin/css-dedup.js"
   },
   "dependencies": {
     "postcss": "^8.5.16"
@@ -20,12 +20,12 @@
     "./plugin": "./src/plugin.js"
   },
   "files": [
-    "bin/udjo.js",
+    "bin/css-dedup.js",
     "src/",
     "!src/plugin.test.js"
   ],
-  "funding": "https://github.com/j9t/udjo?sponsor=1",
-  "homepage": "https://github.com/j9t/udjo",
+  "funding": "https://github.com/j9t/css-dedup?sponsor=1",
+  "homepage": "https://github.com/j9t/css-dedup",
   "keywords": [
     "css",
     "deduplication",
@@ -37,17 +37,17 @@
     "refactoring",
     "udjo"
   ],
-  "name": "udjo",
+  "name": "css-dedup",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/j9t/udjo.git"
+    "url": "git+https://github.com/j9t/css-dedup.git"
   },
   "scripts": {
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepare": "git config core.hooksPath .githooks || true",
-    "start": "node ./bin/udjo.js",
-    "test": "node --test bin/udjo.test.js src/plugin.test.js"
+    "start": "node ./bin/css-dedup.js",
+    "test": "node --test bin/css-dedup.test.js src/plugin.test.js"
   },
   "type": "module",
   "version": "1.0.0"

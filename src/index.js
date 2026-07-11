@@ -411,7 +411,7 @@ export function dedupRoot(root, options = {}) {
   // of the target crosses no boundary that check didn’t already clear.
   function mergeSoloGroup(scope, group) {
     const { key, occurrences, distinctRules, propNormalized } = group;
-    const target = distinctRules[distinctRules.length - 1];
+    const target = distinctRules.at(-1);
 
     const beforeExtrasByRule = new Map();
     const afterExtrasByRule = new Map();
@@ -540,11 +540,19 @@ export function dedupRoot(root, options = {}) {
     }
 
     const clusterSize = cluster.length;
+    // Exactly one full-membership rule: With two candidate hubs, each
+    // holds every cluster key in its own order, and splitting around
+    // either would reorder the other’s declarations—so two hubs is not
+    // a star, however clean the rest of the topology looks
     let hub = null;
+    let hubCandidates = 0;
     for (const [rule, keysHere] of ruleKeyCounts) {
-      if (keysHere.size === clusterSize) { hub = rule; break; }
+      if (keysHere.size === clusterSize) {
+        hub ??= rule;
+        hubCandidates++;
+      }
     }
-    const isStar = hub !== null && [...ruleKeyCounts.values()].every(keysHere => (
+    const isStar = hub !== null && hubCandidates === 1 && [...ruleKeyCounts.values()].every(keysHere => (
       keysHere.size === clusterSize || keysHere.size === 1
     ));
 
@@ -590,7 +598,14 @@ export function dedupRoot(root, options = {}) {
       return residual;
     };
 
-    const gapDecls = (fromIndex, toIndex) => hub.nodes.filter((node, index) => (
+    // The anchors’ indices are positions in the hub as it originally
+    // stood, but the loop below removes declarations from the hub as it
+    // goes (`makeResidual`, `sharedDecl.remove()`)—so gap lookups filter
+    // a snapshot of the original nodes, not live `hub.nodes`, or a
+    // declaration sitting between two anchors would be missed (and then
+    // silently dropped with the hub itself)
+    const hubOriginalNodes = [...hub.nodes];
+    const gapDecls = (fromIndex, toIndex) => hubOriginalNodes.filter((node, index) => (
       node.type === 'decl' && index > fromIndex && index < toIndex
     ));
 
@@ -650,7 +665,7 @@ export function dedupRoot(root, options = {}) {
       applied.push({ scope: scope.label, key, selectors: mergedSelectors, value: shortestValue });
     }
 
-    const trailingGap = gapDecls(anchors.at(-1).index, hub.nodes.length);
+    const trailingGap = gapDecls(anchors.at(-1).index, hubOriginalNodes.length);
     if (trailingGap.length) finalRules.push(makeResidual(hubOriginalSelector, trailingGap));
 
     for (let i = 1; i < finalRules.length; i++) finalRules[i].raws.before = interPieceSeparator;
@@ -741,7 +756,7 @@ export function dedupRoot(root, options = {}) {
 
       for (const group of cluster) {
         const firstIndex = scope.rules.indexOf(group.distinctRules[0]);
-        const lastIndex = scope.rules.indexOf(group.distinctRules[group.distinctRules.length - 1]);
+        const lastIndex = scope.rules.indexOf(group.distinctRules.at(-1));
         const blocking = findBlockingRule(scope, group.distinctRules, clusterRules, firstIndex, lastIndex, group.propNormalized);
         if (blocking) { outsideBlocker = { group, blocking }; break; }
       }

@@ -184,8 +184,11 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     const { css: output, applied, skipped, bytes } = dedup(css, targetOptions);
     const log = isStdin ? console.error : console.log;
 
+    // STDOUT must always carry the complete stylesheet for STDIN input—
+    // even with nothing consolidated, a pipeline consuming it would
+    // otherwise receive nothing and lose the CSS entirely
     if (isStdin) {
-      if (applied.length) process.stdout.write(output);
+      process.stdout.write(output);
     } else if (applied.length) {
       await writeFile(label, output);
     }

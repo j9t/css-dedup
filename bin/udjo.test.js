@@ -74,6 +74,31 @@ describe('selectorsAreMutuallyExclusive', () => {
     assert.strictEqual(selectorsAreMutuallyExclusive('.a[lang=da]', '.b[lang=de]'), false);
     assert.strictEqual(selectorsAreMutuallyExclusive('[lang=da][hidden]', '[lang=de]'), false);
   });
+
+  test('Does not assume exclusivity across a descendant or `~` combinator (the compounds can bind to different elements)', () => {
+    // A `p` nested inside two differently-valued `.x` wrappers matches both
+    assert.strictEqual(selectorsAreMutuallyExclusive('.x[data-v="1"] p', '.x[data-v="2"] p'), false);
+    assert.strictEqual(selectorsAreMutuallyExclusive('.x[data-v="1"] ~ p', '.x[data-v="2"] ~ p'), false);
+    assert.strictEqual(selectorsAreMutuallyExclusive('.x[data-v="1"] > div p', '.x[data-v="2"] > div p'), false);
+  });
+
+  test('Recognizes exclusivity across `>`/`+` combinators (one parent, one preceding sibling)', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('.x[data-v="1"] > p', '.x[data-v="2"] > p'), true);
+    assert.strictEqual(selectorsAreMutuallyExclusive('.x[data-v="1"] + p', '.x[data-v="2"] + p'), true);
+  });
+
+  test('Recognizes exclusivity on the subject compound, past any combinator', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('p .x[data-v="1"]', 'p .x[data-v="2"]'), true);
+  });
+
+  test('Recognizes exclusivity past a descendant combinator when the compound is `html`/`:root` (unique per document)', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive(':root[data-theme=a] p', ':root[data-theme=b] p'), true);
+    assert.strictEqual(selectorsAreMutuallyExclusive('html[lang=da] a b', 'html[lang=de] a b'), true);
+  });
+
+  test('Does not let an `html`-prefixed class name pass as the unique `html` element', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('.html-embed[data-v=1] p', '.html-embed[data-v=2] p'), false);
+  });
 });
 
 describe('Analysis', () => {
@@ -158,6 +183,51 @@ describe('Analysis', () => {
   test('Treats same-case `var()` references as duplicates', () => {
     const { findings } = analyze('.a { color: var(--brand); } .b { color: var(--brand); }');
     assert.strictEqual(findings.length, 1);
+  });
+
+  test('Normalizes whitespace and function-name case around a `var()` reference', () => {
+    assert.strictEqual(analyze('.a { color: var( --brand ); } .b { color: var(--brand); }').findings.length, 1);
+    assert.strictEqual(analyze('.a { color: VAR(--brand); } .b { color: var(--brand); }').findings.length, 1);
+  });
+
+  test('Normalizes spacing around a `var()` fallback', () => {
+    const { findings } = analyze('.a { color: var(--brand, red); } .b { color: var(--brand,red); }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Still normalizes the value parts outside a `var()` reference', () => {
+    const { findings } = analyze('.a { margin: var(--space) 0px; } .b { margin: var(--space) 0; }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Ignores whitespace just inside parentheses and around commas', () => {
+    const { findings } = analyze('.a { color: rgb( 255, 0, 0 ); } .b { color: rgb(255,0,0); }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Preserves whitespace inside quoted strings', () => {
+    const { findings } = analyze('.a { content: "a  b"; } .b { content: "a b"; }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Treats identical custom property declarations as duplicates', () => {
+    const { findings } = analyze('.a { --brand: #fff; } .b { --brand: #fff; }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Compares custom property values verbatim (no case folding, no zero collapsing)', () => {
+    assert.strictEqual(analyze('.a { --brand: #FFF; } .b { --brand: #fff; }').findings.length, 0);
+    assert.strictEqual(analyze('.a { --space: 0px; } .b { --space: 0; }').findings.length, 0);
+  });
+
+  test('Does not fold case for `content` (a `counter()` argument names a case-sensitive counter)', () => {
+    const { findings } = analyze('.a { content: "-" counter(Section); } .b { content: "-" counter(section); }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Does not fold case for grid line names (custom idents)', () => {
+    const { findings } = analyze('.a { grid-column: Main-Start; } .b { grid-column: main-start; }');
+    assert.strictEqual(findings.length, 0);
   });
 
   test('Does not treat different-case `animation-name` as duplicates (custom ident, case-sensitive)', () => {
@@ -335,6 +405,12 @@ describe('Dedup', () => {
     assert.strictEqual(applied.length, 0);
   });
 
+  test('Merges equivalent `var()` spellings, keeping the shortest', () => {
+    const { css, applied } = dedup('.a { color: var( --brand ); }\n.b { color: var(--brand); }\n');
+    assert.strictEqual(applied.length, 1);
+    assert.match(css, /\.a, \.b \{\s*color: var\(--brand\);\s*\}/);
+  });
+
   test('Removes a rule left empty after consolidation', () => {
     const { css } = dedup('.a { color: red; }\n.b { color: red; }\n');
     assert.ok(!css.includes('.a {'));
@@ -365,6 +441,17 @@ describe('Dedup', () => {
     const { applied, skipped } = dedup(input);
     assert.strictEqual(applied.length, 0);
     assert.strictEqual(skipped.length, 1);
+  });
+
+  test('Still skips when the differing attribute sits across a descendant combinator on a repeatable element', () => {
+    // `.x[data-v="1"] p` and `.x[data-v="2"] p` can match the same `p`
+    // (nested `.x` wrappers), so relocating the duplicate past the
+    // intervening rule could change which color wins for it
+    const input = '.x[data-v="1"] p { color: red; }\n.x[data-v="2"] p { color: blue; }\n.x[data-v="3"] p { color: red; }\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 1);
+    assert.strictEqual(css, input);
   });
 
   test('Still skips a multi-selector intervening rule if any one of its selectors isn’t provably exclusive', () => {
@@ -486,6 +573,31 @@ describe('Dedup', () => {
     assert.strictEqual(applied.length, 2);
     assert.strictEqual(skipped.length, 0);
     assert.strictEqual(css, '.a, .c { font-weight: bold; }\n.b, .c { text-align: center; }\n');
+  });
+
+  test('Keeps a hub declaration sitting between two anchors, as its own residual rule in the same slot', () => {
+    // `padding` participates in neither duplicate group, but sits between
+    // the two anchors within the hub’s own rule—it has to survive the
+    // hub’s split, in its original relative position, under the hub’s
+    // own original selector.
+    const input = '.hub { color: red; padding: 1px; background: blue; }\n.a { color: red; }\n.b { background: blue; }\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.hub, .a { color: red; }\n.hub { padding: 1px; }\n.hub, .b { background: blue; }\n');
+  });
+
+  test('Skips a cluster with two candidate hubs (two rules holding every group’s shared declaration)', () => {
+    // Both rules hold both groups’ shared declarations, in opposite
+    // order—splitting around either hub would reorder the overlapping
+    // `margin`/`margin-left` pair for whichever rule isn’t the hub,
+    // changing which value wins for its elements.
+    const input = '.h1 { margin: 0; margin-left: 5px; }\n.h2 { margin-left: 5px; margin: 0; }\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 2);
+    assert.ok(skipped.every(item => /entangled/.test(item.reason)));
+    assert.strictEqual(css, input);
   });
 
   test('Falls back to skipping every group in a cluster with no single rule connecting them all', () => {
@@ -876,6 +988,13 @@ describe('CLI', () => {
     const { stdout, stderr } = run(['--dedup', '-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
     assert.match(stdout, /^\.a, \.b \{\s*color: red;\s*\}\s*$/);
     assert.ok(stderr.includes('1 consolidated'));
+  });
+
+  test('`--dedup -` still writes the full stylesheet to stdout when nothing is consolidated', () => {
+    const input = '.a { color: red; }\n.b { color: blue; }\n';
+    const { stdout, stderr } = run(['--dedup', '-'], { input });
+    assert.strictEqual(stdout, input);
+    assert.ok(stderr.includes('0 consolidated'));
   });
 
   test('Rejects combining `-` with other file arguments', () => {

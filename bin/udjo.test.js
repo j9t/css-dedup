@@ -29,6 +29,13 @@ describe('Selectors', () => {
   test('Does not let an unmatched closing bracket misclassify a later top-level comma as nested', () => {
     assert.deepStrictEqual(splitSelectors(':is(a, b)) , .c'), [':is(a, b))', '.c']);
   });
+
+  test('Treats a backslash-escaped character as content, not syntax', () => {
+    // The escaped quote must not close the string, or the following comma
+    // (still inside the quotes) would be misread as a selector separator
+    assert.deepStrictEqual(splitSelectors('[data-x="a\\"b, c"], .d'), ['[data-x="a\\"b, c"]', '.d']);
+    assert.deepStrictEqual(splitSelectors('.a\\,b, .c'), ['.a\\,b', '.c']);
+  });
 });
 
 describe('selectorsAreMutuallyExclusive', () => {
@@ -98,6 +105,17 @@ describe('selectorsAreMutuallyExclusive', () => {
 
   test('Does not let an `html`-prefixed class name pass as the unique `html` element', () => {
     assert.strictEqual(selectorsAreMutuallyExclusive('.html-embed[data-v=1] p', '.html-embed[data-v=2] p'), false);
+  });
+
+  test('Does not fold attribute-name case (attribute names are case-sensitive in XML/SVG)', () => {
+    assert.strictEqual(selectorsAreMutuallyExclusive('[Foo=a]', '[foo=b]'), false);
+  });
+
+  test('Resolves CSS character escapes in attribute values before comparing', () => {
+    // `\61` is `a`—the two spellings name the same value, so they must
+    // never be taken as proof of exclusivity
+    assert.strictEqual(selectorsAreMutuallyExclusive('[data-x=a]', '[data-x=\\61]'), false);
+    assert.strictEqual(selectorsAreMutuallyExclusive('[data-x=\\61]', '[data-x=b]'), true);
   });
 });
 
@@ -212,6 +230,24 @@ describe('Analysis', () => {
 
   test('Does not touch decimal-looking substrings inside `url()`', () => {
     const { findings } = analyze('.a { background: url(icon-2.0.png); } .b { background: url(icon-2.png); }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Masks a quoted `url()` containing a closing parenthesis as one segment', () => {
+    assert.strictEqual(analyze('.a { background: url("a)b.PNG"); } .b { background: url("a)b.png"); }').findings.length, 0);
+    assert.strictEqual(analyze('.a { background: url("a)b.png"); } .b { background: url("a)b.png"); }').findings.length, 1);
+  });
+
+  test('Does not fold case for `page` (a named page is a case-sensitive custom ident)', () => {
+    assert.strictEqual(analyze('.a { page: Invoice; } .b { page: invoice; }').findings.length, 0);
+  });
+
+  test('Does not collapse repeated `place-content` values', () => {
+    assert.strictEqual(analyze('.a { place-content: baseline baseline; } .b { place-content: baseline; }').findings.length, 0);
+  });
+
+  test('Distinguishes selectors whose quoted attribute values differ only in inner whitespace', () => {
+    const { findings } = analyze('[data-x="a  b"] { color: red; }\n[data-x="a b"] { margin: 0; }\n');
     assert.strictEqual(findings.length, 0);
   });
 

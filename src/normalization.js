@@ -65,6 +65,7 @@ const CASE_SENSITIVE_VALUE_PROPS = new Set([
   'timeline-scope', 'scroll-timeline-name', 'view-timeline-name',
   'anchor-name', 'position-anchor', 'position-try', 'position-try-fallbacks',
   'list-style-type',
+  'page',
   'grid', 'grid-template', 'grid-template-rows', 'grid-template-columns', 'grid-template-areas',
   'grid-row', 'grid-column', 'grid-area',
   'grid-row-start', 'grid-row-end', 'grid-column-start', 'grid-column-end',
@@ -82,12 +83,16 @@ const REPETITION_QUAD_PROPS = new Set([
   'scroll-margin', 'scroll-padding',
 ]);
 
+// `place-content` is deliberately absent: Its `justify-content` half has a
+// different grammar than its `align-content` half (no baseline values), so
+// whether `X X` and `X` are interchangeable there isn’t a pure repetition
+// question the way it is for these
 const REPETITION_PAIR_PROPS = new Set([
   'margin-block', 'margin-inline', 'padding-block', 'padding-inline',
   'inset-block', 'inset-inline',
   'gap', 'grid-gap', 'border-spacing',
   'overflow', 'overscroll-behavior',
-  'place-items', 'place-self', 'place-content',
+  'place-items', 'place-self',
 ]);
 
 // Splits a value on top-level spaces only—a space inside `calc(1px + 2px)`
@@ -159,8 +164,11 @@ export function normalizeProp(prop) {
 // are masked behind placeholders before the steps in `normalizeValue()`
 // below run, and restored afterwards—so everything *around* them (the
 // `var(`/`VAR(` function name, a fallback value, the rest of the value)
-// still normalizes like any other value text
-const RE_OPAQUE_SEGMENT = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|url\((?:\\.|[^)\\])*\)|--[^\s,)]+/gi;
+// still normalizes like any other value text. The `url()` branch tries the
+// quoted forms first, since a quoted path may legitimately contain a closing
+// parenthesis (`url("a)b.png")`)—the generic form would otherwise stop at
+// that `)` and leave the path’s tail exposed to normalization.
+const RE_OPAQUE_SEGMENT = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|url\(\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:\\.|[^)\\])*)\s*\)|--[^\s,)]+/gi;
 
 // U+E000 (private use) brackets the placeholder indices—a character with no
 // meaning in CSS, so it can’t collide with real value text (and, unlike a

@@ -1,0 +1,27 @@
+/* Duplicate: case-insensitive value match */
+.a {
+  color: red;
+}
+
+.b {
+  color: RED;
+  padding: 10px;
+}
+
+/* Duplicate: `0px` vs `0` */
+.c {
+  margin: 0px;
+}
+
+.e {
+  margin: 0;
+}
+
+/* Duplicate: `border: none` vs `border: 0` */
+.f {
+  border: none;
+}
+
+.d {
+  border: 0;
+}

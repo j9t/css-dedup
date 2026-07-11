@@ -1,0 +1,22 @@
+/* Root-level occurrence: alone in its scope, not a duplicate */
+.a {
+  color: red;
+}
+
+@media (min-width: 768px) {
+  /* Duplicate within this scope */
+  .b {
+    color: red;
+  }
+
+  .c {
+    color: red;
+  }
+}
+
+@media (min-width: 1024px) {
+  /* Same declaration as above, but a different scope—not a duplicate */
+  .d {
+    color: red;
+  }
+}

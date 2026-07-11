@@ -1,0 +1,52 @@
+{
+  "author": "Jens Oliver Meiert",
+  "bin": {
+    "udjo": "bin/udjo.js"
+  },
+  "dependencies": {
+    "postcss": "^8.5.16"
+  },
+  "description": "CSS refactoring tool that consolidates duplicate declarations (DRY CSS / UDJO)",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.6.0",
+    "globals": "^17.6.0"
+  },
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./plugin": "./src/plugin.js"
+  },
+  "files": [
+    "bin/udjo.js",
+    "src/",
+    "!src/plugin.test.js"
+  ],
+  "funding": "https://github.com/j9t/udjo?sponsor=1",
+  "homepage": "https://github.com/j9t/udjo",
+  "keywords": [
+    "css",
+    "dry",
+    "duplicate",
+    "optimization",
+    "quality",
+    "refactoring",
+    "udjo"
+  ],
+  "name": "udjo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/j9t/udjo.git"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "prepare": "git config core.hooksPath .githooks || true",
+    "start": "node ./bin/udjo.js",
+    "test": "node --test bin/udjo.test.js src/plugin.test.js"
+  },
+  "type": "module",
+  "version": "1.0.0"
+}

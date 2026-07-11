@@ -1,0 +1,229 @@
+import { normalizeColors } from './colors.js';
+
+// Length/fr units only—unitless zero isn’t valid for angle, time, frequency,
+// or resolution units (`0deg`, `0s`, …), so those are left alone. Percentage
+// zero is handled separately below, via `RE_ZERO_PERCENT`: unlike these units,
+// `0%` isn’t always interchangeable with unitless `0`.
+const RE_ZERO_LENGTH_UNIT = /\b0(?:px|em|rem|ex|rex|ch|rch|ic|ric|cap|rcap|lh|rlh|vw|svw|lvw|dvw|vh|svh|lvh|dvh|vi|svi|lvi|dvi|vb|svb|lvb|dvb|vmin|svmin|lvmin|dvmin|vmax|svmax|lvmax|dvmax|cqw|cqh|cqi|cqb|cqmin|cqmax|cm|mm|in|pt|pc|q|fr)\b/gi;
+
+// `%` isn’t a word character, so it needs its own trailing boundary instead
+// of `\b`—otherwise `0%` at the end of a value (or before another symbol)
+// never matches, since `\b` requires a word/non-word transition
+const RE_ZERO_PERCENT = /\b0%(?!\w)/g;
+
+// Properties whose percentage value resolves against a reference size that
+// can be indefinite (e.g., a block-level box whose height depends on its own
+// content, or a flex container with an indefinite main size)—for these, the
+// spec’s fallback for an indefinite reference isn’t `0`, so `0%` and
+// unitless `0` genuinely differ
+const ZERO_PERCENT_SENSITIVE_PROPS = new Set([
+  'height', 'block-size',
+  'max-height', 'max-block-size',
+  'flex-basis',
+]);
+
+// Collapses a decimal number’s redundant leading/trailing zeros, so `0.5`,
+// `.5`, and `0.50` compare equal, as do `1.0` and `1`
+const RE_DECIMAL = /(-?)(\d*)\.(\d+)/g;
+
+function normalizeDecimals(value) {
+  return value.replace(RE_DECIMAL, (_match, sign, intPart, fracPart) => {
+    const trimmedFrac = fracPart.replace(/0+$/, '');
+    const int = intPart === '' ? '0' : intPart;
+    if (trimmedFrac === '') return `${sign}${int}`;
+    return `${sign}${int === '0' ? '' : int}.${trimmedFrac}`;
+  });
+}
+
+// Shorthand properties where a bare `0` and `none` render identically, because
+// the initial value of e.g. `border-style` is `none`—so `border: 0` implies
+// `border-style: none` just as `border: none` does
+const ZERO_IS_NONE_PROPS = new Set([
+  'border', 'border-top', 'border-right', 'border-bottom', 'border-left',
+  'outline',
+]);
+
+// Properties whose value can contain an author-defined custom ident—
+// `@keyframes`/counter/container names, etc.—which are ASCII case-sensitive
+// per the CSS custom-ident grammar, unlike ordinary keywords elsewhere
+// (which fold safely). `animation-name: Foo` and `animation-name: foo` can
+// name two different `@keyframes` blocks, so lowercasing them risks a false
+// duplicate—or, in `--dedup` mode, an unsafe merge that changes which
+// animation plays. Shorthands mixing such an ident with case-insensitive
+// keywords (`animation`, `container`) are included whole, since there’s no
+// reliable way to fold just the keyword part without parsing the value;
+// likewise `content` (a `counter()` argument names a case-sensitive counter)
+// and the grid properties (line names are idents too). Not exhaustive—
+// extend as needed.
+const CASE_SENSITIVE_VALUE_PROPS = new Set([
+  'animation', 'animation-name',
+  'counter-reset', 'counter-increment', 'counter-set',
+  'content',
+  'container', 'container-name',
+  'view-transition-name',
+  'timeline-scope', 'scroll-timeline-name', 'view-timeline-name',
+  'anchor-name', 'position-anchor', 'position-try', 'position-try-fallbacks',
+  'list-style-type',
+  'page',
+  'grid', 'grid-template', 'grid-template-rows', 'grid-template-columns', 'grid-template-areas',
+  'grid-row', 'grid-column', 'grid-area',
+  'grid-row-start', 'grid-row-end', 'grid-column-start', 'grid-column-end',
+]);
+
+// Shorthands whose 2/3/4-value forms repeat earlier values when trailing
+// ones are omitted—`margin: 0 0` says exactly what `margin: 0` says. The
+// quad set follows the top/right/bottom/left expansion; the pair set covers
+// two-value properties whose second value defaults to the first (`gap`,
+// `overflow`, `place-items`, …). `border-radius` is handled separately,
+// since its horizontal and vertical radii sit on either side of a `/`.
+const REPETITION_QUAD_PROPS = new Set([
+  'margin', 'padding', 'inset',
+  'border-width', 'border-style', 'border-color',
+  'scroll-margin', 'scroll-padding',
+]);
+
+// `place-content` is deliberately absent: Its `justify-content` half has a
+// different grammar than its `align-content` half (no baseline values), so
+// whether `X X` and `X` are interchangeable there isn’t a pure repetition
+// question the way it is for these
+const REPETITION_PAIR_PROPS = new Set([
+  'margin-block', 'margin-inline', 'padding-block', 'padding-inline',
+  'inset-block', 'inset-inline',
+  'gap', 'grid-gap', 'border-spacing',
+  'overflow', 'overscroll-behavior',
+  'place-items', 'place-self',
+]);
+
+// Splits a value on top-level spaces only—a space inside `calc(1px + 2px)`
+// separates operands, not value components
+function splitValueTokens(value) {
+  const tokens = [];
+  let depth = 0;
+  let current = '';
+
+  for (const char of value) {
+    if (char === '(') depth++;
+    if (char === ')') depth = Math.max(0, depth - 1);
+
+    if (char === ' ' && depth === 0) {
+      if (current) tokens.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current) tokens.push(current);
+
+  return tokens;
+}
+
+// `1px 2px 1px 2px` → `1px 2px` → (if both equal) `1px`, following the
+// top/right/bottom/left omission rules in reverse
+function reduceRepetition(tokens) {
+  const reduced = [...tokens];
+  if (reduced.length === 4 && reduced[3] === reduced[1]) reduced.pop();
+  if (reduced.length === 3 && reduced[2] === reduced[0]) reduced.pop();
+  if (reduced.length === 2 && reduced[1] === reduced[0]) reduced.pop();
+  return reduced;
+}
+
+function reduceShorthandRepetition(propNormalized, value) {
+  if (propNormalized === 'border-radius') {
+    const sides = value.split('/').map(side => reduceRepetition(splitValueTokens(side.trim())).join(' '));
+    if (sides.length === 2 && sides[0] === sides[1]) return sides[0];
+    return sides.join('/');
+  }
+
+  if (REPETITION_QUAD_PROPS.has(propNormalized)) {
+    const tokens = splitValueTokens(value);
+    if (tokens.length >= 2 && tokens.length <= 4) return reduceRepetition(tokens).join(' ');
+    return value;
+  }
+
+  if (REPETITION_PAIR_PROPS.has(propNormalized)) {
+    const tokens = splitValueTokens(value);
+    if (tokens.length === 2 && tokens[0] === tokens[1]) return tokens[0];
+  }
+
+  return value;
+}
+
+export function normalizeProp(prop) {
+  const trimmed = prop.trim();
+  // Custom property names are case-sensitive (`--Foo` !== `--foo`); every
+  // other CSS property name is ASCII-case-insensitive
+  return trimmed.startsWith('--') ? trimmed : trimmed.toLowerCase();
+}
+
+// Value segments that must survive normalization untouched: Quoted strings
+// (`content` text, quoted font/path names), `url()` (paths are
+// case-sensitive, and a `2.0`-looking substring in a file name isn’t a
+// number to collapse), and custom property names (`--Foo` !== `--foo`, both
+// inside `var()` and standalone, as in `transition-property: --fade`).
+// These are masked behind placeholders before `normalizeValue()` runs, and
+// restored afterwards—so everything *around* them (the `var(`/`VAR(`
+// function name, a fallback value, the rest of the value) still normalizes
+// like any other value text. The `url()` branch tries the quoted forms
+// first, since a quoted path may legitimately contain a closing parenthesis
+// (`url("a)b.png")`)—the generic form would otherwise stop at that `)` and
+// leave the path’s tail exposed to normalization.
+const RE_OPAQUE_SEGMENT = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|url\(\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:\\.|[^)\\])*)\s*\)|--[^\s,)]+/gi;
+
+// U+E000 (private use) brackets the placeholder indices—a character with no
+// meaning in CSS, so it can’t collide with real value text (and, unlike a
+// control character, doesn’t trip `no-control-regex`)
+const RE_OPAQUE_PLACEHOLDER = /\uE000(\d+)\uE000/g;
+
+export function normalizeValue(prop, rawValue) {
+  let value = rawValue.trim();
+  const propNormalized = normalizeProp(prop);
+
+  // Custom property values are opaque end to end: They substitute verbatim
+  // wherever `var()` references them—possibly somewhere case-sensitive—and,
+  // unlike regular properties, their raw spelling survives into
+  // `getComputedStyle(…).getPropertyValue('--x')`, where scripts can
+  // legitimately compare strings. Even `--x: 0px` vs. `--x: 0` can differ
+  // (only one is a valid `z-index: var(--x)`), so only byte-identical
+  // custom property values ever compare equal.
+  if (propNormalized.startsWith('--')) return value;
+
+  const opaques = [];
+  value = value.replace(RE_OPAQUE_SEGMENT, segment => `\uE000${opaques.push(segment) - 1}\uE000`);
+
+  value = value.replace(/\s+/g, ' ');
+  if (!CASE_SENSITIVE_VALUE_PROPS.has(propNormalized)) value = value.toLowerCase();
+  // Whitespace just inside parentheses and around commas is never
+  // significant in a value, so `var( --brand, red )` compares equal to
+  // `var(--brand,red)`; space before an opening parenthesis is left
+  // alone—in `calc(1px + (2px))`, the space after `+` is load-bearing
+  value = value.replace(/([(,]) /g, '$1').replace(/ ([),])/g, '$1');
+  // `/` is a pure separator wherever it appears in a value (`font`, `grid`
+  // shorthands, `border-radius`, `aspect-ratio`), so spacing around it is
+  // insignificant; a leading `+` sign on a number is a no-op
+  value = value.replace(/ ?\/ ?/g, '/');
+  value = value.replace(/(^|[\s(,])\+(?=[\d.])/g, '$1');
+  if (!CASE_SENSITIVE_VALUE_PROPS.has(propNormalized)) value = normalizeColors(value);
+  // `bold`/`700` and `normal`/`400` are defined equal—only for the
+  // longhand, though; picking the weight out of the `font` shorthand would
+  // require parsing the value
+  if (propNormalized === 'font-weight') {
+    if (value === 'bold') value = '700';
+    else if (value === 'normal') value = '400';
+  }
+  value = value.replace(RE_ZERO_LENGTH_UNIT, '0');
+  if (!ZERO_PERCENT_SENSITIVE_PROPS.has(propNormalized)) value = value.replace(RE_ZERO_PERCENT, '0');
+  value = normalizeDecimals(value);
+  value = reduceShorthandRepetition(propNormalized, value);
+
+  value = value.replace(RE_OPAQUE_PLACEHOLDER, (_match, index) => opaques[index]);
+
+  if (ZERO_IS_NONE_PROPS.has(propNormalized) && (value === '0' || value === 'none')) {
+    value = 'none';
+  }
+
+  return value;
+}
+
+export function declarationKey(prop, value, important) {
+  return `${normalizeProp(prop)}: ${normalizeValue(prop, value)}${important ? ' !important' : ''}`;
+}

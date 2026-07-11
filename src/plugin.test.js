@@ -8,7 +8,7 @@ describe('Plugin: Analysis', () => {
     const result = await postcss([udjo()]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
     const warnings = result.warnings();
     assert.strictEqual(warnings.length, 1);
-    assert.match(warnings[0].text, /Duplicate declaration `color: red`/);
+    assert.match(warnings[0].text, /Duplicate declaration `color: #ff0000`/);
   });
 
   test('Does not touch the CSS in report mode', async () => {
@@ -20,6 +20,11 @@ describe('Plugin: Analysis', () => {
   test('Warns about a redundant same-rule declaration', async () => {
     const result = await postcss([udjo()]).process('.a { color: red; color: red; }', { from: undefined });
     assert.ok(result.warnings().some(w => /Redundant declaration/.test(w.text)));
+  });
+
+  test('Warns about a selector written more than once in one scope', async () => {
+    const result = await postcss([udjo()]).process('.a { color: red; }\n.a { margin: 0; }\n', { from: undefined });
+    assert.ok(result.warnings().some(w => /Selector `\.a` written 2 times/.test(w.text)));
   });
 });
 

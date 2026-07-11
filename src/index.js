@@ -143,6 +143,16 @@ function atRuleLabel(atrule) {
   return `@${atrule.name}${atrule.params ? ` ${atrule.params}` : ''}`;
 }
 
+// Canonical identity of a rule’s selector list, order- and
+// whitespace-insensitive—`.b, .a` matches the same elements with the same
+// specificities as `.a, .b`
+function selectorSetKey(rule) {
+  return splitSelectors(rule.selector)
+    .map(selector => selector.replace(/\s+/g, ' '))
+    .sort()
+    .join(',');
+}
+
 function eligibleRules(scope, ignorePatterns) {
   return scope.rules.filter(rule => {
     const selectors = splitSelectors(rule.selector);
@@ -195,6 +205,35 @@ export function analyzeRoot(root, options = {}) {
         scope: scope.label,
         key,
         occurrences: [...distinctRules].map(rule => describeOccurrence({ rule, decl: findDecl(occurrences, rule) })),
+      });
+    }
+  }
+
+  // A selector (list) written more than once within one scope is the same
+  // maintainability smell one level up from a repeated declaration—the
+  // later rule could hold its declarations in the earlier one. Detected on
+  // physical containers (like `--dedup`’s fold, not the merged reporting
+  // view above), since two same-condition `@media` blocks legitimately
+  // repeat their selectors by construction.
+  for (const scope of collectScopes(root)) {
+    const bySelector = new Map();
+    for (const rule of eligibleRules(scope, ignorePatterns)) {
+      const key = selectorSetKey(rule);
+      if (!bySelector.has(key)) bySelector.set(key, []);
+      bySelector.get(key).push(rule);
+    }
+
+    for (const rules of bySelector.values()) {
+      if (rules.length < 2) continue;
+      findings.push({
+        scope: scope.label,
+        key: splitSelectors(rules[0].selector).join(', '),
+        repeatedSelector: true,
+        occurrences: rules.map(rule => ({
+          selector: rule.selector,
+          selectors: splitSelectors(rule.selector),
+          line: rule.source?.start?.line,
+        })),
       });
     }
   }
@@ -392,6 +431,78 @@ export function dedupRoot(root, options = {}) {
     applied.push(...removeRedundantDuplicates(atrule, describeScope(atrule), [atRuleLabel(atrule)]));
   }
 
+  // Folds rules repeating the same selector (list) within one scope into
+  // the last of them—`.a { color: red; } … .a { margin: 0; }` becomes one
+  // `.a` rule. Earlier rules’ declarations move to the top of the last
+  // rule, in source order, which preserves every same-selector cascade
+  // outcome; each move only happens if no intervening rule (with a selector
+  // that isn’t provably disjoint) touches any of the moved properties—the
+  // same check declaration merges use. Sources are processed nearest to the
+  // target first, so an earlier rule’s span check always sees any
+  // same-selector rule that could *not* be folded still sitting in the way
+  // (and correctly refuses), never one that has already moved. Only rules
+  // holding nothing but declarations participate as sources—nested rules
+  // and comments stay put; the target itself may hold anything, since its
+  // own content doesn’t move. Runs before the declaration merges below, so
+  // a duplicate declaration the fold brings into one rule is collapsed
+  // right here (same-rule duplicates are unconditionally safe) rather than
+  // ever forming a cross-rule group.
+  for (const scope of scopes) {
+    const bySelector = new Map();
+    for (const rule of eligibleRules(scope, ignorePatterns)) {
+      const key = selectorSetKey(rule);
+      if (!bySelector.has(key)) bySelector.set(key, []);
+      bySelector.get(key).push(rule);
+    }
+
+    for (const rules of bySelector.values()) {
+      if (rules.length < 2) continue;
+      const target = rules.at(-1);
+      let merged = false;
+
+      for (const rule of rules.slice(0, -1).reverse()) {
+        if (!rule.nodes.length || !rule.nodes.every(node => node.type === 'decl')) continue;
+
+        const ruleIndex = scope.rules.indexOf(rule);
+        const targetIndex = scope.rules.indexOf(target);
+        const exempt = new Set([rule, target]);
+        let blocking = null;
+        for (const decl of rule.nodes) {
+          blocking = findBlockingRule(scope, [rule, target], exempt, ruleIndex, targetIndex, normalizeProp(decl.prop));
+          if (blocking) break;
+        }
+        if (blocking) {
+          skipped.push({
+            scope: scope.label,
+            key: splitSelectors(rule.selector).join(', '),
+            reason: `same selector written again on line ${target.source?.start?.line}, but an intervening \`${blocking.prop}\` declaration in \`${blocking.rule.selector}\` (line ${blocking.rule.source?.start?.line}) blocks folding the rules together`,
+          });
+          continue;
+        }
+
+        const anchor = target.first;
+        for (const decl of [...rule.nodes]) {
+          decl.remove();
+          if (anchor) target.insertBefore(anchor, decl);
+          else target.append(decl);
+        }
+        rule.remove();
+        scope.rules.splice(scope.rules.indexOf(rule), 1);
+        applied.push({
+          scope: scope.label,
+          key: splitSelectors(target.selector).join(', '),
+          selectors: splitSelectors(target.selector),
+          foldedRule: true,
+        });
+        merged = true;
+      }
+
+      if (merged) {
+        applied.push(...removeRedundantDuplicates(target, scope.label, splitSelectors(target.selector)));
+      }
+    }
+  }
+
   // A duplicate-key group with no other declaration overlapping its
   // property, anywhere in its own rules, needs nothing beyond the basic
   // merge—fold every rule’s selector onto the last occurrence, drop the
@@ -507,6 +618,74 @@ export function dedupRoot(root, options = {}) {
     applied.push({ scope: scope.label, key, selectors: mergedSelectors, value: shortestValue });
   }
 
+  // Twin rules are the copy-paste pattern: Two or more rules that all carry
+  // exactly the same set of shared declarations (`.a { margin: 0; color:
+  // red; } .b { margin: 0; color: red; }`). As a cluster they have several
+  // full-membership rules, so no hub split applies—but no split is needed:
+  // The rules can be folded whole into the last one, keeping its declaration
+  // order, when that’s provably safe. Every rule must consist of nothing but
+  // the cluster’s own shared declarations (an extra would leak to the other
+  // rules’ selectors), and the keys must either appear in the same order in
+  // every rule or be pairwise non-overlapping—if two overlapping keys swap
+  // order between rules, one rule’s elements would see their winner change.
+  // The caller’s intervening-rule check has already cleared everything
+  // sitting between the rules. Returns “false” (leaving the cluster to be
+  // skipped) when the shape doesn’t match.
+  function mergeTwinRules(scope, cluster, ruleKeyCounts) {
+    const clusterSize = cluster.length;
+    if (![...ruleKeyCounts.values()].every(keysHere => keysHere.size === clusterSize)) return false;
+
+    const clusterKeys = new Set(cluster.map(group => group.key));
+    const rules = [...ruleKeyCounts.keys()].sort((a, b) => scope.rules.indexOf(a) - scope.rules.indexOf(b));
+
+    for (const rule of rules) {
+      const allShared = rule.nodes.every(node => (
+        node.type === 'decl' && clusterKeys.has(declarationKey(node.prop, node.value, node.important))
+      ));
+      if (!allShared) return false;
+    }
+
+    const sequences = rules.map(rule => (
+      rule.nodes.map(node => declarationKey(node.prop, node.value, node.important)).join('\n')
+    ));
+    const sameOrder = sequences.every(sequence => sequence === sequences[0]);
+    if (!sameOrder) {
+      for (let i = 0; i < cluster.length; i++) {
+        for (let j = i + 1; j < cluster.length; j++) {
+          if (propertiesOverlap(cluster[i].propNormalized, cluster[j].propNormalized)) return false;
+        }
+      }
+    }
+
+    const target = rules.at(-1);
+    const mergedSelectors = [];
+    for (const rule of rules) {
+      for (const selector of splitSelectors(rule.selector)) {
+        if (!mergedSelectors.includes(selector)) mergedSelectors.push(selector);
+      }
+    }
+    target.selector = joinSelectors(mergedSelectors, target, multilineSelectors);
+
+    for (const decl of target.nodes) {
+      const key = declarationKey(decl.prop, decl.value, decl.important);
+      const group = cluster.find(candidate => candidate.key === key);
+      const shortestValue = group.occurrences.reduce((shortest, occ) => (
+        occ.decl.value.length < shortest.length ? occ.decl.value : shortest
+      ), group.occurrences[0].decl.value);
+      if (decl.value !== shortestValue) decl.value = shortestValue;
+
+      applied.push({ scope: scope.label, key, selectors: mergedSelectors, value: shortestValue });
+    }
+
+    for (const rule of rules) {
+      if (rule === target) continue;
+      rule.remove();
+      scope.rules.splice(scope.rules.indexOf(rule), 1);
+    }
+
+    return true;
+  }
+
   // A cluster is two or more duplicate-key groups that share a rule—one
   // rule holding declarations for more than one of the group’s keys.
   // That’s unsafe to merge independently, key by key: Whichever key’s
@@ -557,6 +736,8 @@ export function dedupRoot(root, options = {}) {
     ));
 
     if (!isStar) {
+      if (mergeTwinRules(scope, cluster, ruleKeyCounts)) return;
+
       for (const group of cluster) {
         skipped.push({
           scope: scope.label,

@@ -123,14 +123,16 @@ Both functions accept an options object:
 
 ```javascript
 {
-  scope,        // `root`, or the at-rule chain the rules live in, e.g. `@media (min-width: 768px)`
-  key,          // normalized `prop: value` (plus ` !important` if set)
-  redundant,    // “true” if the same declaration repeats within one rule, absent otherwise
-  occurrences,  // [{ selector, selectors, prop, value, line }, …]
+  scope,             // `root`, or the at-rule chain the rules live in, e.g. `@media (min-width: 768px)`
+  key,               // normalized `prop: value` (plus ` !important` if set)
+  redundant,         // “true” if the same declaration repeats within one rule, absent otherwise
+  repeatedSelector,  // “true” if this flags a selector (list) written more than once in one scope;
+                     // `key` is then the selector list, and occurrences carry no `prop`/`value`
+  occurrences,       // [{ selector, selectors, prop, value, line }, …]
 }
 ```
 
-`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten stylesheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the stylesheet before and after, since that’s what changes over the wire, not the character count, covering everything `--dedup` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
+`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten stylesheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `foldedRule: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the stylesheet before and after, since that’s what changes over the wire, not the character count, covering everything `--dedup` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
 
 ### PostCSS Plugin Use
 
@@ -170,13 +172,18 @@ UDJO:
    - Compares custom property *values* verbatim (`--brand: #FFF` and `--brand: #fff` don’t match)—they’re substituted as-is wherever `var()` references them—possibly somewhere case-sensitive—and scripts can read them back via `getPropertyValue()`, so no two spellings are provably interchangeable (even `--x: 0px` and `--x: 0` differ—only one is a valid `z-index: var(--x)`).
    - Collapses whitespace, including just inside parentheses and around commas (`rgb( 255, 0, 0 )` matches `rgb(255,0,0)`), and folds value case—except for properties whose value is (or can contain) an author-defined custom ident (`animation-name`, `counter-reset`, `container-name`, and similar), since those are case-*sensitive* per CSS, unlike the predefined keywords everywhere else; `animation-name: Foo` and `animation-name: foo` can name two different `@keyframes` blocks, so folding them would risk a false duplicate.
    - Collapses zero-value length units (`0px`/`0svh`/`0cqw` → `0`)—angle/time/frequency/resolution units like `0deg`/`0s` are left alone, since unitless zero isn’t valid there. Zero percentages (`0%`) are collapsed to `0`, too, except for a short list of properties where a percentage can resolve against an indefinite reference size.
-   - Collapses redundant decimal zeros (`.5`/`0.5`/`0.50` → `.5`, `1.0` → `1`).
+   - Collapses redundant decimal zeros (`.5`/`0.5`/`0.50` → `.5`, `1.0` → `1`), drops a redundant leading `+` sign (`+2px` → `2px`), and ignores whitespace around `/` separators (`12px/1.5` matches `12px / 1.5`).
+   - Canonicalizes equivalent color spellings: `white`, `#fff`, `#ffffff`, `#ffffffff`, `rgb(255, 255, 255)`, and `rgb(255 255 255)` all compare equal, as do `transparent` and `rgba(0, 0, 0, 0)`. Only lossless textual equivalences count—`hsl()` and percentage channels involve rounding, so they’re left alone.
+   - Treats `font-weight: bold`/`700` and `normal`/`400` as equivalent (the longhand only—picking the weight out of the `font` shorthand would require parsing the value).
+   - Collapses repeated shorthand values, following the omission rules in reverse: `margin: 0 0` matches `margin: 0`, `padding: 1px 2px 1px 2px` matches `1px 2px`, `border-radius: 1px/1px` matches `1px`, and two-value pairs like `gap`/`overflow`/`place-items` collapse the same way.
    - Treats the `border`/`outline` `none` and `0` values as equivalent.
 
-5. …**reports** any normalized declaration that occurs in more than one rule within a scope, and separately flags declarations repeated within a single rule—including within a selector-less at-rule block like `@font-face` or `@page`, which have declarations of their own but, unlike two rules, are never compared against each other (there’s no selector list to fold two `@font-face` blocks into).
+5. …**reports** any normalized declaration that occurs in more than one rule within a scope, and separately flags declarations repeated within a single rule—including within a selector-less at-rule block like `@font-face` or `@page`, which have declarations of their own but, unlike two rules, are never compared against each other (there’s no selector list to fold two `@font-face` blocks into). It also reports a selector (list) written more than once within one scope—the same smell one level up from a repeated declaration—matched as a set, so `.a, .b` and `.b, .a` count as the same selector list; only within one physical block, though, since two same-condition `@media` blocks repeat their selectors by construction.
 
 6. …**consolidates** (with `--dedup`) only when it’s provably safe.
    - First, a declaration repeated within the same rule (or the same selector-less at-rule block) is collapsed to its last occurrence—unconditionally safe, since nothing moves across a rule boundary, so none of the checks below apply to it.
+   - Rules repeating the same selector (list) within one scope are folded into the last of them, earlier declarations first—which preserves every same-selector cascade outcome—but only if nothing in between touches any of the moved properties (the same intervening-rule check the declaration merges below use). Rules holding anything but declarations (nested rules, say) stay put.
+   - Identical rules—two or more rules whose declarations are exactly the same set of shared declarations—are folded into one rule with the combined selector list, rather than being split per declaration, provided their declaration order agrees wherever the properties overlap (and the usual intervening-rule check clears).
    - Then, a duplicate group spread across separate rules is merged by folding its selectors into the last occurrence—one line per selector if that’s already how the file writes multi-selector rules, comma-separated on one line otherwise.
    - Keeps whichever of the group’s equivalent raw spellings is shortest (e.g. `.5` over `0.50`)—UDJO only picks among spellings already present in the source, so it doesn’t synthesize a shorter one, which would be a minifier’s job.
    - Removes the declaration from the other occurrences—but only if no other rule between the first and last occurrence also sets that property or a shorthand/longhand overlapping it (`margin` and `margin-left`, `border-color` and `border-top-color`, etc.), for any selector.

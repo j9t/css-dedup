@@ -1,3 +1,5 @@
+import { normalizeColors } from './colors.js';
+
 // Length/fr units only—unitless zero isn’t valid for angle, time, frequency,
 // or resolution units (`0deg`, `0s`, …), so those are left alone. Percentage
 // zero is handled separately below, via `RE_ZERO_PERCENT`: unlike these units,
@@ -68,6 +70,80 @@ const CASE_SENSITIVE_VALUE_PROPS = new Set([
   'grid-row-start', 'grid-row-end', 'grid-column-start', 'grid-column-end',
 ]);
 
+// Shorthands whose 2/3/4-value forms repeat earlier values when trailing
+// ones are omitted—`margin: 0 0` says exactly what `margin: 0` says. The
+// quad set follows the top/right/bottom/left expansion; the pair set covers
+// two-value properties whose second value defaults to the first (`gap`,
+// `overflow`, `place-items`, …). `border-radius` is handled separately,
+// since its horizontal and vertical radii sit on either side of a `/`.
+const REPETITION_QUAD_PROPS = new Set([
+  'margin', 'padding', 'inset',
+  'border-width', 'border-style', 'border-color',
+  'scroll-margin', 'scroll-padding',
+]);
+
+const REPETITION_PAIR_PROPS = new Set([
+  'margin-block', 'margin-inline', 'padding-block', 'padding-inline',
+  'inset-block', 'inset-inline',
+  'gap', 'grid-gap', 'border-spacing',
+  'overflow', 'overscroll-behavior',
+  'place-items', 'place-self', 'place-content',
+]);
+
+// Splits a value on top-level spaces only—a space inside `calc(1px + 2px)`
+// separates operands, not value components
+function splitValueTokens(value) {
+  const tokens = [];
+  let depth = 0;
+  let current = '';
+
+  for (const char of value) {
+    if (char === '(') depth++;
+    if (char === ')') depth = Math.max(0, depth - 1);
+
+    if (char === ' ' && depth === 0) {
+      if (current) tokens.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current) tokens.push(current);
+
+  return tokens;
+}
+
+// `1px 2px 1px 2px` → `1px 2px` → (if both equal) `1px`, following the
+// top/right/bottom/left omission rules in reverse
+function reduceRepetition(tokens) {
+  const reduced = [...tokens];
+  if (reduced.length === 4 && reduced[3] === reduced[1]) reduced.pop();
+  if (reduced.length === 3 && reduced[2] === reduced[0]) reduced.pop();
+  if (reduced.length === 2 && reduced[1] === reduced[0]) reduced.pop();
+  return reduced;
+}
+
+function reduceShorthandRepetition(propNormalized, value) {
+  if (propNormalized === 'border-radius') {
+    const sides = value.split('/').map(side => reduceRepetition(splitValueTokens(side.trim())).join(' '));
+    if (sides.length === 2 && sides[0] === sides[1]) return sides[0];
+    return sides.join('/');
+  }
+
+  if (REPETITION_QUAD_PROPS.has(propNormalized)) {
+    const tokens = splitValueTokens(value);
+    if (tokens.length >= 2 && tokens.length <= 4) return reduceRepetition(tokens).join(' ');
+    return value;
+  }
+
+  if (REPETITION_PAIR_PROPS.has(propNormalized)) {
+    const tokens = splitValueTokens(value);
+    if (tokens.length === 2 && tokens[0] === tokens[1]) return tokens[0];
+  }
+
+  return value;
+}
+
 export function normalizeProp(prop) {
   const trimmed = prop.trim();
   // Custom property names are case-sensitive (`--Foo` !== `--foo`); every
@@ -114,9 +190,23 @@ export function normalizeValue(prop, rawValue) {
   // `var(--brand,red)`; space before an opening parenthesis is left
   // alone—in `calc(1px + (2px))`, the space after `+` is load-bearing
   value = value.replace(/([(,]) /g, '$1').replace(/ ([),])/g, '$1');
+  // `/` is a pure separator wherever it appears in a value (`font`, `grid`
+  // shorthands, `border-radius`, `aspect-ratio`), so spacing around it is
+  // insignificant; a leading `+` sign on a number is a no-op
+  value = value.replace(/ ?\/ ?/g, '/');
+  value = value.replace(/(^|[\s(,])\+(?=[\d.])/g, '$1');
+  if (!CASE_SENSITIVE_VALUE_PROPS.has(propNormalized)) value = normalizeColors(value);
+  // `bold`/`700` and `normal`/`400` are defined equal—only for the
+  // longhand, though; picking the weight out of the `font` shorthand would
+  // require parsing the value
+  if (propNormalized === 'font-weight') {
+    if (value === 'bold') value = '700';
+    else if (value === 'normal') value = '400';
+  }
   value = value.replace(RE_ZERO_LENGTH_UNIT, '0');
   if (!ZERO_PERCENT_SENSITIVE_PROPS.has(propNormalized)) value = value.replace(RE_ZERO_PERCENT, '0');
   value = normalizeDecimals(value);
+  value = reduceShorthandRepetition(propNormalized, value);
 
   value = value.replace(RE_OPAQUE_PLACEHOLDER, (_match, index) => opaques[index]);
 

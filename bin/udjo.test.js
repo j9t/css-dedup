@@ -105,7 +105,8 @@ describe('Analysis', () => {
   test('Flags declarations that are duplicated across rules in the same scope', () => {
     const { findings } = analyze('.a { color: red; } .b { color: red; }');
     assert.strictEqual(findings.length, 1);
-    assert.strictEqual(findings[0].key, 'color: red');
+    // The key is the normalized pair—`red` canonicalizes to `#ff0000`
+    assert.strictEqual(findings[0].key, 'color: #ff0000');
     assert.deepStrictEqual(findings[0].occurrences.map(o => o.selector), ['.a', '.b']);
   });
 
@@ -143,6 +144,50 @@ describe('Analysis', () => {
   test('Still collapses `0%` and unitless `0` for properties not in the percentage-sensitive set', () => {
     const { findings } = analyze('.a { border-radius: 0; } .b { border-radius: 0%; }');
     assert.strictEqual(findings.length, 1);
+  });
+
+  test('Treats equivalent color spellings as duplicates (hex, named, `rgb()`)', () => {
+    assert.strictEqual(analyze('.a { color: #fff; } .b { color: #ffffff; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { color: white; } .b { color: #fff; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { color: rgb(255, 0, 0); } .b { color: rgb(255 0 0); }').findings.length, 1);
+    assert.strictEqual(analyze('.a { color: rgba(255, 0, 0, 1); } .b { color: red; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { color: #ffffffff; } .b { color: white; }').findings.length, 1);
+  });
+
+  test('Treats `transparent` and `rgba(0, 0, 0, 0)` as equivalent', () => {
+    assert.strictEqual(analyze('.a { color: transparent; } .b { color: rgba(0, 0, 0, 0); }').findings.length, 1);
+  });
+
+  test('Leaves `hsl()` and percentage `rgb()` channels alone (rounding is the browser’s business)', () => {
+    assert.strictEqual(analyze('.a { color: hsl(0 0% 100%); } .b { color: #fff; }').findings.length, 0);
+    assert.strictEqual(analyze('.a { color: rgb(50%, 0%, 0%); } .b { color: #800000; }').findings.length, 0);
+  });
+
+  test('Treats `font-weight: bold`/`700` and `normal`/`400` as equivalent', () => {
+    assert.strictEqual(analyze('.a { font-weight: bold; } .b { font-weight: 700; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { font-weight: normal; } .b { font-weight: 400; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { font-weight: bolder; } .b { font-weight: 700; }').findings.length, 0);
+  });
+
+  test('Ignores a redundant leading `+` sign', () => {
+    assert.strictEqual(analyze('.a { margin: +2px; } .b { margin: 2px; }').findings.length, 1);
+  });
+
+  test('Ignores whitespace around `/` separators', () => {
+    assert.strictEqual(analyze('.a { font: 12px/1.5 serif; } .b { font: 12px / 1.5 serif; }').findings.length, 1);
+  });
+
+  test('Collapses repeated shorthand values (`margin: 0 0` ≡ `margin: 0`)', () => {
+    assert.strictEqual(analyze('.a { margin: 0 0; } .b { margin: 0; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { padding: 1px 2px 1px 2px; } .b { padding: 1px 2px; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { margin: 0 auto 0 auto; } .b { margin: 0 auto; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { overflow: hidden hidden; } .b { overflow: hidden; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { border-radius: 1px / 1px; } .b { border-radius: 1px; }').findings.length, 1);
+  });
+
+  test('Does not collapse shorthand values that aren’t repetitions', () => {
+    assert.strictEqual(analyze('.a { margin: 1px 2px; } .b { margin: 1px; }').findings.length, 0);
+    assert.strictEqual(analyze('.a { border-radius: 50% / 100%; } .b { border-radius: 50%; }').findings.length, 0);
   });
 
   test('Treats `border: none` and `border: 0` as equivalent', () => {
@@ -359,6 +404,28 @@ describe('Analysis', () => {
     assert.doesNotThrow(() => analyze('@layer reset, base;\n.a { color: red; }\n.b { color: red; }'));
     const { findings } = analyze('@layer reset, base;\n.a { color: red; }\n.b { color: red; }');
     assert.strictEqual(findings.length, 1);
+  });
+
+  test('Flags a selector written more than once within one scope', () => {
+    const { findings } = analyze('.a { color: red; }\n.b { color: blue; }\n.a { margin: 0; }\n');
+    assert.strictEqual(findings.length, 1);
+    assert.strictEqual(findings[0].repeatedSelector, true);
+    assert.strictEqual(findings[0].key, '.a');
+    assert.deepStrictEqual(findings[0].occurrences.map(occ => occ.line), [1, 3]);
+  });
+
+  test('Recognizes a repeated selector list regardless of order (`.a, .b` vs. `.b, .a`)', () => {
+    const { findings } = analyze('.a, .b { color: red; }\n.b, .a { margin: 0; }\n');
+    assert.strictEqual(findings.length, 1);
+    assert.strictEqual(findings[0].repeatedSelector, true);
+  });
+
+  test('Does not flag a selector repeated across two separately-written same-condition blocks', () => {
+    // The merged reporting view treats the two blocks as one scope for
+    // declaration duplicates, but repeating a selector across two physical
+    // blocks is by construction, not a smell within one of them
+    const { findings } = analyze('@media (min-width: 768px) { .a { color: red; } }\n@media (min-width: 768px) { .a { margin: 0; } }');
+    assert.strictEqual(findings.length, 0);
   });
 
   test('Flags a declaration repeated within a selector-less at-rule block (`@font-face`)', () => {
@@ -587,6 +654,40 @@ describe('Dedup', () => {
     assert.strictEqual(css, '.hub, .a { color: red; }\n.hub { padding: 1px; }\n.hub, .b { background: blue; }\n');
   });
 
+  test('Folds identical twin rules into one rule with the combined selector list', () => {
+    const { css, applied, skipped } = dedup('.a { margin: 0; color: red; }\n.b { margin: 0; color: red; }\n');
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a, .b { margin: 0; color: red; }\n');
+  });
+
+  test('Folds three identical twin rules at once', () => {
+    const { css, applied } = dedup('.a { margin: 0; color: red; }\n.b { margin: 0; color: red; }\n.c { margin: 0; color: red; }\n');
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(css, '.a, .b, .c { margin: 0; color: red; }\n');
+  });
+
+  test('Folds twin rules with overlapping properties when their declaration order agrees', () => {
+    const { css, applied, skipped } = dedup('.a { margin: 0; margin-left: 5px; }\n.b { margin: 0; margin-left: 5px; }\n');
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a, .b { margin: 0; margin-left: 5px; }\n');
+  });
+
+  test('Folds twin rules with non-overlapping properties even when their declaration order differs', () => {
+    const { css, applied } = dedup('.a { color: red; font-weight: bold; }\n.b { font-weight: bold; color: red; }\n');
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(css, '.a, .b { font-weight: bold; color: red; }\n');
+  });
+
+  test('Skips twin rules when one carries an extra declaration (it would leak to the other’s selector)', () => {
+    const input = '.a { margin: 0; color: red; padding: 1px; }\n.b { margin: 0; color: red; }\n';
+    const { css, applied, skipped } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 2);
+    assert.strictEqual(css, input);
+  });
+
   test('Skips a cluster with two candidate hubs (two rules holding every group’s shared declaration)', () => {
     // Both rules hold both groups’ shared declarations, in opposite
     // order—splitting around either hub would reorder the overlapping
@@ -657,12 +758,58 @@ describe('Dedup', () => {
     assert.strictEqual(bytes.before, bytes.after);
   });
 
+  test('Folds a rule repeating the same selector into the last one, earlier declarations first', () => {
+    const { css, applied, skipped } = dedup('.a { color: red; }\n.b { margin: 0; }\n.a { padding: 1px; }\n');
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.b { margin: 0; }\n.a { color: red; padding: 1px; }\n');
+  });
+
+  test('Folds three same-selector rules into one', () => {
+    const { css, applied } = dedup('.a { color: red; }\n.a { margin: 0; }\n.a { padding: 1px; }\n');
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(css, '.a { color: red; margin: 0; padding: 1px; }\n');
+  });
+
+  test('Preserves the same-selector cascade when folding (conflicting values keep their order)', () => {
+    const { css } = dedup('.a { color: red; }\n.b { margin: 0; }\n.a { color: blue; }\n');
+    assert.strictEqual(css, '.b { margin: 0; }\n.a { color: red; color: blue; }\n');
+  });
+
+  test('Collapses a duplicate declaration the same-selector fold brings into one rule', () => {
+    const { css, applied } = dedup('.a { color: red; }\n.b { margin: 0; }\n.a { color: red; }\n');
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(css, '.b { margin: 0; }\n.a { color: red; }\n');
+  });
+
+  test('Skips a same-selector fold when an intervening rule touches a moved property', () => {
+    const input = '.a { color: red; }\n.b { color: blue; }\n.a { margin: 0; }\n';
+    const { css, applied, skipped } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 1);
+    assert.match(skipped[0].reason, /same selector written again/);
+    assert.strictEqual(css, input);
+  });
+
+  test('Leaves a same-selector rule holding nested rules where it is', () => {
+    const input = '.a { &:hover { color: red; } }\n.a { margin: 0; }\n';
+    const { css, applied } = dedup(input);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(css, input);
+  });
+
+  test('Merges equivalent color spellings, keeping the shortest', () => {
+    const { css, applied } = dedup('.a { color: #ffffff; }\n.b { color: #fff; }\n');
+    assert.strictEqual(applied.length, 1);
+    assert.match(css, /\.a, \.b \{\s*color: #fff;\s*\}/);
+  });
+
   test('Removes an exact duplicate declaration repeated within one rule', () => {
     const { css, applied } = dedup('.a { color: red; color: red; }');
     assert.strictEqual(css, '.a { color: red; }');
     assert.strictEqual(applied.length, 1);
     assert.strictEqual(applied[0].redundant, true);
-    assert.strictEqual(applied[0].key, 'color: red');
+    assert.strictEqual(applied[0].key, 'color: #ff0000');
   });
 
   test('Catches a same-rule duplicate after normalizing case and equivalent zero values', () => {
@@ -751,7 +898,7 @@ describe('Fixtures', () => {
     const { stdout } = run([path.join(fixturesDir, 'merge-safety.css')]);
     assert.match(stdout, /Run with `--dedup` to save \d+ bytes \(\d+\.\d%\)\./);
     assert.ok(stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
-    assert.match(stdout, /background: white — intervening `background` declaration in `\.y`/);
+    assert.match(stdout, /background: #ffffff — intervening `background` declaration in `\.y`/);
   });
 
   test('merge-safety.css --dedup consolidates the safe pair and skips the unsafe one', () => {

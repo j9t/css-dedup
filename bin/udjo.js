@@ -126,6 +126,14 @@ function printFindings(findings) {
     console.log(styleText('bold', scope === 'root' ? '(root)' : scope));
 
     for (const finding of items) {
+      if (finding.repeatedSelector) {
+        console.log(`  ${styleText('cyan', 'repeated')}    ${finding.key}`);
+        for (const occ of finding.occurrences) {
+          console.log(`    ${styleText('dim', `line ${occ.line}`)}`);
+        }
+        continue;
+      }
+
       if (finding.redundant) {
         const [occ] = finding.occurrences;
         console.log(`  ${styleText('yellow', 'redundant')}   ${occ.prop}: ${occ.value}  ${styleText('dim', `${occ.selector} (line ${occ.line})`)}`);

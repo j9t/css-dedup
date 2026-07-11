@@ -1,5 +1,7 @@
 # UDJO, the CSS Declaration De-Duplicator
 
+[![npm version](https://img.shields.io/npm/v/udjo.svg)](https://www.npmjs.com/package/udjo) [![Build status](https://github.com/j9t/udjo/workflows/Tests/badge.svg)](https://github.com/j9t/udjo/actions) [![Socket](https://badge.socket.dev/npm/package/udjo)](https://socket.dev/npm/package/udjo) [![GitHub Sponsors](https://badgen.net/static/Support/Open%20Source/cyan)](https://github.com/j9t/udjo?sponsor=1)
+
 UDJO is a CSS maintainability and performance optimization tool that finds—and, when requested and where safe, consolidates—duplicate CSS declarations. It implements the technique of [“using declarations just once”](https://webglossary.info/terms/udjo/) as originally described in [“DRY CSS”](https://meiert.com/blog/dry-css/) (cf. [_CSS Optimization Basics_](https://meiert.com/blog/css-optimization-basics/)): the same normalized property–value pair shouldn’t appear in more than one rule within the same scope. Where it does, UDJO reports it—and can group the affected selectors into a single rule.
 
 ## Example Optimization

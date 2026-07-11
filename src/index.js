@@ -228,7 +228,7 @@ export function analyzeRoot(root, options = {}) {
       findings.push({
         scope: scope.label,
         key: splitSelectors(rules[0].selector).join(', '),
-        repeatedSelector: true,
+        repeated: true,
         occurrences: rules.map(rule => ({
           selector: rule.selector,
           selectors: splitSelectors(rule.selector),
@@ -492,7 +492,7 @@ export function dedupRoot(root, options = {}) {
           scope: scope.label,
           key: splitSelectors(target.selector).join(', '),
           selectors: splitSelectors(target.selector),
-          foldedRule: true,
+          folded: true,
         });
         merged = true;
       }

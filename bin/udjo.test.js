@@ -409,7 +409,7 @@ describe('Analysis', () => {
   test('Flags a selector written more than once within one scope', () => {
     const { findings } = analyze('.a { color: red; }\n.b { color: blue; }\n.a { margin: 0; }\n');
     assert.strictEqual(findings.length, 1);
-    assert.strictEqual(findings[0].repeatedSelector, true);
+    assert.strictEqual(findings[0].repeated, true);
     assert.strictEqual(findings[0].key, '.a');
     assert.deepStrictEqual(findings[0].occurrences.map(occ => occ.line), [1, 3]);
   });
@@ -417,7 +417,7 @@ describe('Analysis', () => {
   test('Recognizes a repeated selector list regardless of order (`.a, .b` vs. `.b, .a`)', () => {
     const { findings } = analyze('.a, .b { color: red; }\n.b, .a { margin: 0; }\n');
     assert.strictEqual(findings.length, 1);
-    assert.strictEqual(findings[0].repeatedSelector, true);
+    assert.strictEqual(findings[0].repeated, true);
   });
 
   test('Does not flag a selector repeated across two separately-written same-condition blocks', () => {

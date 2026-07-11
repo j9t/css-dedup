@@ -1,4 +1,4 @@
-// The CSS named colors (CSS Color Module Level 4, mapped to their six-digit hex
+// The CSS named colors (CSS Color Module Level 4), mapped to their six-digit hex
 // equivalents. Used only to canonicalize a value for comparison—output always
 // keeps a spelling that already exists in the source, so UDJO never rewrites
 // `white` to `#ffffff` (or vice versa) on its own.

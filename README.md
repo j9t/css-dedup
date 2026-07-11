@@ -123,16 +123,16 @@ Both functions accept an options object:
 
 ```javascript
 {
-  scope,             // `root`, or the at-rule chain the rules live in, e.g. `@media (min-width: 768px)`
-  key,               // normalized `prop: value` (plus ` !important` if set)
-  redundant,         // “true” if the same declaration repeats within one rule, absent otherwise
-  repeatedSelector,  // “true” if this flags a selector (list) written more than once in one scope;
-                     // `key` is then the selector list, and occurrences carry no `prop`/`value`
-  occurrences,       // [{ selector, selectors, prop, value, line }, …]
+  scope,        // `root`, or the at-rule chain the rules live in, e.g. `@media (min-width: 768px)`
+  key,          // normalized `prop: value` (plus ` !important` if set)
+  redundant,    // “true” if the same declaration repeats within one rule, absent otherwise
+  repeated,     // “true” if this flags a selector (list) written more than once in one scope;
+                // `key` is then the selector list, and occurrences carry no `prop`/`value`
+  occurrences,  // [{ selector, selectors, prop, value, line }, …]
 }
 ```
 
-`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten stylesheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `foldedRule: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the stylesheet before and after, since that’s what changes over the wire, not the character count, covering everything `--dedup` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
+`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten stylesheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the stylesheet before and after, since that’s what changes over the wire, not the character count, covering everything `--dedup` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
 
 ### PostCSS Plugin Use
 

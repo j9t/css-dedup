@@ -19,7 +19,7 @@ export default function udjo(options = {}) {
 
       const { findings } = analyzeRoot(root, options);
       for (const finding of findings) {
-        if (finding.repeatedSelector) {
+        if (finding.repeated) {
           root.warn(result, `Selector \`${finding.key}\` written ${finding.occurrences.length} times in its scope (${finding.scope === 'root' ? 'root' : finding.scope})`);
           continue;
         }

@@ -126,7 +126,7 @@ function printFindings(findings) {
     console.log(styleText('bold', scope === 'root' ? '(root)' : scope));
 
     for (const finding of items) {
-      if (finding.repeatedSelector) {
+      if (finding.repeated) {
         console.log(`  ${styleText('cyan', 'repeated')}    ${finding.key}`);
         for (const occ of finding.occurrences) {
           console.log(`    ${styleText('dim', `line ${occ.line}`)}`);

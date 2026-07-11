@@ -48,7 +48,7 @@ const ZERO_IS_NONE_PROPS = new Set([
 // per the CSS custom-ident grammar, unlike ordinary keywords elsewhere
 // (which fold safely). `animation-name: Foo` and `animation-name: foo` can
 // name two different `@keyframes` blocks, so lowercasing them risks a false
-// duplicate—or, in `--dedup` mode, an unsafe merge that changes which
+// duplicate—or, in `--fix` mode, an unsafe merge that changes which
 // animation plays. Shorthands mixing such an ident with case-insensitive
 // keywords (`animation`, `container`) are included whole, since there’s no
 // reliable way to fold just the keyword part without parsing the value;

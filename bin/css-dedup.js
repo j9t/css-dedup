@@ -12,7 +12,7 @@ const DIRS_IGNORED = new Set(['node_modules']);
 
 const { values, positionals } = parseArgs({
   options: {
-    dedup: { type: 'boolean', short: 'd', default: false },
+    fix: { type: 'boolean', short: 'f', default: false },
     'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
     'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
     config: { type: 'string', short: 'c' },
@@ -31,10 +31,10 @@ Arguments:
   file  One or more CSS files or directories to analyze (directories are searched recursively for .css files, skipping node_modules and dotfolders); pass \`-\` to read from STDIN instead
 
 Options:
-  -d, --dedup                      Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)
+  -f, --fix                        Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -n, --no-ignore-selectors-defaults  Disable the built-in selector-hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
-  -c, --config <path>              Path to a config file (defaults to \`.css-dedup.js\` in the working directory, if present)
+  -c, --config <path>              Path to a config file (defaults to \`css-dedup.config.js\` in the working directory, if present)
   -h, --help                       Show this help`);
   process.exit(values.help ? 0 : 1);
 }
@@ -46,7 +46,7 @@ if (positionals.includes('-') && positionals.length > 1) {
 
 // Settings file
 async function loadConfig(pathConfig) {
-  const pathResolved = resolve(pathConfig ?? '.css-dedup.js');
+  const pathResolved = resolve(pathConfig ?? 'css-dedup.config.js');
   if (!pathConfig && !existsSync(pathResolved)) return {};
 
   const { default: config = {} } = await import(pathToFileURL(pathResolved).href);
@@ -61,7 +61,7 @@ async function readStdin() {
 
 // Recursively collects `.css` files under a directory, skipping
 // `node_modules` and dotfolders—not configurable, since a
-// project-specific exclude list belongs in `.css-dedup.js`’s `ignoreSelectors`
+// project-specific exclude list belongs in `css-dedup.config.js`’s `ignoreSelectors`
 async function collectCssFiles(dirPath) {
   const entries = await readdir(dirPath, { withFileTypes: true });
   const files = [];
@@ -151,7 +151,7 @@ function printFindings(findings) {
 }
 
 // Processes one target (a file path, or `-` for STDIN) and returns whether
-// it should count against the process’s exit code. In `--dedup` mode, STDIN
+// it should count against the process’s exit code. In `--fix` mode, STDIN
 // is a special case: There is no file to rewrite in place, so the
 // consolidated CSS is printed to STDOUT instead—and, so that stream stays
 // pipeable, the usual status/summary lines go to STDERR rather than STDOUT.
@@ -187,7 +187,7 @@ async function processTarget(file, options, { multi }) {
 }
 
 async function processCss(css, targetOptions, { isStdin, label }) {
-  if (values.dedup) {
+  if (values.fix) {
     const { css: output, applied, skipped, bytes } = dedup(css, targetOptions);
     const log = isStdin ? console.error : console.log;
 
@@ -208,7 +208,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     if (applied.length) {
       log(`\n${formatBytesSummary(bytes)}`);
       if (bytes.saved < 0) {
-        log(styleText('yellow', `Note: this consolidation makes the file ${formatGrowth(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--dedup\` here if you care more about transfer size.`));
+        log(styleText('yellow', `Note: this consolidation makes the file ${formatGrowth(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--fix\` here if you care more about transfer size.`));
       }
       if (!isStdin) log(`Wrote ${label}`);
     }
@@ -226,13 +226,13 @@ async function processCss(css, targetOptions, { isStdin, label }) {
   printFindings(findings);
 
   // A dry-run consolidation, purely to report the payoff—same safety rules
-  // as `--dedup`, just discarded instead of written
+  // as `--fix`, just discarded instead of written
   const { applied, skipped, bytes } = dedup(css, targetOptions);
 
   // Findings above don't distinguish safe from unsafe—without this, a
-  // duplicate group that `--dedup` would just skip (see its own safety
+  // duplicate group that `--fix` would just skip (see its own safety
   // checks) reads as if nothing follows from it at all, when there’s a
-  // concrete, explainable reason it wasn't offered as a `--dedup` win
+  // concrete, explainable reason it wasn't offered as a `--fix` win
   if (skipped.length) {
     console.log(styleText('yellow', `${skipped.length} duplicate group${skipped.length !== 1 ? 's' : ''} considered unsafe to auto-merge:`));
     for (const item of skipped) {
@@ -241,15 +241,15 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     console.log('');
   }
 
-  // Summary and `--dedup` payoff close each stylesheet’s report, so with
+  // Summary and `--fix` payoff close each stylesheet’s report, so with
   // several files it’s unambiguous which file they refer to
   console.log(`${styleText('bold', 'Summary:')} ${findings.length} finding${findings.length !== 1 ? 's' : ''}`);
   if (applied.length) {
     if (bytes.saved > 0) {
       const percent = bytes.before ? (bytes.saved / bytes.before) * 100 : 0;
-      console.log(`Run with \`--dedup\` to save ${bytes.saved.toLocaleString()} bytes (${percent.toFixed(1)}%).`);
+      console.log(`Run with \`--fix\` to save ${bytes.saved.toLocaleString()} bytes (${percent.toFixed(1)}%).`);
     } else if (bytes.saved < 0) {
-      console.log(styleText('yellow', `Running \`--dedup\` here would make the file ${formatGrowth(bytes)} bigger, not smaller (worth it for maintainability but not for transfer size).`));
+      console.log(styleText('yellow', `Running \`--fix\` here would make the file ${formatGrowth(bytes)} bigger, not smaller (worth it for maintainability but not for transfer size).`));
     }
   }
 

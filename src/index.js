@@ -208,7 +208,7 @@ export function analyzeRoot(root, options = {}) {
   // A selector (list) written more than once within one scope is the same
   // maintainability smell one level up from a repeated declaration—the
   // later rule could hold its declarations in the earlier one. Detected on
-  // physical containers (like `--dedup`’s fold, not the merged reporting
+  // physical containers (like `--fix`’s fold, not the merged reporting
   // view above), since two same-condition `@media` blocks legitimately
   // repeat their selectors by construction.
   for (const scope of collectScopes(root)) {

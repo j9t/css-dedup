@@ -30,12 +30,12 @@ describe('Plugin: Analysis', () => {
 
 describe('Plugin: Dedup', () => {
   test('Merges a duplicate declaration in place', async () => {
-    const result = await postcss([cssdedup({ dedup: true })]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
+    const result = await postcss([cssdedup({ fix: true })]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
     assert.match(result.css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
   });
 
   test('Warns about a skipped (unsafe) merge', async () => {
-    const result = await postcss([cssdedup({ dedup: true })]).process('.a { color: red; }\n.b { color: blue; }\n.c { color: red; }\n', { from: undefined });
+    const result = await postcss([cssdedup({ fix: true })]).process('.a { color: red; }\n.b { color: blue; }\n.c { color: red; }\n', { from: undefined });
     assert.strictEqual(result.warnings().length, 1);
     assert.match(result.warnings()[0].text, /left unmerged/);
   });

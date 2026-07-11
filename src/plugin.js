@@ -3,13 +3,13 @@ import { analyzeRoot, dedupRoot } from './index.js';
 // A thin PostCSS plugin wrapper around `analyzeRoot`/`dedupRoot`, for
 // dropping CSS Dedup into an existing `postcss([…])` pipeline (e.g. alongside
 // Autoprefixer, cssnano) instead of running it as a separate file-based pass.
-// By default it only reports, via `result.warn()`—pass `dedup: true` to
-// rewrite the root in place, same as the CLI’s `--dedup`.
+// By default it only reports, via `result.warn()`—pass `fix: true` to
+// rewrite the root in place, same as the CLI’s `--fix`.
 export default function cssdedup(options = {}) {
   return {
     postcssPlugin: 'css-dedup',
     OnceExit(root, { result }) {
-      if (options.dedup) {
+      if (options.fix) {
         const { skipped } = dedupRoot(root, options);
         for (const item of skipped) {
           root.warn(result, `Duplicate \`${item.key}\` left unmerged (${item.scope === 'root' ? 'root' : item.scope}): ${item.reason}`);

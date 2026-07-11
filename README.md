@@ -31,10 +31,10 @@ $ npx css-dedup default.css
     .c (line 11)
 
 Summary: 1 finding
-Run with `--dedup` to save 10 bytes (11.8%).
+Run with `--fix` to save 10 bytes (11.8%).
 ```
 
-Running with `--dedup` folds `.a` and `.c` into a single rule for the shared declaration, and leaves everything else untouched:
+Running with `--fix` folds `.a` and `.c` into a single rule for the shared declaration, and leaves everything else untouched:
 
 ```css
 .a {
@@ -51,7 +51,7 @@ Running with `--dedup` folds `.a` and `.c` into a single rule for the shared dec
 ```
 
 ```shell
-$ npx css-dedup --dedup default.css
+$ npx css-dedup --fix default.css
 1 consolidated, 0 skipped
 
 85 → 75 bytes (-10 B, -11.8%)
@@ -70,28 +70,28 @@ The two aren’t always aligned, though: Folding a declaration into a shared sel
 npx css-dedup [options] <file…>
 ```
 
-Pass one or more files—each is analyzed (and, with `--dedup`, rewritten) independently; with more than one file, output is grouped under a header per file. A directory is searched recursively for .css files (skipping node_modules and dotfolders); the result is unrolled into that same per-file list, so mixing files and directories works too. Pass `-` instead of a file to read CSS from STDIN (can’t be combined with other file arguments); in `--dedup` mode this prints the consolidated CSS to STDOUT, rather than writing a file, so it composes in a pipeline—status/summary output moves to STDERR in that case, keeping STDOUT pure CSS.
+Pass one or more files—each is analyzed (and, with `--fix`, rewritten) independently; with more than one file, output is grouped under a header per file. A directory is searched recursively for .css files (skipping node_modules and dotfolders); the result is unrolled into that same per-file list, so mixing files and directories works too. Pass `-` instead of a file to read CSS from STDIN (can’t be combined with other file arguments); in `--fix` mode this prints the consolidated CSS to STDOUT, rather than writing a file, so it composes in a pipeline—status/summary output moves to STDERR in that case, keeping STDOUT pure CSS.
 
 | Option | Description |
 | --- | --- |
-| `--dedup`, `-d` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
+| `--fix`, `-f` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
 | `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
 | `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector-hack ignore list |
-| `--config <path>`, `-c <path>` | Path to a config file (defaults to `.css-dedup.js` in the working directory, if present) |
+| `--config <path>`, `-c <path>` | Path to a config file (defaults to `css-dedup.config.js` in the working directory, if present) |
 | `--help`, `-h` | Show usage information |
 
 `--ignore-selector` is singular because it’s a repeatable flag—each occurrence (`-i pattern1 -i pattern2`) adds one pattern. The corresponding programmatic option, `ignoreSelectors`, takes an array.
 
-Without `--dedup`, CSS Dedup only reports. Report mode still runs the same safety checks `--dedup` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--dedup`, anything skipped as unsafe) in any of the given files.
+Without `--fix`, CSS Dedup only reports. Report mode still runs the same safety checks `--fix` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--fix`, anything skipped as unsafe) in any of the given files.
 
 A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported and CSS Dedup moves on to the rest.
 
 ### Config File
 
-For settings that should apply on every run—typically a project’s own `ignoreSelectors`—drop a `.css-dedup.js` in the working directory (or point `--config` at one elsewhere, under any name):
+For settings that should apply on every run—typically a project’s own `ignoreSelectors`—drop a `css-dedup.config.js` in the working directory (or point `--config` at one elsewhere, under any name):
 
 ```javascript
-// .css-dedup.js
+// css-dedup.config.js
 export default {
   ignoreSelectors: [/^\.legacy-/],
   ignoreSelectorsDefaults: true
@@ -134,7 +134,7 @@ Both functions accept an options object:
 }
 ```
 
-`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten stylesheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the stylesheet before and after, since that’s what changes over the wire, not the character count, covering everything `--dedup` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
+`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten stylesheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the stylesheet before and after, since that’s what changes over the wire, not the character count, covering everything `--fix` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
 
 ### PostCSS Plugin Use
 
@@ -148,12 +148,12 @@ import cssdedup from 'css-dedup/plugin';
 const result = await postcss([cssdedup()]).process(css, { from: 'default.css' });
 console.log(result.warnings());
 
-// Dedup mode: Rewrites the root in place; skipped merges still surface as warnings
-const fixed = await postcss([cssdedup({ dedup: true })]).process(css, { from: 'default.css' });
+// Fix mode: Rewrites the root in place; skipped merges still surface as warnings
+const fixed = await postcss([cssdedup({ fix: true })]).process(css, { from: 'default.css' });
 console.log(fixed.css);
 ```
 
-The plugin takes the same options as `analyze()`/`dedup()`, plus `dedup: true` to switch it into consolidation mode. Since CSS Dedup is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may duplicate work those tools do.
+The plugin takes the same options as `analyze()`/`dedup()`, plus `fix: true` to switch it into consolidation mode. Since CSS Dedup is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may duplicate work those tools do.
 
 ## How It Works
 
@@ -164,7 +164,7 @@ CSS Dedup:
 2. …**scopes** rules by their DRY boundary—the root stylesheet, the contents of an `@media`/`@supports`/`@layer` condition, or one specific nested rule (native CSS nesting).
    - Declarations are only ever compared within the same scope: A rule’s own declarations are never compared against those of rules nested inside it, and rules in different `@layer`s (or different `@media`/`@supports` conditions) can’t share a merged rule.
    - For _reporting_, two blocks with the _same_ condition are the same scope even when written separately in the source (e.g., two `@media (min-width: 768px) {}` blocks in different parts of the file)—matching is whitespace-insensitive but case-sensitive, since `@layer` names and selectors can be case-significant.
-   - `--dedup` is more conservative here: It only ever folds rules that already live in the same physical block, since merging across two separate blocks would relocate a declaration past whatever sits between those blocks in the source—including rules in an entirely different scope, which the merge-safety check (step 6) has no visibility into. A duplicate split across two same-condition blocks is therefore reported, not auto-merged.
+   - `--fix` is more conservative here: It only ever folds rules that already live in the same physical block, since merging across two separate blocks would relocate a declaration past whatever sits between those blocks in the source—including rules in an entirely different scope, which the merge-safety check (step 6) has no visibility into. A duplicate split across two same-condition blocks is therefore reported, not auto-merged.
    - Statement-form at-rules with no block (`@layer reset, base;`) are skipped.
 
 3. …**excludes** selectors matching a hack pattern (vendor-prefixed pseudo-classes/elements, legacy IE selector hacks) from analysis by default—grouping those into a shared selector list risks the whole rule being dropped by browsers that don’t recognize the selector.
@@ -182,7 +182,7 @@ CSS Dedup:
 
 5. …**reports** any normalized declaration that occurs in more than one rule within a scope, and separately flags declarations repeated within a single rule—including within a selector-less at-rule block like `@font-face` or `@page`, which have declarations of their own but, unlike two rules, are never compared against each other (there’s no selector list to fold two `@font-face` blocks into). It also reports a selector (list) written more than once within one scope—the same smell one level up from a repeated declaration—matched as a set, so `.a, .b` and `.b, .a` count as the same selector list; only within one physical block, though, since two same-condition `@media` blocks repeat their selectors by construction.
 
-6. …**consolidates** (with `--dedup`) only when it’s provably safe.
+6. …**consolidates** (with `--fix`) only when it’s provably safe.
    - First, a declaration repeated within the same rule (or the same selector-less at-rule block) is collapsed to its last occurrence—unconditionally safe, since nothing moves across a rule boundary, so none of the checks below apply to it.
    - Rules repeating the same selector (list) within one scope are folded into the last of them, earlier declarations first—which preserves every same-selector cascade outcome—but only if nothing in between touches any of the moved properties (the same intervening-rule check the declaration merges below use). Rules holding anything but declarations (nested rules, say) stay put.
    - Identical rules—two or more rules whose declarations are exactly the same set of shared declarations—are folded into one rule with the combined selector list, rather than being split per declaration, provided their declaration order agrees wherever the properties overlap (and the usual intervening-rule check clears).
@@ -197,7 +197,7 @@ CSS Dedup:
 
 Overall, CSS Dedup is conservative by design and will leave some safe merges for manual review.
 
-`test/fixtures/*.css` contains small example stylesheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/css-dedup.js test/fixtures/<file>.css` (add `--dedup` for `merge-safety.css`) to see them in action.
+`test/fixtures/*.css` contains small example stylesheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/css-dedup.js test/fixtures/<file>.css` (add `--fix` for `merge-safety.css`) to see them in action.
 
 ***
 

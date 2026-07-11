@@ -982,28 +982,28 @@ describe('Fixtures', () => {
 
   test('merge-safety.css report mode explains the unsafe group alongside the safe one’s savings estimate', () => {
     const { stdout } = run([path.join(fixturesDir, 'merge-safety.css')]);
-    assert.match(stdout, /Run with `--dedup` to save \d+ bytes \(\d+\.\d%\)\./);
+    assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\./);
     assert.ok(stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
     assert.match(stdout, /background: #ffffff — intervening `background` declaration in `\.y`/);
   });
 
-  test('merge-safety.css report mode closes with the summary and `--dedup` payoff, after the unsafe-group details', () => {
+  test('merge-safety.css report mode closes with the summary and `--fix` payoff, after the unsafe-group details', () => {
     const { stdout } = run([path.join(fixturesDir, 'merge-safety.css')]);
     const unsafeIndex = stdout.indexOf('unsafe to auto-merge');
     const summaryIndex = stdout.indexOf('Summary:');
     assert.ok(unsafeIndex !== -1 && summaryIndex !== -1);
     assert.ok(unsafeIndex < summaryIndex);
-    assert.match(stdout, /Run with `--dedup` to save \d+ bytes \(\d+\.\d%\)\.\s*$/);
+    assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\.\s*$/);
   });
 
-  test('merge-safety.css --dedup consolidates the safe pair and skips the unsafe one', () => {
+  test('merge-safety.css --fix consolidates the safe pair and skips the unsafe one', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_merge_safety');
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'merge-safety.css');
     fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
 
     try {
-      const { stdout } = run(['--dedup', file]);
+      const { stdout } = run(['--fix', file]);
       assert.ok(stdout.includes('1 consolidated'));
       assert.ok(stdout.includes('1 skipped'));
       assert.ok(stdout.includes('1 skipped (considered unsafe to auto-merge)'));
@@ -1018,14 +1018,14 @@ describe('Fixtures', () => {
     }
   });
 
-  test('`--dedup` omits the “unsafe to auto-merge” qualifier when nothing was skipped', () => {
+  test('`--fix` omits the “unsafe to auto-merge” qualifier when nothing was skipped', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_nothing_skipped');
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'clean.css');
     fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n');
 
     try {
-      const { stdout } = run(['--dedup', file]);
+      const { stdout } = run(['--fix', file]);
       assert.ok(stdout.includes('1 consolidated, 0 skipped'));
       assert.ok(!stdout.includes('unsafe to auto-merge'));
     } finally {
@@ -1033,19 +1033,19 @@ describe('Fixtures', () => {
     }
   });
 
-  test('basic.css report mode suggests the byte savings from running `--dedup`', () => {
+  test('basic.css report mode suggests the byte savings from running `--fix`', () => {
     const { stdout } = run([path.join(fixturesDir, 'basic.css')]);
-    assert.match(stdout, /Run with `--dedup` to save \d+ bytes \(\d+\.\d%\)\./);
+    assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\./);
   });
 
-  test('merge-safety.css -d consolidates the safe pair (short flag)', () => {
+  test('merge-safety.css -f consolidates the safe pair (short flag)', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_merge_safety_short');
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'merge-safety.css');
     fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
 
     try {
-      const { stdout } = run(['-d', file]);
+      const { stdout } = run(['-f', file]);
       assert.ok(stdout.includes('1 consolidated'));
 
       const output = fs.readFileSync(file, 'utf8');
@@ -1091,20 +1091,20 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run([file]);
-      assert.match(stdout, /Running `--dedup` here would make the file \d+ bytes \(\d+\.\d%\) bigger, not smaller/);
+      assert.match(stdout, /Running `--fix` here would make the file \d+ bytes \(\d+\.\d%\) bigger, not smaller/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
   });
 
-  test('Warns in `--dedup` mode when consolidation grows the file rather than shrinks it', () => {
+  test('Warns in `--fix` mode when consolidation grows the file rather than shrinks it', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_growth_dedup');
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'grow.css');
     fs.writeFileSync(file, '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n');
 
     try {
-      const { stdout } = run(['--dedup', file]);
+      const { stdout } = run(['--fix', file]);
       assert.match(stdout, /\+\d+ B, \+\d+\.\d%/);
       assert.match(stdout, /Note: this consolidation makes the file \d+ bytes \(\d+\.\d%\) bigger, not smaller/);
       assert.ok(fs.readFileSync(file, 'utf8').includes('.very-long-selector-name-one, .b'));
@@ -1134,7 +1134,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--dedup` consolidates each of multiple files independently', () => {
+  test('`--fix` consolidates each of multiple files independently', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_dedup');
     fs.mkdirSync(dirTemp, { recursive: true });
     const fileA = path.join(dirTemp, 'a.css');
@@ -1143,7 +1143,7 @@ describe('CLI', () => {
     fs.writeFileSync(fileB, '.c { margin: 0; }\n.d { margin: 0; }\n');
 
     try {
-      const { stdout } = run(['--dedup', fileA, fileB]);
+      const { stdout } = run(['--fix', fileA, fileB]);
       assert.ok(stdout.includes(fileA));
       assert.ok(stdout.includes(fileB));
       assert.match(fs.readFileSync(fileA, 'utf8'), /\.a,\s*\.b\s*{\s*color: red;\s*}/);
@@ -1228,15 +1228,15 @@ describe('CLI', () => {
     assert.ok(stdout.includes('1 finding'));
   });
 
-  test('`--dedup -` writes the consolidated CSS to stdout, and status to stderr', () => {
-    const { stdout, stderr } = run(['--dedup', '-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
+  test('`--fix -` writes the consolidated CSS to stdout, and status to stderr', () => {
+    const { stdout, stderr } = run(['--fix', '-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
     assert.match(stdout, /^\.a, \.b \{\s*color: red;\s*\}\s*$/);
     assert.ok(stderr.includes('1 consolidated'));
   });
 
-  test('`--dedup -` still writes the full stylesheet to stdout when nothing is consolidated', () => {
+  test('`--fix -` still writes the full stylesheet to stdout when nothing is consolidated', () => {
     const input = '.a { color: red; }\n.b { color: blue; }\n';
-    const { stdout, stderr } = run(['--dedup', '-'], { input });
+    const { stdout, stderr } = run(['--fix', '-'], { input });
     assert.strictEqual(stdout, input);
     assert.ok(stderr.includes('0 consolidated'));
   });
@@ -1256,10 +1256,10 @@ describe('CLI', () => {
     }
   });
 
-  test('Loads `ignoreSelectors` from `.css-dedup.js` in the working directory', () => {
+  test('Loads `ignoreSelectors` from `css-dedup.config.js` in the working directory', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_config');
     fs.mkdirSync(dirTemp, { recursive: true });
-    fs.writeFileSync(path.join(dirTemp, '.css-dedup.js'), 'export default { ignoreSelectors: [/^\\.legacy-/] };\n');
+    fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { ignoreSelectors: [/^\\.legacy-/] };\n');
     const file = path.join(dirTemp, 'legacy.css');
     fs.writeFileSync(file, '.a { color: red; }\n.legacy-b { color: red; }\n');
 
@@ -1287,7 +1287,7 @@ describe('CLI', () => {
     }
   });
 
-  test('An absent `.css-dedup.js` is silently ignored', () => {
+  test('An absent `css-dedup.config.js` is silently ignored', () => {
     const { stdout } = run([path.join(fixturesDir, 'hacks.css')]);
     assert.ok(stdout.includes('No duplicate declarations found.'));
   });

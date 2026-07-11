@@ -152,6 +152,53 @@ function scanSelector(selector) {
   return { combinatorRuns, parenDepths };
 }
 
+// The identity tokens—type, IDs, classes—of a selector’s subject compound
+// (its rightmost one). Returns “null” when the compound can’t be read
+// confidently: An escape could hide a `.`/`#` behind content, and a
+// selector-taking pseudo-class (`:is()`, `:not()`, `:where()`, …) can smuggle
+// in arbitrary further identity—both fall back to “can’t tell” rather than
+// risk a wrong disjointness call.
+function subjectIdentity(selector) {
+  const scan = scanSelector(selector);
+  const lastRun = scan.combinatorRuns.at(-1);
+  const compound = selector.slice(lastRun ? lastRun.end : 0);
+
+  if (compound.includes('\\') || compound.includes('(')) return null;
+
+  // Attribute selectors go first—their values can contain `.`/`#` characters
+  // that would otherwise read as classes/IDs
+  const stripped = compound.replace(RE_ATTRIBUTE_SELECTOR, ' ');
+  const type = /^[a-zA-Z][\w-]*/.exec(compound)?.[0].toLowerCase() ?? null;
+  const classes = new Set([...stripped.matchAll(/\.([\w-]+)/g)].map(match => match[1]));
+  const ids = new Set([...stripped.matchAll(/#([\w-]+)/g)].map(match => match[1]));
+
+  return { type, classes, ids };
+}
+
+function setsDisjoint(a, b) {
+  return ![...a].some(member => b.has(member));
+}
+
+// “True” if the two selectors’ subject compounds carry conflicting identity:
+// different type selectors, different IDs, or non-empty class sets with no
+// class in common. The type and ID cases are close to provable (one element
+// has one tag and one ID); The class case is the aggressive-mode heuristic—
+// `.card` and `.btn:hover` are assumed to target different elements, which
+// BEM-style naming makes almost always true in practice, but which nothing
+// stops a `class="card btn"` element from violating. Not consulted outside
+// aggressive mode.
+export function selectorsLikelyDisjoint(a, b) {
+  const identityA = subjectIdentity(a.trim());
+  const identityB = subjectIdentity(b.trim());
+  if (!identityA || !identityB) return false;
+
+  if (identityA.type && identityB.type && identityA.type !== identityB.type) return true;
+  if (identityA.ids.size && identityB.ids.size && setsDisjoint(identityA.ids, identityB.ids)) return true;
+  if (identityA.classes.size && identityB.classes.size && setsDisjoint(identityA.classes, identityB.classes)) return true;
+
+  return false;
+}
+
 // The “an attribute can only hold one value” argument requires the two
 // differing attribute selectors to be evaluated against the same element in
 // any hypothetical joint match. That’s only guaranteed when the attribute’s

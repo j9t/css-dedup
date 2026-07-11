@@ -148,11 +148,25 @@ function reduceShorthandRepetition(propNormalized, value) {
   return value;
 }
 
-export function normalizeProp(prop) {
+// Property aliases—legacy names current browsers treat as pure synonyms of
+// their standardized successors. Only folded in aggressive mode: The two
+// spellings are interchangeable today, but merging them changes the
+// legacy-support surface (a browser old enough to know only `word-wrap`
+// loses the declaration when the `overflow-wrap` spelling is the one kept).
+const PROPERTY_ALIASES = {
+  'word-wrap': 'overflow-wrap',
+  'grid-gap': 'gap',
+  'grid-row-gap': 'row-gap',
+  'grid-column-gap': 'column-gap',
+};
+
+export function normalizeProp(prop, aggressive = false) {
   const trimmed = prop.trim();
   // Custom property names are case-sensitive (`--Foo` !== `--foo`); every
   // other CSS property name is ASCII-case-insensitive
-  return trimmed.startsWith('--') ? trimmed : trimmed.toLowerCase();
+  if (trimmed.startsWith('--')) return trimmed;
+  const lower = trimmed.toLowerCase();
+  return aggressive ? PROPERTY_ALIASES[lower] ?? lower : lower;
 }
 
 // Value segments that must survive normalization untouched: Quoted strings
@@ -174,9 +188,9 @@ const RE_OPAQUE_SEGMENT = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|url\(\s*(?:"(?:\\
 // control character, doesn’t trip `no-control-regex`)
 const RE_OPAQUE_PLACEHOLDER = /\uE000(\d+)\uE000/g;
 
-export function normalizeValue(prop, rawValue) {
+export function normalizeValue(prop, rawValue, aggressive = false) {
   let value = rawValue.trim();
-  const propNormalized = normalizeProp(prop);
+  const propNormalized = normalizeProp(prop, aggressive);
 
   // Custom property values are opaque end to end: They substitute verbatim
   // wherever `var()` references them—possibly somewhere case-sensitive—and,
@@ -202,7 +216,7 @@ export function normalizeValue(prop, rawValue) {
   // insignificant; a leading `+` sign on a number is a no-op
   value = value.replace(/ ?\/ ?/g, '/');
   value = value.replace(/(^|[\s(,])\+(?=[\d.])/g, '$1');
-  if (!CASE_SENSITIVE_VALUE_PROPS.has(propNormalized)) value = normalizeColors(value);
+  if (!CASE_SENSITIVE_VALUE_PROPS.has(propNormalized)) value = normalizeColors(value, aggressive);
   // `bold`/`700` and `normal`/`400` are defined equal—only for the
   // longhand, though; picking the weight out of the `font` shorthand would
   // require parsing the value
@@ -224,6 +238,6 @@ export function normalizeValue(prop, rawValue) {
   return value;
 }
 
-export function declarationKey(prop, value, important) {
-  return `${normalizeProp(prop)}: ${normalizeValue(prop, value)}${important ? ' !important' : ''}`;
+export function declarationKey(prop, value, important, aggressive = false) {
+  return `${normalizeProp(prop, aggressive)}: ${normalizeValue(prop, value, aggressive)}${important ? ' !important' : ''}`;
 }

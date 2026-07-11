@@ -52,6 +52,10 @@ const RE_HEX_COLOR = /#([0-9a-f]+)\b/g;
 // leaving those values alone
 const RE_RGB_FUNCTION = /\brgba?\(([^()]*)\)/g;
 
+// Same shape as `RE_RGB_FUNCTION`—only consulted in aggressive mode,
+// since `hsl()` equivalence goes through rounding (see `canonicalizeHsl()`)
+const RE_HSL_FUNCTION = /\bhsla?\(([^()]*)\)/g;
+
 // `#abc` → `#aabbcc`, `#abcd` → `#aabbccdd`; a fully opaque alpha channel is
 // the default, so `…ff` is dropped from an eight-digit form
 function expandHex(hex) {
@@ -59,31 +63,98 @@ function expandHex(hex) {
   return digits.length === 8 && digits.endsWith('ff') ? digits.slice(0, 6) : digits;
 }
 
+function parseAlpha(raw) {
+  const number = raw.endsWith('%') ? Number(raw.slice(0, -1)) / 100 : Number(raw);
+  if (!Number.isFinite(number)) return null;
+  return Math.min(Math.max(number, 0), 1);
+}
+
+// One canonical spelling for a set of resolved 0–255 channels plus alpha—
+// shared by the `rgb()` and (aggressive-only) `hsl()` paths, so both land on
+// the same form and compare equal
+function formatChannels(channels, alpha) {
+  if (alpha === 1) return `#${channels.map(channel => channel.toString(16).padStart(2, '0')).join('')}`;
+  // Fully transparent black is what the `transparent` keyword is defined as
+  if (alpha === 0 && channels.every(channel => channel === 0)) return 'transparent';
+  return `rgba(${channels.join(',')},${alpha})`;
+}
+
 // Canonicalizes one `rgb()`/`rgba()` argument list—legacy comma and modern
 // space syntax alike (whitespace/comma/slash spacing has already been
 // normalized by the time this runs)—when the channels are plain 0–255
 // integers. Percentage or otherwise non-integer channels are left alone:
 // `50%` of 255 is 127.5, and how that rounds is the browser’s business, not
-// a textual equivalence.
-function canonicalizeRgb(args) {
+// a textual equivalence. Aggressive mode accepts the rounding and resolves
+// those channels, too (`Math.round`, matching what current browsers do).
+function canonicalizeRgb(args, aggressive) {
   const parts = args.trim().split(/[\s,/]+/);
   if (parts.length < 3 || parts.length > 4) return null;
 
-  const channels = parts.slice(0, 3).map(part => (/^\d{1,3}$/.test(part) ? Number(part) : null));
+  const channels = parts.slice(0, 3).map(part => {
+    if (/^\d{1,3}$/.test(part)) return Number(part);
+    if (!aggressive) return null;
+    const number = part.endsWith('%') ? (Number(part.slice(0, -1)) / 100) * 255 : Number(part);
+    if (!Number.isFinite(number)) return null;
+    return Math.round(Math.min(Math.max(number, 0), 255));
+  });
   if (channels.some(channel => channel === null || channel > 255)) return null;
 
-  let alpha = 1;
-  if (parts.length === 4) {
-    const raw = parts[3];
-    const number = raw.endsWith('%') ? Number(raw.slice(0, -1)) / 100 : Number(raw);
-    if (!Number.isFinite(number)) return null;
-    alpha = Math.min(Math.max(number, 0), 1);
-  }
+  const alpha = parts.length === 4 ? parseAlpha(parts[3]) : 1;
+  if (alpha === null) return null;
 
-  if (alpha === 1) return `#${channels.map(channel => channel.toString(16).padStart(2, '0')).join('')}`;
-  // Fully transparent black is what the `transparent` keyword is defined as
-  if (alpha === 0 && channels.every(channel => channel === 0)) return 'transparent';
-  return `rgba(${channels.join(',')},${alpha})`;
+  return formatChannels(channels, alpha);
+}
+
+// The CSS Color 4 HSL → RGB algorithm, rounded to 0–255 integer channels—
+// aggressive mode only, since that rounding is exactly the step safe mode
+// refuses to take on the browser’s behalf
+function hslToRgb(hue, saturation, lightness) {
+  const sat = saturation / 100;
+  const light = lightness / 100;
+  const k = n => (n + hue / 30) % 12;
+  const a = sat * Math.min(light, 1 - light);
+  const channel = n => light - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return [channel(0), channel(8), channel(4)].map(x => Math.round(x * 255));
+}
+
+// A hue is a plain angle; `deg` is the default unit
+function parseHue(raw) {
+  const match = /^(-?[\d.]+)(deg|grad|rad|turn)?$/.exec(raw);
+  if (!match) return null;
+  const number = Number(match[1]);
+  if (!Number.isFinite(number)) return null;
+  const unit = match[2] ?? 'deg';
+  const degrees = unit === 'deg' ? number
+    : unit === 'grad' ? number * 0.9
+    : unit === 'rad' ? number * (180 / Math.PI)
+    : number * 360;
+  return ((degrees % 360) + 360) % 360;
+}
+
+// Saturation/lightness are percentages (CSS Color 5 also allows the bare
+// number spelling of the same 0–100 scale)
+function parseHslComponent(raw) {
+  const number = Number(raw.endsWith('%') ? raw.slice(0, -1) : raw);
+  if (!Number.isFinite(number)) return null;
+  return Math.min(Math.max(number, 0), 100);
+}
+
+// Canonicalizes one `hsl()`/`hsla()` argument list onto the same form
+// `canonicalizeRgb()` produces, so `hsl(0 0% 100%)` meets `#fff` at
+// `#ffffff`—aggressive mode only (rounding-based equivalence)
+function canonicalizeHsl(args) {
+  const parts = args.trim().split(/[\s,/]+/);
+  if (parts.length < 3 || parts.length > 4) return null;
+
+  const hue = parseHue(parts[0]);
+  const saturation = parseHslComponent(parts[1]);
+  const lightness = parseHslComponent(parts[2]);
+  if (hue === null || saturation === null || lightness === null) return null;
+
+  const alpha = parts.length === 4 ? parseAlpha(parts[3]) : 1;
+  if (alpha === null) return null;
+
+  return formatChannels(hslToRgb(hue, saturation, lightness), alpha);
 }
 
 // Folds equivalent color spellings onto one canonical form for comparison:
@@ -92,10 +163,13 @@ function canonicalizeRgb(args) {
 // `rgba(0, 0, 0, 0)` meet at `transparent`. Expects the value to already be
 // lowercased with collapsed whitespace (so it must not run for
 // case-sensitive value properties, where `red` could be a counter or
-// keyframes name rather than a color).
-export function normalizeColors(value) {
-  return value
-    .replace(RE_RGB_FUNCTION, (match, args) => canonicalizeRgb(args) ?? match)
+// keyframes name rather than a color). Only lossless textual equivalences by
+// default; aggressive mode adds the rounding-based ones (`hsl()`, percentage
+// `rgb()` channels).
+export function normalizeColors(value, aggressive = false) {
+  let result = value.replace(RE_RGB_FUNCTION, (match, args) => canonicalizeRgb(args, aggressive) ?? match);
+  if (aggressive) result = result.replace(RE_HSL_FUNCTION, (match, args) => canonicalizeHsl(args) ?? match);
+  return result
     .replace(RE_NAMED_COLOR, name => `#${NAMED_COLORS[name]}`)
     .replace(RE_HEX_COLOR, (match, hex) => (
       [3, 4, 6, 8].includes(hex.length) ? `#${expandHex(hex)}` : match

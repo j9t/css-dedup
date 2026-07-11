@@ -6,7 +6,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { stripVTControlCharacters } from 'node:util';
 import { analyze, dedup } from '../src/index.js';
-import { splitSelectors, selectorsAreMutuallyExclusive } from '../src/selectors.js';
+import { splitSelectors, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint } from '../src/selectors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.join(__dirname, 'css-dedup.js');
@@ -38,7 +38,7 @@ describe('Selectors', () => {
   });
 });
 
-describe('selectorsAreMutuallyExclusive', () => {
+describe('Selectors—mutually exclusive', () => {
   test('Recognizes an exact-match attribute value difference as mutually exclusive', () => {
     assert.strictEqual(selectorsAreMutuallyExclusive('html[lang=\'da\'] a', 'html[lang=\'de\'] a'), true);
   });
@@ -116,6 +116,50 @@ describe('selectorsAreMutuallyExclusive', () => {
     // never be taken as proof of exclusivity
     assert.strictEqual(selectorsAreMutuallyExclusive('[data-x=a]', '[data-x=\\61]'), false);
     assert.strictEqual(selectorsAreMutuallyExclusive('[data-x=\\61]', '[data-x=b]'), true);
+  });
+});
+
+describe('Selector—likely disjoint', () => {
+  test('Assumes disjointness for subject compounds with no class in common', () => {
+    assert.strictEqual(selectorsLikelyDisjoint('.card', '.btn:hover'), true);
+  });
+
+  test('Does not assume disjointness when the subject compounds share a class', () => {
+    assert.strictEqual(selectorsLikelyDisjoint('.a', '.a.on'), false);
+    assert.strictEqual(selectorsLikelyDisjoint('.a', '.a:hover'), false);
+  });
+
+  test('Recognizes different type selectors as disjoint', () => {
+    assert.strictEqual(selectorsLikelyDisjoint('div', '.x span'), true);
+  });
+
+  test('Recognizes different IDs as disjoint', () => {
+    assert.strictEqual(selectorsLikelyDisjoint('#a', '#b'), true);
+  });
+
+  test('Does not compare across identity categories (a class tells nothing about a type)', () => {
+    assert.strictEqual(selectorsLikelyDisjoint('.a', 'div'), false);
+  });
+
+  test('Only the subject compound counts, not ancestor compounds', () => {
+    // Both selectors’ subjects are `p`—the differing ancestors don’t make
+    // them disjoint (the same `p` can sit inside both wrappers)
+    assert.strictEqual(selectorsLikelyDisjoint('.x p', '.y p'), false);
+  });
+
+  test('Bails out on selector-taking pseudo-classes in the subject compound', () => {
+    assert.strictEqual(selectorsLikelyDisjoint('.a', ':not(.a)'), false);
+    assert.strictEqual(selectorsLikelyDisjoint('.a', ':is(.b)'), false);
+  });
+
+  test('Bails out on escapes in the subject compound', () => {
+    assert.strictEqual(selectorsLikelyDisjoint('.a\\.b', '.c'), false);
+  });
+
+  test('Does not misread `.`/`#` inside attribute values as classes/IDs', () => {
+    // `[href$=".pdf"]` carries no class identity, so nothing proves it apart
+    // from `.pdf`
+    assert.strictEqual(selectorsLikelyDisjoint('[href$=".pdf"]', '.pdf'), false);
   });
 });
 
@@ -484,7 +528,7 @@ describe('Analysis', () => {
   });
 });
 
-describe('Dedup', () => {
+describe('Deduplication', () => {
   test('Merges a duplicate declaration into the selector list of the last rule', () => {
     const { css, applied, skipped } = dedup('.a { color: red; }\n.b { color: red; }\n');
     assert.strictEqual(applied.length, 1);
@@ -937,6 +981,98 @@ describe('Dedup', () => {
   });
 });
 
+describe('Aggressive mode', () => {
+  test('Treats `hsl()` and hex as equivalent (rounding-based)', () => {
+    const css = '.a { color: hsl(0 0% 100%); } .b { color: #fff; }';
+    assert.strictEqual(analyze(css).findings.length, 0);
+    const { findings } = analyze(css, { aggressive: true });
+    assert.strictEqual(findings.length, 1);
+    assert.strictEqual(findings[0].key, 'color: #ffffff');
+  });
+
+  test('Handles legacy comma `hsla()` and hue units', () => {
+    const { findings } = analyze('.a { color: hsla(0, 0%, 100%, 1); } .b { color: hsl(0deg 0% 100%); } .c { color: white; }', { aggressive: true });
+    assert.strictEqual(findings.length, 1);
+    assert.strictEqual(findings[0].occurrences.length, 3);
+  });
+
+  test('Treats percentage `rgb()` channels as equivalent (rounding-based)', () => {
+    const css = '.a { color: rgb(100%, 0%, 0%); } .b { color: #f00; }';
+    assert.strictEqual(analyze(css).findings.length, 0);
+    assert.strictEqual(analyze(css, { aggressive: true }).findings.length, 1);
+    // 50% of 255 is 127.5—rounds to 128 (`#80`), matching browser behavior
+    assert.strictEqual(analyze('.a { color: rgb(50% 50% 50%); } .b { color: #808080; }', { aggressive: true }).findings.length, 1);
+  });
+
+  test('Treats property aliases as equivalent (`word-wrap`/`overflow-wrap`, `grid-gap`/`gap`)', () => {
+    const css = '.a { word-wrap: break-word; } .b { overflow-wrap: break-word; }';
+    assert.strictEqual(analyze(css).findings.length, 0);
+    assert.strictEqual(analyze(css, { aggressive: true }).findings.length, 1);
+    assert.strictEqual(analyze('.a { grid-gap: 1rem; } .b { gap: 1rem; }', { aggressive: true }).findings.length, 1);
+  });
+
+  test('Merges a property-alias duplicate, keeping the last occurrence’s spelling', () => {
+    const { css: output } = dedup('.a { word-wrap: break-word; } .b { overflow-wrap: break-word; }', { aggressive: true });
+    assert.match(output, /\.a,\s*\.b\s*{\s*overflow-wrap: break-word;\s*}/);
+  });
+
+  test('Merges across two separately-written same-condition blocks, removing the emptied one', () => {
+    const css = '@media (min-width: 768px) { .a { color: red; } }\n@media (min-width: 768px) { .b { color: red; } }';
+    const { css: output, applied, skipped } = dedup(css, { aggressive: true });
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(output.match(/@media/g).length, 1);
+    assert.match(output, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+  });
+
+  test('Still honors an intervening rule inside the merged scope when merging across blocks', () => {
+    const css = '@media (min-width: 768px) { .a { color: red; } .btn { color: blue; } }\n@media (min-width: 768px) { .btn-primary { color: red; } }';
+    // `.btn` intervenes between the two occurrences after the blocks fold
+    // into one scope—and shares no class with `.a`/`.btn-primary`, so the
+    // likely-disjoint heuristic lets the merge through; make it share one
+    // and it must block
+    const merged = dedup(css, { aggressive: true });
+    assert.strictEqual(merged.skipped.length, 0);
+
+    const blocked = dedup(css.replace('.btn {', '.a.on {'), { aggressive: true });
+    assert.strictEqual(blocked.skipped.length, 1);
+  });
+
+  test('Keeps an emptied `@layer` shell (its first appearance sets layer order)', () => {
+    const css = '@layer a { .x { color: red; } }\n@layer b { .other { margin: 0; } }\n@layer a { .y { color: red; } }';
+    const { css: output, applied } = dedup(css, { aggressive: true });
+    assert.strictEqual(applied.length, 1);
+    // The first `@layer a` block drained, but its shell must survive
+    assert.strictEqual(output.match(/@layer a/g).length, 2);
+    assert.match(output, /\.x,\s*\.y\s*{\s*color: red;\s*}/);
+  });
+
+  test('Keeps a block that was already empty in the source', () => {
+    const css = '@media print {}\n.a { color: red; }';
+    const { css: output } = dedup(css, { aggressive: true });
+    assert.ok(output.includes('@media print {}'));
+  });
+
+  test('Merges past an intervening rule whose subject compound shares no class with the group’s', () => {
+    const css = '.a { color: red; } .b:hover { color: blue; } .c { color: red; }';
+    assert.strictEqual(dedup(css).skipped.length, 1);
+    const { css: output, skipped } = dedup(css, { aggressive: true });
+    assert.strictEqual(skipped.length, 0);
+    assert.match(output, /\.a,\s*\.c\s*{\s*color: red;\s*}/);
+  });
+
+  test('Still blocks on an intervening rule sharing a class with the group', () => {
+    const { skipped } = dedup('.a { color: red; } .a.on { color: blue; } .c { color: red; }', { aggressive: true });
+    assert.strictEqual(skipped.length, 1);
+  });
+
+  test('Does not merge across blocks with different conditions', () => {
+    const css = '@media (min-width: 768px) { .a { color: red; } }\n@media (min-width: 1024px) { .b { color: red; } }';
+    const { applied } = dedup(css, { aggressive: true });
+    assert.strictEqual(applied.length, 0);
+  });
+});
+
 describe('Fixtures', () => {
   test('basic.css reports the expected duplicate count', () => {
     const { stdout, status } = run([path.join(fixturesDir, 'basic.css')]);
@@ -993,7 +1129,7 @@ describe('Fixtures', () => {
     const summaryIndex = stdout.indexOf('Summary:');
     assert.ok(unsafeIndex !== -1 && summaryIndex !== -1);
     assert.ok(unsafeIndex < summaryIndex);
-    assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\.\s*$/);
+    assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\.\nWith `--fix --aggressive`: \d+ more consolidations?, saving \d+ bytes \(\d+\.\d%\) in total\.\s*$/);
   });
 
   test('merge-safety.css --fix consolidates the safe pair and skips the unsafe one', () => {
@@ -1036,6 +1172,53 @@ describe('Fixtures', () => {
   test('basic.css report mode suggests the byte savings from running `--fix`', () => {
     const { stdout } = run([path.join(fixturesDir, 'basic.css')]);
     assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\./);
+  });
+
+  test('aggressive.css reports nothing by default, but notes the `--aggressive` potential in parentheses', () => {
+    const { stdout, status } = run([path.join(fixturesDir, 'aggressive.css')]);
+    assert.strictEqual(status, 0);
+    assert.match(stdout, /No duplicate declarations found\. With `--aggressive`: 1 consolidation possible\./);
+  });
+
+  test('aggressive.css reports the duplicate with `--aggressive`', () => {
+    const { stdout, status } = run(['--aggressive', path.join(fixturesDir, 'aggressive.css')]);
+    assert.strictEqual(status, 1);
+    assert.ok(stdout.includes('duplicate   color: hsl(0 0% 100%)'));
+    assert.match(stdout, /Run with `--fix` to save \d+ bytes/);
+  });
+
+  test('aggressive.css --fix --aggressive merges across the blocks, drops the emptied one, and suggests testing', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_aggressive');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'aggressive.css');
+    fs.copyFileSync(path.join(fixturesDir, 'aggressive.css'), file);
+
+    try {
+      const { stdout } = run(['--fix', '--aggressive', file]);
+      assert.ok(stdout.includes('1 consolidated, 0 skipped'));
+      assert.match(stdout, /1 of these merges is aggressive-only—probably, but not provably, safe\. Review the diff and test the affected pages\./);
+
+      const output = fs.readFileSync(file, 'utf8');
+      assert.strictEqual(output.match(/@media/g).length, 1);
+      assert.match(output, /\.a,\s*\.b\s*{\s*color: #fff;\s*}/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('merge-safety.css --fix without `--aggressive` notes what a re-run with it would add', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_merge_safety_hint');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'merge-safety.css');
+    fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
+
+    try {
+      const { stdout } = run(['--fix', file]);
+      assert.match(stdout, /intervening `background` declaration in `\.y`.*\(may merge with `--aggressive`\)/);
+      assert.match(stdout, /\(Re-running with `--aggressive` would consolidate 1 more, saving another \d+ bytes\.\)/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
   });
 
   test('merge-safety.css -f consolidates the safe pair (short flag)', () => {
@@ -1290,5 +1473,27 @@ describe('CLI', () => {
   test('An absent `css-dedup.config.js` is silently ignored', () => {
     const { stdout } = run([path.join(fixturesDir, 'hacks.css')]);
     assert.ok(stdout.includes('No duplicate declarations found.'));
+  });
+
+  test('`-a` is the short flag for `--aggressive`', () => {
+    const { stdout, status } = run(['-a', path.join(fixturesDir, 'aggressive.css')]);
+    assert.strictEqual(status, 1);
+    assert.ok(stdout.includes('duplicate   color: hsl(0 0% 100%)'));
+  });
+
+  test('Loads `aggressive: true` from the config file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_config_aggressive');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { aggressive: true };\n');
+    const file = path.join(dirTemp, 'aliases.css');
+    fs.writeFileSync(file, '.a { word-wrap: break-word; }\n.b { overflow-wrap: break-word; }\n');
+
+    try {
+      const { stdout, status } = run([file], { cwd: dirTemp });
+      assert.strictEqual(status, 1);
+      assert.ok(stdout.includes('duplicate'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
   });
 });

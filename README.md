@@ -75,6 +75,7 @@ Pass one or more files—each is analyzed (and, with `--fix`, rewritten) indepen
 | Option | Description |
 | --- | --- |
 | `--fix`, `-f` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
+| `--aggressive`, `-a` | Also allow merges that are probably—but not provably—safe (see [aggressive mode](#aggressive-mode)); on its own this widens the report, with `--fix` it applies the merges |
 | `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
 | `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector-hack ignore list |
 | `--config <path>`, `-c <path>` | Path to a config file (defaults to `css-dedup.config.js` in the working directory, if present) |
@@ -88,13 +89,16 @@ A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS does
 
 ### Config File
 
-For settings that should apply on every run—typically a project’s own `ignoreSelectors`—drop a `css-dedup.config.js` in the working directory (or point `--config` at one elsewhere, under any name):
+For settings that should apply on every run—typically a project’s own `ignoreSelectors`—drop a `css-dedup.config.js` in the working directory (or point `--config` at one elsewhere, under any name).
+
+These are the supported options, shown with their defaults (each can be omitted):
 
 ```javascript
 // css-dedup.config.js
 export default {
-  ignoreSelectors: [/^\.legacy-/],
-  ignoreSelectorsDefaults: true
+  ignoreSelectors: [],            // additional selector patterns to exclude, e.g., [/^\.legacy-/]
+  ignoreSelectorsDefaults: true,  // set to `false` to disable the built-in hack list
+  aggressive: false               // set to `true` to also allow probably-safe merges
 };
 ```
 
@@ -118,6 +122,7 @@ Both functions accept an options object:
   from: 'path/to/file.css',         // used for source-map-style line numbers only
   ignoreSelectors: [/^\.legacy-/],  // additional selector patterns to exclude
   ignoreSelectorsDefaults: true,    // set to `false` to disable the built-in hack list
+  aggressive: false,                // set to `true` to also allow probably-safe merges
 }
 ```
 
@@ -164,7 +169,7 @@ CSS Dedup:
 2. …**scopes** rules by their DRY boundary—the root stylesheet, the contents of an `@media`/`@supports`/`@layer` condition, or one specific nested rule (native CSS nesting).
    - Declarations are only ever compared within the same scope: A rule’s own declarations are never compared against those of rules nested inside it, and rules in different `@layer`s (or different `@media`/`@supports` conditions) can’t share a merged rule.
    - For _reporting_, two blocks with the _same_ condition are the same scope even when written separately in the source (e.g., two `@media (min-width: 768px) {}` blocks in different parts of the file)—matching is whitespace-insensitive but case-sensitive, since `@layer` names and selectors can be case-significant.
-   - `--fix` is more conservative here: It only ever folds rules that already live in the same physical block, since merging across two separate blocks would relocate a declaration past whatever sits between those blocks in the source—including rules in an entirely different scope, which the merge-safety check (step 6) has no visibility into. A duplicate split across two same-condition blocks is therefore reported, not auto-merged.
+   - `--fix` is more conservative here: It only ever folds rules that already live in the same physical block, since merging across two separate blocks would relocate a declaration past whatever sits between those blocks in the source—including rules in an entirely different scope, which the merge-safety check (step 6) has no visibility into. A duplicate split across two same-condition blocks is therefore reported, not auto-merged (unless `--aggressive` is enabled—see [aggressive mode](#aggressive-mode)).
    - Statement-form at-rules with no block (`@layer reset, base;`) are skipped.
 
 3. …**excludes** selectors matching a hack pattern (vendor-prefixed pseudo-classes/elements, legacy IE selector hacks) from analysis by default—grouping those into a shared selector list risks the whole rule being dropped by browsers that don’t recognize the selector.
@@ -175,7 +180,7 @@ CSS Dedup:
    - Collapses whitespace, including just inside parentheses and around commas (`rgb( 255, 0, 0 )` matches `rgb(255,0,0)`), and folds value case—except for properties whose value is (or can contain) an author-defined custom ident (`animation-name`, `counter-reset`, `container-name`, and similar), since those are case-*sensitive* per CSS, unlike the predefined keywords everywhere else; `animation-name: Foo` and `animation-name: foo` can name two different `@keyframes` blocks, so folding them would risk a false duplicate.
    - Collapses zero-value length units (`0px`/`0svh`/`0cqw` → `0`)—angle/time/frequency/resolution units like `0deg`/`0s` are left alone, since unitless zero isn’t valid there. Zero percentages (`0%`) are collapsed to `0`, too, except for a short list of properties where a percentage can resolve against an indefinite reference size.
    - Collapses redundant decimal zeros (`.5`/`0.5`/`0.50` → `.5`, `1.0` → `1`), drops a redundant leading `+` sign (`+2px` → `2px`), and ignores whitespace around `/` separators (`12px/1.5` matches `12px / 1.5`).
-   - Canonicalizes equivalent color spellings: `white`, `#fff`, `#ffffff`, `#ffffffff`, `rgb(255, 255, 255)`, and `rgb(255 255 255)` all compare equal, as do `transparent` and `rgba(0, 0, 0, 0)`. Only lossless textual equivalences count—`hsl()` and percentage channels involve rounding, so they’re left alone.
+   - Canonicalizes equivalent color spellings: `white`, `#fff`, `#ffffff`, `#ffffffff`, `rgb(255, 255, 255)`, and `rgb(255 255 255)` all compare equal, as do `transparent` and `rgba(0, 0, 0, 0)`. Only lossless textual equivalences count—`hsl()` and percentage channels involve rounding, so they’re left alone (except in [aggressive mode](#aggressive-mode), which accepts the rounding).
    - Treats `font-weight: bold`/`700` and `normal`/`400` as equivalent (the longhand only—picking the weight out of the `font` shorthand would require parsing the value).
    - Collapses repeated shorthand values, following the omission rules in reverse: `margin: 0 0` matches `margin: 0`, `padding: 1px 2px 1px 2px` matches `1px 2px`, `border-radius: 1px/1px` matches `1px`, and two-value pairs like `gap`/`overflow`/`place-items` collapse the same way.
    - Treats the `border`/`outline` `none` and `0` values as equivalent.
@@ -190,14 +195,30 @@ CSS Dedup:
    - Then, a duplicate group spread across separate rules is merged by folding its selectors into the last occurrence—one line per selector if that’s already how the file writes multi-selector rules, comma-separated on one line otherwise.
    - Keeps whichever of the group’s equivalent raw spellings is shortest (e.g. `.5` over `0.50`)—CSS Dedup only picks among spellings already present in the source, so it doesn’t synthesize a shorter one, which would be a minifier’s job.
    - Removes the declaration from the other occurrences—but only if no other rule between the first and last occurrence also sets that property or a shorthand/longhand overlapping it (`margin` and `margin-left`, `border-color` and `border-top-color`, etc.), for any selector.
-   - One narrow exception to “any other rule”: If that rule’s selector is provably mutually exclusive with the group’s—right now, that only covers an exact-match attribute value on the same attribute, on what is provably the same element (`html[lang="da"] a` vs. `html[lang="de"] a`, since an attribute can only ever hold one value and `html` is unique per document)—it can’t actually match the same element, so it’s not a threat to this particular merge and doesn’t block it. “Provably the same element” means the differing attribute sits on the selector’s subject, is connected to it purely through `>`/`+` combinators, or sits on `html`/`:root`; across a descendant or `~` combinator, `.x[data-v="1"] p` and `.x[data-v="2"] p` can match the very same `p` (nested `.x` wrappers), so those don’t count as exclusive.
+   - One narrow exception to “any other rule”: If that rule’s selector is provably mutually exclusive with the group’s—right now, that only covers an exact-match attribute value on the same attribute, on what is provably the same element (`html[lang="da"] a` vs. `html[lang="de"] a`, since an attribute can only ever hold one value and `html` is unique per document)—it can’t actually match the same element, so it’s not a threat to this particular merge and doesn’t block it. ([Aggressive mode](#aggressive-mode) widens this exception to selectors that are merely *likely* disjoint.) “Provably the same element” means the differing attribute sits on the selector’s subject, is connected to it purely through `>`/`+` combinators, or sits on `html`/`:root`; across a descendant or `~` combinator, `.x[data-v="1"] p` and `.x[data-v="2"] p` can match the very same `p` (nested `.x` wrappers), so those don’t count as exclusive.
    - If a merged rule (including the last occurrence itself) also carries a declaration for an overlapping property, that declaration is split out into its own small rule—keeping that occurrence’s own, original selector—placed right after the merged rule, rather than blocking the merge outright: Folding every selector onto one shared declaration block would otherwise hand that overlapping extra to selectors that never had it. Exception: If that extra is itself duplicated elsewhere in the same scope, it’s left alone and the whole merge is skipped instead, since splitting it here would orphan that other duplicate’s own merge.
    - If something does block it, the merge is skipped and reported rather than risking a cascade change. A blocker fences, though—it doesn’t forbid: Occurrences on the same side of it still consolidate among themselves (their own spans are clean, so the same safety argument applies), and the group is reported as skipped either way, since the duplicate keeps existing across the blocker.
    - Consolidation runs to a fixed point: One merge can unblock or create another (a fresh merged rule may repeat an existing rule’s selector list, an emptied rule stops fencing a span), so the passes repeat until nothing changes.
 
 Overall, CSS Dedup is conservative by design and will leave some safe merges for manual review.
 
-`test/fixtures/*.css` contains small example stylesheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/css-dedup.js test/fixtures/<file>.css` (add `--fix` for `merge-safety.css`) to see them in action.
+`test/fixtures/*.css` contains small example stylesheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/css-dedup.js test/fixtures/<file>.css` (add `--fix` for `merge-safety.css`, and `--aggressive` for `aggressive.css`) to see them in action.
+
+### Aggressive Mode
+
+By default, CSS Dedup only consolidates what it can prove safe. `--aggressive` (`-a`) also allows merges that are _probably_ safe:
+
+* **Merging across separately-written same-condition blocks.** Two `@media (min-width: 768px)` blocks apply under the exact same runtime condition, so their duplicates consolidate—usually the biggest single lever on real files. The accepted risk: Rules from _other_ scopes sitting between the two blocks stay invisible to the intervening-rule safety check, so a merge could move a declaration past one that matters. A conditional block this empties (`@media`, `@supports`, `@container`) is removed; an emptied `@layer` shell is kept, since a layer’s first appearance sets the layer order.
+
+* **Assuming rules with disjoint-looking selectors don’t overlap.** An intervening rule whose subject compound shares no class, ID, or type with the group’s (e.g., `.btn:hover` between two `.card` occurrences) no longer blocks a merge. Almost always right with BEM-style class naming—but nothing stops one element from carrying both classes, which is why this isn’t provable. Anything the heuristic can’t read confidently (escapes, `:is()`/`:not()` and friends) still blocks.
+
+* **Rounding-based color equivalences.** `hsl(0 0% 100%)` ≡ `#fff`, and percentage `rgb()` channels (`rgb(100% 0% 0%)` ≡ `#f00`)—excluded by default because the equivalence goes through browser rounding rather than being purely textual.
+
+* **Property aliases.** `word-wrap`/`overflow-wrap` and `grid-gap`/`gap` (plus the row/column variants) are pure synonyms in current browsers, so their duplicates merge—keeping the last occurrence’s spelling, which changes the legacy-support surface (a browser old enough to know only `word-wrap` loses the declaration when `overflow-wrap` is the spelling kept).
+
+What aggressive mode deliberately does _not_ do: drop same-rule overrides with differing values (`color: red; color: oklch(…)`). That pattern is CSS’s fallback mechanism for progressive enhancement, and there is no way to tell an intentional fallback from an accident. (Overrides that are really the same color spelled two ways—`color: #fff; color: hsl(0 0% 100%)`—do collapse, via the color equivalence above.)
+
+`--aggressive` deliberately doesn’t imply `--fix`: The two flags are orthogonal—`--aggressive` sets how much risk to accept, `--fix` whether to write. On its own, `--aggressive` widens report mode (aggressive equivalences surface as findings, the savings estimate includes the aggressive merges), which is exactly the preview you want for the merges that carry risk; add `--fix` to apply them. Since these merges are not provable, review the diff and test the affected pages after an aggressive `--fix`—the CLI reminds you, counting how many of the merges actually rode on the flag. Conversely, without the flag, reports and `--fix` runs note in parentheses what `--aggressive` would add.
 
 ***
 

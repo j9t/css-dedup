@@ -13,6 +13,7 @@ const DIRS_IGNORED = new Set(['node_modules']);
 const { values, positionals } = parseArgs({
   options: {
     fix: { type: 'boolean', short: 'f', default: false },
+    aggressive: { type: 'boolean', short: 'a', default: false },
     'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
     'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
     config: { type: 'string', short: 'c' },
@@ -32,6 +33,7 @@ Arguments:
 
 Options:
   -f, --fix                        Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)
+  -a, --aggressive                 Also allow merges that are probably—but not provably—safe; on its own this widens the report, with \`--fix\` it applies the merges (test afterwards)
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -n, --no-ignore-selectors-defaults  Disable the built-in selector-hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
   -c, --config <path>              Path to a config file (defaults to \`css-dedup.config.js\` in the working directory, if present)
@@ -186,10 +188,39 @@ async function processTarget(file, options, { multi }) {
   }
 }
 
+// What `--aggressive` would add, computed by a second, discarded
+// consolidation pass with the flag set—“null” when the run already is
+// aggressive and there is nothing further to preview
+function aggressivePotential(css, targetOptions) {
+  return targetOptions.aggressive ? null : dedup(css, { ...targetOptions, aggressive: true });
+}
+
+// Decorates a skipped-group line when the group would (likely) merge with
+// `--aggressive`—matched by scope and key, which aggressive normalization
+// can alter, so a missing hint is possible where the merge would still
+// happen (never the other way around: the hint only appears when the
+// aggressive pass really didn’t skip the group)
+function aggressiveHint(item, potential) {
+  if (!potential) return '';
+  const stillSkipped = potential.skipped.some(candidate => candidate.scope === item.scope && candidate.key === item.key);
+  return stillSkipped ? '' : ` (may merge with \`--aggressive\`)`;
+}
+
 async function processCss(css, targetOptions, { isStdin, label }) {
+  const potential = aggressivePotential(css, targetOptions);
+
   if (values.fix) {
     const { css: output, applied, skipped, bytes } = dedup(css, targetOptions);
     const log = isStdin ? console.error : console.log;
+
+    // The aggressive-only share of an aggressive run’s merges—measured
+    // against a discarded default-mode pass, so the test-your-pages advice
+    // below only appears when something actually rode on the flag
+    let aggressiveOnly = 0;
+    if (targetOptions.aggressive && applied.length) {
+      const baseline = dedup(css, { ...targetOptions, aggressive: false });
+      aggressiveOnly = applied.length - baseline.applied.length;
+    }
 
     // STDOUT must always carry the complete stylesheet for STDIN input—
     // even with nothing consolidated, a pipeline consuming it would
@@ -203,7 +234,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     const skippedNote = skipped.length ? ' (considered unsafe to auto-merge)' : '';
     log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
     for (const item of skipped) {
-      log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
+      log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}${aggressiveHint(item, potential)}`);
     }
     if (applied.length) {
       log(`\n${formatBytesSummary(bytes)}`);
@@ -212,6 +243,15 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       }
       if (!isStdin) log(`Wrote ${label}`);
     }
+    if (potential && potential.applied.length > applied.length) {
+      const extra = potential.applied.length - applied.length;
+      const extraSaved = bytes.after - potential.bytes.after;
+      const savings = extraSaved > 0 ? `, saving another ${extraSaved.toLocaleString()} bytes` : '';
+      log(`(Re-running with \`--aggressive\` would consolidate ${extra} more${savings}.)`);
+    }
+    if (aggressiveOnly > 0) {
+      log(styleText('yellow', `${aggressiveOnly} of these merges ${aggressiveOnly !== 1 ? 'are' : 'is'} aggressive-only—probably, but not provably, safe. Review the diff and test the affected pages.`));
+    }
 
     return skipped.length > 0;
   }
@@ -219,7 +259,10 @@ async function processCss(css, targetOptions, { isStdin, label }) {
   const { findings } = analyze(css, targetOptions);
 
   if (!findings.length) {
-    console.log('No duplicate declarations found.');
+    const note = potential?.applied.length
+      ? ` With \`--aggressive\`: ${potential.applied.length} consolidation${potential.applied.length !== 1 ? 's' : ''} possible.`
+      : '';
+    console.log(`No duplicate declarations found.${note}`);
     return false;
   }
 
@@ -236,7 +279,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
   if (skipped.length) {
     console.log(styleText('yellow', `${skipped.length} duplicate group${skipped.length !== 1 ? 's' : ''} considered unsafe to auto-merge:`));
     for (const item of skipped) {
-      console.log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
+      console.log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}${aggressiveHint(item, potential)}`);
     }
     console.log('');
   }
@@ -252,6 +295,13 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       console.log(styleText('yellow', `Running \`--fix\` here would make the file ${formatGrowth(bytes)} bigger, not smaller (worth it for maintainability but not for transfer size).`));
     }
   }
+  if (potential && potential.applied.length > applied.length) {
+    const extra = potential.applied.length - applied.length;
+    const totals = potential.bytes.saved > 0
+      ? `, saving ${potential.bytes.saved.toLocaleString()} bytes (${(potential.bytes.before ? (potential.bytes.saved / potential.bytes.before) * 100 : 0).toFixed(1)}%) in total`
+      : '';
+    console.log(`With \`--fix --aggressive\`: ${extra} more consolidation${extra !== 1 ? 's' : ''}${totals}.`);
+  }
 
   return true;
 }
@@ -264,6 +314,7 @@ async function main() {
       ...values['ignore-selector'].map(pattern => new RegExp(pattern, 'i')),
     ],
     ignoreSelectorsDefaults: values['no-ignore-selectors-defaults'] ? false : (config.ignoreSelectorsDefaults ?? true),
+    aggressive: values.aggressive || (config.aggressive ?? false),
   };
 
   const files = await expandTargets(positionals);

@@ -530,6 +530,33 @@ describe('Dedup', () => {
     assert.strictEqual(skipped.length, 1);
   });
 
+  test('Consolidates to a fixed point (a merge that creates a twin gets folded in the same run)', () => {
+    // The `color` merge turns `.b` into an `.a, .b` rule—which then
+    // repeats the existing `.a, .b` selector, so a second pass folds the
+    // two rules into one
+    const { css, applied, skipped } = dedup('.a { color: red; }\n.b { color: red; }\n.a, .b { margin: 0; }\n');
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a, .b { color: red; margin: 0; }\n');
+  });
+
+  test('Merges the safe sub-runs of a group an intervening rule splits, still reporting the split', () => {
+    const input = '.a { color: red; }\n.b { color: red; }\n.mid { color: blue; }\n.c { color: red; }\n.d { color: red; }\n';
+    const { css, applied, skipped } = dedup(input);
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(skipped.length, 1);
+    assert.match(skipped[0].reason, /intervening `color` declaration in `\.mid`/);
+    assert.strictEqual(css, '.a, .b { color: red; }\n.mid { color: blue; }\n.c, .d { color: red; }\n');
+  });
+
+  test('Merges a safe sub-run even when another occurrence stays alone on the blocker’s far side', () => {
+    const input = '.a { color: red; }\n.mid { color: blue; }\n.b { color: red; }\n.c { color: red; }\n';
+    const { css, applied, skipped } = dedup(input);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 1);
+    assert.strictEqual(css, '.a { color: red; }\n.mid { color: blue; }\n.b, .c { color: red; }\n');
+  });
+
   test('Merges past an intervening rule whose selector is provably mutually exclusive with the group’s', () => {
     const input = 'html[lang=\'da\'] p { content: \'A\'; }\nhtml[lang=\'de\'] p { content: \'B\'; }\nhtml[lang=\'id\'] p { content: \'A\'; }\n';
     const { css, applied, skipped } = dedup(input);
@@ -716,12 +743,24 @@ describe('Dedup', () => {
     assert.strictEqual(css, '.a, .b { font-weight: bold; color: red; }\n');
   });
 
-  test('Skips twin rules when one carries an extra declaration (it would leak to the other’s selector)', () => {
-    const input = '.a { margin: 0; color: red; padding: 1px; }\n.b { margin: 0; color: red; }\n';
-    const { css, applied, skipped } = dedup(input);
-    assert.strictEqual(applied.length, 0);
-    assert.strictEqual(skipped.length, 2);
-    assert.strictEqual(css, input);
+  test('Merges entangled rules whose extra declaration overlaps no shared property, leaving the extra behind', () => {
+    // The two per-group merged rules repeat the same `.a, .b` selector, so
+    // a later fixed-point pass folds them into one rule
+    const { css, applied, skipped } = dedup('.a { margin: 0; color: red; padding: 1px; }\n.b { margin: 0; color: red; }\n');
+    assert.strictEqual(applied.length, 3);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a { padding: 1px; }\n.a, .b { color: red; margin: 0; }\n');
+  });
+
+  test('Resolves an entangled group fenced by an overlapping extra across fixed-point passes', () => {
+    // Pass one merges `color` (crossing no color-family declaration);
+    // that disentangles `margin`, whose solo merge then splits `.a`’s
+    // trailing `margin-left` into a residual that keeps winning for `.a`
+    const { css, applied, skipped } = dedup('.a { margin: 0; color: red; margin-left: 1px; }\n.b { margin: 0; color: red; }\n');
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(skipped.length, 1);
+    assert.match(skipped[0].reason, /same selector written again/);
+    assert.strictEqual(css, '.a, .b { margin: 0; }\n.a { margin-left: 1px; }\n.a, .b { color: red; }\n');
   });
 
   test('Skips a cluster with two candidate hubs (two rules holding every group’s shared declaration)', () => {
@@ -737,17 +776,28 @@ describe('Dedup', () => {
     assert.strictEqual(css, input);
   });
 
-  test('Falls back to skipping every group in a cluster with no single rule connecting them all', () => {
+  test('Merges a chain of entangled groups whose properties don’t overlap, one merged rule per group', () => {
     // `.a` entangles the `color` and `margin` groups; `.c` entangles the
-    // `margin` and `border` groups—but no single rule is a member of all
-    // three groups, so there’s no one-hub position that could satisfy
-    // every pairwise ordering constraint at once
+    // `margin` and `border` groups. No single hub connects all three—but
+    // since no two of the properties overlap, there are no ordering
+    // constraints, and each group gets its own merged rule at its last
+    // occurrence.
     const input = '.a { color: red; margin: 0; }\n.b { color: red; }\n.c { margin: 0; border: none; }\n.d { border: none; }\n';
     const { applied, skipped, css } = dedup(input);
-    assert.strictEqual(applied.length, 0);
-    assert.strictEqual(skipped.length, 3);
-    assert.ok(skipped.every(item => /entangled/.test(item.reason)));
-    assert.strictEqual(css, input);
+    assert.strictEqual(applied.length, 3);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a, .b { color: red; }\n.a, .c { margin: 0; }\n.c, .d { border: none; }\n');
+  });
+
+  test('Resolves an overlap-constrained entangled chain across fixed-point passes', () => {
+    // Pass one can only merge `margin-top` (the others are fenced by
+    // overlaps)—but that turns `.a` into the cluster’s single hub, so the
+    // next pass splits it per key, preserving `.a`’s own declaration order
+    const input = '.a { margin: 0; margin-left: 5px; }\n.b { margin: 0; }\n.c { margin-left: 5px; margin-top: 1px; }\n.d { margin-top: 1px; }\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 3);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.a, .b { margin: 0; }\n.a, .c { margin-left: 5px; }\n.c, .d { margin-top: 1px; }\n');
   });
 
   test('Places a target’s pre-shared extra in a residual before the merge, preserving its original within-rule order', () => {

@@ -411,20 +411,9 @@ export function dedupRoot(root, options = {}) {
   const before = Buffer.byteLength(root.toString(), 'utf8');
 
   const ignorePatterns = resolveIgnorePatterns(options);
-  const scopes = collectScopes(root);
   const multilineSelectors = usesMultilineSelectors(root);
   const applied = [];
   const skipped = [];
-
-  for (const scope of scopes) {
-    for (const rule of eligibleRules(scope, ignorePatterns)) {
-      applied.push(...removeRedundantDuplicates(rule, scope.label, splitSelectors(rule.selector)));
-    }
-  }
-
-  for (const atrule of collectDeclOnlyContainers(root)) {
-    applied.push(...removeRedundantDuplicates(atrule, describeScope(atrule), [atRuleLabel(atrule)]));
-  }
 
   // Folds rules repeating the same selector (list) within one scope into
   // the last of them—`.a { color: red; } … .a { margin: 0; }` becomes one
@@ -441,7 +430,7 @@ export function dedupRoot(root, options = {}) {
   // move. Runs before the declaration merges below, so a duplicate the fold
   // brings into one rule is collapsed right here rather than ever forming a
   // cross-rule group.
-  for (const scope of scopes) {
+  function foldSameSelectorRules(scope) {
     const bySelector = new Map();
     for (const rule of eligibleRules(scope, ignorePatterns)) {
       const key = selectorSetKey(rule);
@@ -610,6 +599,49 @@ export function dedupRoot(root, options = {}) {
     applied.push({ scope: scope.label, key, selectors: mergedSelectors, value: shortestValue });
   }
 
+  // A blocker fences a group, it doesn’t forbid it: The occurrences on one
+  // side of the blocking rule can still merge among themselves, since that
+  // merge only relocates declarations within a span of their own that the
+  // safety check clears. Each maximal run of consecutive occurrences with
+  // clean spans between neighbors merges like a small group in its own
+  // right (clean neighbor spans compose—the member between two clean spans
+  // is part of the merge itself). The group as a whole is still reported as
+  // skipped, since the duplicate keeps existing across the blocker.
+  //
+  // Only for solo groups: In a multi-group cluster, a partial merge could
+  // relocate a shared rule’s selector out from under the other groups, so
+  // a blocked cluster stays untouched as a whole.
+  function mergePartialGroup(scope, group, reason) {
+    const { key, occurrences, distinctRules, propNormalized } = group;
+    const exempt = new Set(distinctRules);
+
+    const runs = [[distinctRules[0]]];
+    for (let i = 1; i < distinctRules.length; i++) {
+      const previousIndex = scope.rules.indexOf(distinctRules[i - 1]);
+      const nextIndex = scope.rules.indexOf(distinctRules[i]);
+      if (findBlockingRule(scope, distinctRules, exempt, previousIndex, nextIndex, propNormalized)) {
+        runs.push([]);
+      }
+      runs.at(-1).push(distinctRules[i]);
+    }
+
+    for (const runRules of runs) {
+      if (runRules.length < 2) continue;
+      const runSet = new Set(runRules);
+      mergeSoloGroup(scope, {
+        key,
+        occurrences: occurrences.filter(occ => runSet.has(occ.rule)),
+        distinctRules: runRules,
+        propNormalized,
+      });
+    }
+
+    // Whatever merged above resurfaces as a smaller group on the next
+    // fixed-point pass; this entry only survives from the final, quiescent
+    // pass, where it describes exactly what remains split and why
+    skipped.push({ scope: scope.label, key, reason });
+  }
+
   // Twin rules are the copy-paste pattern: Two or more rules that all carry
   // exactly the same set of shared declarations (`.a { margin: 0; color:
   // red; } .b { margin: 0; color: red; }`). As a cluster they have several
@@ -678,6 +710,87 @@ export function dedupRoot(root, options = {}) {
     return true;
   }
 
+  // For a group inside a cluster that can’t merge as a whole—blocked by an
+  // outside rule, or shaped so no coordinated order exists—safe sub-runs of
+  // its occurrences can still consolidate, under a stricter recipe than a
+  // solo group’s, since fellow cluster rules must stay intact:
+  //
+  //   - The merged rule is a fresh one, inserted right after the run’s last
+  //     member—no member’s selector is ever mutated, so entanglement can’t
+  //     leak one group’s selectors into another’s.
+  //   - Runs are fenced by any rule carrying an overlapping declaration,
+  //     including fellow cluster members, which stay behind and remain part
+  //     of the cascade (only the run’s own members are being absorbed).
+  //   - A member whose own trailing declarations overlap the key is refused
+  //     outright—relocating the key past its own tail would flip which
+  //     wins. (The solo path splits such extras into residuals instead—
+  //     here they may belong to other groups and must not move.) Skipping
+  //     it still fences the runs around it, since its tail declaration is
+  //     an intervening overlap like any other.
+  function mergeClusterGroupRuns(scope, group) {
+    const { key, occurrences, distinctRules, propNormalized } = group;
+
+    const viable = rule => {
+      const declIndex = rule.nodes.indexOf(occurrences.find(occ => occ.rule === rule).decl);
+      return !rule.nodes.some((node, index) => (
+        index > declIndex && node.type === 'decl' && propertiesOverlap(normalizeProp(node.prop), propNormalized)
+      ));
+    };
+
+    const runs = [[]];
+    for (const rule of distinctRules) {
+      if (!viable(rule)) {
+        runs.push([]);
+        continue;
+      }
+      const run = runs.at(-1);
+      if (run.length) {
+        const previousIndex = scope.rules.indexOf(run.at(-1));
+        const nextIndex = scope.rules.indexOf(rule);
+        if (findBlockingRule(scope, distinctRules, new Set(), previousIndex, nextIndex, propNormalized)) {
+          runs.push([rule]);
+          continue;
+        }
+      }
+      run.push(rule);
+    }
+
+    for (const runRules of runs) {
+      if (runRules.length < 2) continue;
+      const lastRule = runRules.at(-1);
+      const runOccurrences = occurrences.filter(occ => runRules.includes(occ.rule));
+
+      const mergedSelectors = [];
+      for (const rule of runRules) {
+        for (const selector of splitSelectors(rule.selector)) {
+          if (!mergedSelectors.includes(selector)) mergedSelectors.push(selector);
+        }
+      }
+
+      const shortestValue = runOccurrences.reduce((shortest, occ) => (
+        occ.decl.value.length < shortest.length ? occ.decl.value : shortest
+      ), runOccurrences[0].decl.value);
+
+      const mergedRule = lastRule.clone({ nodes: [] });
+      mergedRule.selector = joinSelectors(mergedSelectors, lastRule, multilineSelectors);
+      const lastDecl = runOccurrences.find(occ => occ.rule === lastRule).decl;
+      lastDecl.remove();
+      if (lastDecl.value !== shortestValue) lastDecl.value = shortestValue;
+      mergedRule.append(lastDecl);
+      lastRule.after(mergedRule);
+      scope.rules.splice(scope.rules.indexOf(lastRule) + 1, 0, mergedRule);
+
+      for (const rule of runRules) {
+        if (rule === lastRule) continue;
+        runOccurrences.find(occ => occ.rule === rule).decl.remove();
+        if (rule.nodes.length === 0) rule.remove();
+      }
+      if (lastRule.nodes.length === 0) lastRule.remove();
+
+      applied.push({ scope: scope.label, key, selectors: mergedSelectors, value: shortestValue });
+    }
+  }
+
   // A cluster is two or more duplicate-key groups that share a rule—one
   // rule holding declarations for more than one of the group’s keys.
   // That’s unsafe to merge independently, key by key: Whichever key’s merge
@@ -697,8 +810,10 @@ export function dedupRoot(root, options = {}) {
   //
   // Any other topology—a chain with no single shared rule, multiple
   // candidate hubs—has no single anchor position that could satisfy every
-  // pairwise ordering constraint at once, so every group in the cluster is
-  // left untouched instead.
+  // pairwise ordering constraint at once. `mergeTwinRules()` still handles
+  // the identical-rules shape; whatever remains falls back to
+  // `mergeClusterGroupRuns()`, which consolidates each group’s safe
+  // sub-runs individually and reports the rest.
   function mergeCluster(scope, cluster) {
     const ruleKeyCounts = new Map();
     for (const group of cluster) {
@@ -729,6 +844,7 @@ export function dedupRoot(root, options = {}) {
       if (mergeTwinRules(scope, cluster, ruleKeyCounts)) return;
 
       for (const group of cluster) {
+        mergeClusterGroupRuns(scope, group);
         skipped.push({
           scope: scope.label,
           key: group.key,
@@ -854,7 +970,7 @@ export function dedupRoot(root, options = {}) {
     scope.rules.splice(hubIndex, 1, ...finalRules);
   }
 
-  for (const scope of scopes) {
+  function mergeDuplicateGroups(scope) {
     const rules = eligibleRules(scope, ignorePatterns);
     const byKey = new Map();
 
@@ -916,10 +1032,11 @@ export function dedupRoot(root, options = {}) {
     // stood before any of this scope’s merges start—but exempts every rule
     // in the cluster, not just this one group’s own two members, since a
     // fellow cluster member is being absorbed into the same coordinated
-    // merge rather than staying behind. If a genuine outsider blocks any
-    // one group in a multi-group cluster, the whole cluster is left
-    // untouched, rather than trying to salvage a partial merge around the
-    // blocked piece.
+    // merge rather than staying behind. A blocked solo group still gets its
+    // safe sub-runs merged (see `mergePartialGroup()`); a blocked
+    // multi-group cluster falls back to per-group sub-run merges (see
+    // `mergeClusterGroupRuns()`), which never touch a fellow member’s
+    // selector and so can’t leak anything between the groups.
     for (const cluster of clusters.values()) {
       const clusterRules = new Set(cluster.flatMap(group => group.distinctRules));
       let outsideBlocker = null;
@@ -935,7 +1052,14 @@ export function dedupRoot(root, options = {}) {
         const { group, blocking } = outsideBlocker;
         const propDescription = blocking.prop === group.propNormalized ? `\`${group.propNormalized}\`` : `overlapping \`${blocking.prop}\``;
         const reason = `intervening ${propDescription} declaration in \`${blocking.rule.selector}\` (line ${blocking.rule.source?.start?.line})`;
+
+        if (cluster.length === 1) {
+          mergePartialGroup(scope, group, reason);
+          continue;
+        }
+
         for (const member of cluster) {
+          mergeClusterGroupRuns(scope, member);
           skipped.push({
             scope: scope.label,
             key: member.key,
@@ -948,6 +1072,30 @@ export function dedupRoot(root, options = {}) {
       if (cluster.length === 1) mergeSoloGroup(scope, cluster[0]);
       else mergeCluster(scope, cluster);
     }
+  }
+
+  // One merge can unblock or create another: A fresh merged rule may twin
+  // with an existing rule, and an emptied rule stops fencing the spans it
+  // sat in—so the passes repeat until nothing changes. Termination is
+  // guaranteed, since every productive pass strictly reduces the number of
+  // declarations or rules. `skipped` is rebuilt each pass, so it describes
+  // what remains at the end, not intermediate states.
+  let appliedCount = -1;
+  while (applied.length !== appliedCount) {
+    appliedCount = applied.length;
+    skipped.length = 0;
+
+    const scopes = collectScopes(root);
+    for (const scope of scopes) {
+      for (const rule of eligibleRules(scope, ignorePatterns)) {
+        applied.push(...removeRedundantDuplicates(rule, scope.label, splitSelectors(rule.selector)));
+      }
+    }
+    for (const atrule of collectDeclOnlyContainers(root)) {
+      applied.push(...removeRedundantDuplicates(atrule, describeScope(atrule), [atRuleLabel(atrule)]));
+    }
+    for (const scope of scopes) foldSameSelectorRules(scope);
+    for (const scope of scopes) mergeDuplicateGroups(scope);
   }
 
   const after = Buffer.byteLength(root.toString(), 'utf8');

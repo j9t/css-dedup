@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/css-dedup.svg)](https://www.npmjs.com/package/css-dedup) [![Build status](https://github.com/j9t/css-dedup/workflows/Tests/badge.svg)](https://github.com/j9t/css-dedup/actions) [![Socket](https://badge.socket.dev/npm/package/css-dedup)](https://socket.dev/npm/package/css-dedup) [![GitHub Sponsors](https://badgen.net/static/Support/Open%20Source/cyan)](https://github.com/j9t/css-dedup?sponsor=1)
 
-CSS Dedup is a CSS maintainability and performance optimization tool that finds—and, when requested and where safe, consolidates—duplicate CSS declarations. It implements the technique of [“using declarations just once” (UDJO)](https://webglossary.info/terms/udjo/) as originally described in [“DRY CSS”](https://meiert.com/blog/dry-css/) (cf. [_CSS Optimization Basics_](https://meiert.com/blog/css-optimization-basics/)): the same normalized property–value pair shouldn’t appear in more than one rule within the same scope. Where it does, CSS Dedup reports it—and allows to optimize the respective style sheet.
+CSS Dedup is a CSS maintainability and performance optimization tool that finds—and, when requested and where safe, consolidates—duplicate CSS declarations. It implements the technique of [using declarations just once (“UDJO”)](https://webglossary.info/terms/udjo/) as originally described in [“DRY CSS”](https://meiert.com/blog/dry-css/) (cf. [_CSS Optimization Basics_](https://meiert.com/blog/css-optimization-basics/)): the same normalized property–value pair shouldn’t appear in more than one rule within the same scope. Where it does, CSS Dedup reports it—and allows to optimize the respective style sheet.
 
 ## Example Optimization
 

@@ -901,6 +901,15 @@ describe('Fixtures', () => {
     assert.match(stdout, /background: #ffffff — intervening `background` declaration in `\.y`/);
   });
 
+  test('merge-safety.css report mode closes with the summary and `--dedup` payoff, after the unsafe-group details', () => {
+    const { stdout } = run([path.join(fixturesDir, 'merge-safety.css')]);
+    const unsafeIndex = stdout.indexOf('unsafe to auto-merge');
+    const summaryIndex = stdout.indexOf('Summary:');
+    assert.ok(unsafeIndex !== -1 && summaryIndex !== -1);
+    assert.ok(unsafeIndex < summaryIndex);
+    assert.match(stdout, /Run with `--dedup` to save \d+ bytes \(\d+\.\d%\)\.\s*$/);
+  });
+
   test('merge-safety.css --dedup consolidates the safe pair and skips the unsafe one', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_merge_safety');
     fs.mkdirSync(dirTemp, { recursive: true });
@@ -1031,6 +1040,8 @@ describe('CLI', () => {
       assert.ok(stdout.includes(fileA));
       assert.ok(stdout.includes(fileB));
       assert.ok(stdout.includes('No duplicate declarations found.'));
+      // Two blank lines separate one file’s report from the next header
+      assert.ok(stdout.includes(`\n\n\n${fileB}`));
       assert.strictEqual(status, 1);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });

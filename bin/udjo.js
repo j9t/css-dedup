@@ -225,19 +225,10 @@ async function processCss(css, targetOptions, { isStdin, label }) {
   }
 
   printFindings(findings);
-  console.log(`${styleText('bold', 'Summary:')} ${findings.length} finding${findings.length !== 1 ? 's' : ''}`);
 
   // A dry-run consolidation, purely to report the payoff—same safety rules
   // as `--dedup`, just discarded instead of written
   const { applied, skipped, bytes } = dedup(css, targetOptions);
-  if (applied.length) {
-    if (bytes.saved > 0) {
-      const percent = bytes.before ? (bytes.saved / bytes.before) * 100 : 0;
-      console.log(`Run with \`--dedup\` to save ${bytes.saved.toLocaleString()} bytes (${percent.toFixed(1)}%).`);
-    } else if (bytes.saved < 0) {
-      console.log(styleText('yellow', `Running \`--dedup\` here would make the file ${formatGrowth(bytes)} bigger, not smaller (worth it for maintainability but not for transfer size).`));
-    }
-  }
 
   // Findings above don't distinguish safe from unsafe—without this, a
   // duplicate group that `--dedup` would just skip (see its own safety
@@ -247,6 +238,19 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     console.log(styleText('yellow', `${skipped.length} duplicate group${skipped.length !== 1 ? 's' : ''} considered unsafe to auto-merge:`));
     for (const item of skipped) {
       console.log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
+    }
+    console.log('');
+  }
+
+  // Summary and `--dedup` payoff close each stylesheet’s report, so with
+  // several files it’s unambiguous which file they refer to
+  console.log(`${styleText('bold', 'Summary:')} ${findings.length} finding${findings.length !== 1 ? 's' : ''}`);
+  if (applied.length) {
+    if (bytes.saved > 0) {
+      const percent = bytes.before ? (bytes.saved / bytes.before) * 100 : 0;
+      console.log(`Run with \`--dedup\` to save ${bytes.saved.toLocaleString()} bytes (${percent.toFixed(1)}%).`);
+    } else if (bytes.saved < 0) {
+      console.log(styleText('yellow', `Running \`--dedup\` here would make the file ${formatGrowth(bytes)} bigger, not smaller (worth it for maintainability but not for transfer size).`));
     }
   }
 
@@ -273,7 +277,9 @@ async function main() {
   let failed = false;
 
   for (const [index, file] of files.entries()) {
-    if (multi && index > 0) console.log('');
+    // Two blank lines between per-file reports, so each file’s closing
+    // summary is visually separated from the next file’s header
+    if (multi && index > 0) console.log('\n');
     if (await processTarget(file, options, { multi })) failed = true;
   }
 

@@ -6,7 +6,7 @@
   "dependencies": {
     "postcss": "^8.5.16"
   },
-  "description": "CSS refactoring tool that consolidates duplicate declarations (DRY CSS / UDJO)",
+  "description": "CSS declaration de-duplicator for maintainability and performance optimization",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.6.0",
@@ -28,9 +28,11 @@
   "homepage": "https://github.com/j9t/udjo",
   "keywords": [
     "css",
+    "deduplication",
     "dry",
-    "duplicate",
+    "maintainability",
     "optimization",
+    "performance",
     "quality",
     "refactoring",
     "udjo"

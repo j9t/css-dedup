@@ -214,6 +214,61 @@ describe('Analysis', () => {
     assert.strictEqual(findings.length, 0);
   });
 
+  test('Treats equivalent `s`/`ms` time values as duplicates, unconditionally', () => {
+    assert.strictEqual(analyze('.a { transition-duration: 0.3s; } .b { transition-duration: 300ms; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { transition-delay: 0s; } .b { transition-delay: 0ms; }').findings.length, 1);
+    // A value that loses precision under naive `parseFloat(x) * 1000`
+    // (`1.005 * 1000 === 1004.9999999999999` in IEEE 754) must still compare
+    // exactly equal to its millisecond spelling
+    assert.strictEqual(analyze('.a { transition-duration: 1.005s; } .b { transition-duration: 1005ms; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { animation-duration: 1s; } .b { animation-duration: 2s; }').findings.length, 0);
+  });
+
+  test('Normalizes time units inside the `animation`/`transition` shorthand without touching the case-sensitive animation name', () => {
+    const { findings } = analyze('.a { animation: Spin 2s linear infinite; } .b { animation: Spin 2000ms linear infinite; }');
+    assert.strictEqual(findings.length, 1);
+    // A differently-cased animation name must still be treated as distinct
+    assert.strictEqual(analyze('.a { animation: Spin 2s linear; } .b { animation: spin 2000ms linear; }').findings.length, 0);
+  });
+
+  test('Sorts `min()`/`max()` arguments, since mathematical min/max is commutative', () => {
+    assert.strictEqual(analyze('.a { width: min(100%, 500px); } .b { width: min(500px, 100%); }').findings.length, 1);
+    assert.strictEqual(analyze('.a { width: max(1em, 2em); } .b { width: max(2em, 1em); }').findings.length, 1);
+    // Different raw spellings of the same argument value still land in the
+    // same sort position, since the sort runs after decimal normalization
+    assert.strictEqual(analyze('.a { width: min(0.50, 10px); } .b { width: min(10px, .5); }').findings.length, 1);
+  });
+
+  test('Does not reorder `clamp()` arguments (positional: minimum, preferred, maximum)', () => {
+    const { findings } = analyze('.a { width: clamp(1px, 50%, 500px); } .b { width: clamp(500px, 50%, 1px); }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Does not reorder `minmax()` arguments (positional grid track sizing, not the `min()` function)', () => {
+    const { findings } = analyze('.a { grid-template-columns: minmax(100px, 1fr); } .b { grid-template-columns: minmax(1fr, 100px); }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Sorts arguments of a `min()`/`max()` call nested inside another', () => {
+    const { findings } = analyze('.a { width: min(max(1px, 2px), 3px); } .b { width: min(3px, max(2px, 1px)); }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Does not treat angle units as equivalent by default (aggressive-only)', () => {
+    const { findings } = analyze('.a { transform: rotate(90deg); } .b { transform: rotate(0.25turn); }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Treats equivalent angle units as duplicates in aggressive mode', () => {
+    assert.strictEqual(analyze('.a { transform: rotate(90deg); } .b { transform: rotate(0.25turn); }', { aggressive: true }).findings.length, 1);
+    // `grad`→`deg` is an exact rational conversion (×9/10)
+    assert.strictEqual(analyze('.a { transform: rotate(90deg); } .b { transform: rotate(100grad); }', { aggressive: true }).findings.length, 1);
+    // `rad`→`deg` involves π, so it's rounded—still expected to land on the
+    // same canonical key at the conversion's fixed precision
+    assert.strictEqual(analyze('.a { transform: rotate(57.29578deg); } .b { transform: rotate(1rad); }', { aggressive: true }).findings.length, 1);
+    assert.strictEqual(analyze('.a { transform: rotate(45deg); } .b { transform: rotate(1rad); }', { aggressive: true }).findings.length, 0);
+  });
+
   test('Does not collapse `0%` and unitless `0` for `flex-basis`', () => {
     const { findings } = analyze('.a { flex-basis: 0; } .b { flex-basis: 0%; }');
     assert.strictEqual(findings.length, 0);
@@ -1142,7 +1197,7 @@ describe('Aggressive mode', () => {
 });
 
 describe('savingsOnly', () => {
-  test('Withholds a growing consolidation, returning the stylesheet untouched', () => {
+  test('Withholds a growing consolidation, returning the style sheet untouched', () => {
     const css = cssGrowing;
     const { css: output, applied, skipped, bytes, withheld } = dedup(css, { savingsOnly: true });
     assert.strictEqual(output, css);
@@ -1481,7 +1536,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix --savings-only -` still writes the untouched stylesheet to stdout when withholding', () => {
+  test('`--fix --savings-only -` still writes the untouched style sheet to stdout when withholding', () => {
     const source = cssGrowing;
     const { stdout, stderr, status } = run(['--fix', '-s', '-'], { input: source });
     assert.strictEqual(status, 1);
@@ -1713,7 +1768,7 @@ describe('CLI', () => {
     assert.ok(stderr.includes('1 consolidated'));
   });
 
-  test('`--fix -` still writes the full stylesheet to stdout when nothing is consolidated', () => {
+  test('`--fix -` still writes the full style sheet to stdout when nothing is consolidated', () => {
     const input = '.a { color: red; }\n.b { color: blue; }\n';
     const { stdout, stderr } = run(['--fix', '-'], { input });
     assert.strictEqual(stdout, input);

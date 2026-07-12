@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 * Added license (MIT)
 * Added `--ignore-path`/`-p` (`ignorePaths` in the config file) to exclude files by path—matched against each file’s path relative to the working directory
 * `--fix` now warns when it rewrites a file that references a source map (`sourceMappingURL`), since the map itself isn’t regenerated and goes stale
+* Duplicate detection now canonicalizes `<time>` values (`s`/`ms`) unconditionally
+* Duplicate detection now sorts `min()`/`max()` arguments, since mathematical min/max is commutative
+* Aggressive mode: Duplicate detection now canonicalizes `<angle>` values (`deg`/`grad`/`rad`/`turn`)
 
 ### Changed
 

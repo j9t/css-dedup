@@ -148,6 +148,143 @@ function reduceShorthandRepetition(propNormalized, value) {
   return value;
 }
 
+// Multiplies a decimal string by `numerator / 10**denominatorPow10`,
+// exactly—used below for unit conversions whose ratio is rational (time:
+// ×1000/1; angle `turn`: ×360/1; angle `grad`: ×9/10). `Number(text) * ratio`
+// can’t be trusted here: `1.005 * 1000` is `1004.9999999999999` in IEEE 754,
+// which would make two textually exact-equal times compare unequal. Doing
+// the multiplication on the digit string via `BigInt`, then relocating the
+// decimal point, is exact for any finite decimal—`denominatorPow10` only
+// ever divides by a power of ten, so that step is point relocation, not
+// true division.
+function scaleDecimalExact(text, numerator, denominatorPow10 = 0) {
+  const negative = text.startsWith('-');
+  const unsigned = negative ? text.slice(1) : text;
+  const [intPart, fracPart = ''] = unsigned.split('.');
+  const scaled = (BigInt((intPart || '0') + fracPart || '0') * BigInt(numerator)).toString();
+  const decimalPlaces = fracPart.length + denominatorPow10;
+  const padded = scaled.padStart(decimalPlaces + 1, '0');
+  const pointIndex = padded.length - decimalPlaces;
+  const result = decimalPlaces > 0 ? `${padded.slice(0, pointIndex)}.${padded.slice(pointIndex)}` : padded;
+  return (negative && !/^0\.?0*$/.test(result) ? '-' : '') + result;
+}
+
+const RE_NUMBER = '(-?(?:\\d+(?:\\.\\d+)?|\\.\\d+))';
+
+// Canonicalizes time values to milliseconds for comparison: `1s` and
+// `1000ms` are exactly interchangeable per the CSS `<time>` grammar, and
+// converting `s` to `ms` is only ever a decimal-point shift—never lossy—so
+// this runs unconditionally, the same way zero-value units do. Matches
+// regardless of surrounding property (including inside the `transition`/
+// `animation` shorthand, alongside a case-sensitive `animation-name`),
+// since the pattern can’t collide with anything but an actual time value.
+const RE_TIME = new RegExp(`${RE_NUMBER}(ms|s)\\b`, 'gi');
+
+function normalizeTimeUnits(value) {
+  return value.replace(RE_TIME, (match, number, unit) => {
+    if (unit.toLowerCase() === 'ms') return match;
+    return `${scaleDecimalExact(number, 1000)}ms`;
+  });
+}
+
+// Canonicalizes angle values to degrees for comparison—`aggressive` mode
+// only. `grad` → `deg` (×9/10) and `turn` → `deg` (×360) are exact rational
+// conversions, but `rad` → `deg` (×180/π) involves an irrational factor: Any
+// non-zero `rad` value becomes a non-terminating decimal in degrees, so
+// that one conversion is rounded. Rather than split the feature by
+// per-unit exactness, the whole thing is gated behind `aggressive`, the
+// same “probably, not provably, safe” treatment the `hsl()` color
+// equivalence elsewhere gets.
+const RE_ANGLE = new RegExp(`${RE_NUMBER}(deg|grad|rad|turn)\\b`, 'gi');
+const ANGLE_ROUND_DECIMALS = 6;
+
+function normalizeAngleUnits(value) {
+  return value.replace(RE_ANGLE, (match, number, rawUnit) => {
+    const unit = rawUnit.toLowerCase();
+    if (unit === 'deg') return match;
+    if (unit === 'grad') return `${scaleDecimalExact(number, 9, 1)}deg`;
+    if (unit === 'turn') return `${scaleDecimalExact(number, 360)}deg`;
+    return `${(Number(number) * (180 / Math.PI)).toFixed(ANGLE_ROUND_DECIMALS)}deg`;
+  });
+}
+
+// Splits a value on top-level commas only—reused below by the `min()`/
+// `max()` argument sorter; a comma inside a nested call used as an
+// argument (`min(calc(1px, 2px), 3px)`) doesn’t separate top-level ones
+function splitTopLevelCommas(text) {
+  const parts = [];
+  let depth = 0;
+  let current = '';
+
+  for (const char of text) {
+    if (char === '(') depth++;
+    if (char === ')') depth = Math.max(0, depth - 1);
+
+    if (char === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+
+  return parts;
+}
+
+// A character CSS identifiers (including function names) can continue
+// with—used below to require a real token boundary before `min(`/`max(`,
+// so a hypothetical custom ident merely ending in those letters is never
+// mistaken for the function (a plain `\b` wouldn’t reject a hyphenated one)
+const RE_IDENT_CHAR = /[\w-]/;
+
+// Sorts a top-level `min()`/`max()` call’s comma-separated arguments
+// canonically—mathematical min/max is commutative, so argument order
+// carries no meaning (`min(100%, 500px)` ≡ `min(500px, 100%)`). `clamp()`
+// is deliberately left alone: its three arguments are positional (minimum,
+// preferred, maximum), and reordering them changes what it computes.
+// `minmax()` (grid track sizing—also positional) is never matched, since
+// the scan looks for the function name immediately followed by `(`,
+// and “minmax(” doesn’t contain “min(” or “max(” as a prefix.
+function sortMinMaxArguments(value) {
+  let result = '';
+  let index = 0;
+
+  while (index < value.length) {
+    const boundaryOk = index === 0 || !RE_IDENT_CHAR.test(value[index - 1]);
+    const match = boundaryOk ? /^(min|max)\(/i.exec(value.slice(index)) : null;
+    if (!match) {
+      result += value[index];
+      index++;
+      continue;
+    }
+
+    const name = match[1];
+    const argsStart = index + match[0].length;
+    let depth = 1;
+    let cursor = argsStart;
+    while (cursor < value.length && depth > 0) {
+      if (value[cursor] === '(') depth++;
+      else if (value[cursor] === ')') depth--;
+      cursor++;
+    }
+    // Unbalanced parentheses: Leave the rest of the value untouched rather
+    // than guessing where the call would have ended
+    if (depth > 0) {
+      result += value.slice(index);
+      break;
+    }
+
+    const inner = value.slice(argsStart, cursor - 1);
+    const args = splitTopLevelCommas(inner).map(sortMinMaxArguments);
+    args.sort();
+    result += `${name}(${args.join(',')})`;
+    index = cursor;
+  }
+
+  return result;
+}
+
 // Property aliases—legacy names current browsers treat as pure synonyms of
 // their standardized successors. Only folded in aggressive mode: The two
 // spellings are interchangeable today, but merging them changes the
@@ -226,7 +363,15 @@ export function normalizeValue(prop, rawValue, aggressive = false) {
   }
   value = value.replace(RE_ZERO_LENGTH_UNIT, '0');
   if (!ZERO_PERCENT_SENSITIVE_PROPS.has(propNormalized)) value = value.replace(RE_ZERO_PERCENT, '0');
+  value = normalizeTimeUnits(value);
+  if (aggressive) value = normalizeAngleUnits(value);
+  // Both unit conversions above produce their own freshly-scaled decimal
+  // text (e.g. `0.3s` → `300.0ms`), so the general decimal cleanup runs
+  // after them, not before—and the `min()`/`max()` sort runs after that,
+  // so two arguments that are the same value in different raw spellings
+  // (`.5`/`0.50`) already compare equal as sort keys
   value = normalizeDecimals(value);
+  value = sortMinMaxArguments(value);
   value = reduceShorthandRepetition(propNormalized, value);
 
   value = value.replace(RE_OPAQUE_PLACEHOLDER, (_match, index) => opaques[index]);

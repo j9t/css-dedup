@@ -4,6 +4,8 @@
 
 CSS Dedup is a CSS maintainability and performance optimization tool that finds—and, when requested and where safe, consolidates—duplicate CSS declarations. It implements the technique of [using declarations just once (“UDJO”)](https://webglossary.info/terms/udjo/) as originally described in [“DRY CSS”](https://meiert.com/blog/dry-css/) (cf. [_CSS Optimization Basics_](https://meiert.com/blog/css-optimization-basics/)): the same normalized property–value pair shouldn’t appear in more than one rule within the same scope. Where it does, CSS Dedup reports it—and allows to optimize the respective style sheet.
 
+**Note: CSS Dedup is still brand-new 🆕 and needs to be battle-tested 🧪. Please [report any issues](https://github.com/j9t/css-dedup/issues).**
+
 ## Example Optimization
 
 Given:
@@ -58,13 +60,13 @@ $ npx css-dedup --fix default.css
 Wrote default.css
 ```
 
-Since duplicate declarations cost bytes wherever they live—in the stylesheet itself, and (uncompressed) over the wire—the byte counts reflect two payoffs at once: less to maintain, and less to transfer.
+Since duplicate declarations cost bytes wherever they live—in the style sheet itself, and (uncompressed) over the wire—the byte counts reflect two payoffs at once: less to maintain, and less to transfer.
 
 The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. CSS Dedup’s two modes call this out, so it’s a call you can make consciously—it may be worth it if you value using declarations just once (maintainability), not if you’re optimizing purely for transfer size. (`--fix --savings-only` automates that call: A file whose consolidation would grow it is left untouched.)
 
 ## Usage
 
-### CLI Use
+### CLI
 
 ```shell
 npx css-dedup [options] <file…>
@@ -129,7 +131,7 @@ Both functions accept an options object:
   ignoreSelectors: [/^\.legacy-/],  // additional selector patterns to exclude
   ignoreSelectorsDefaults: true,    // set to `false` to disable the built-in hack list
   aggressive: false,                // set to `true` to also allow probably-safe merges
-  savingsOnly: false,               // set to `true` to withhold a consolidation that would grow the stylesheet (`dedup()` only)
+  savingsOnly: false,               // set to `true` to withhold a consolidation that would grow the style sheet (`dedup()` only)
 }
 ```
 
@@ -146,7 +148,7 @@ Both functions accept an options object:
 }
 ```
 
-`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten stylesheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the stylesheet before and after, since that’s what changes over the wire, not the character count, covering everything `--fix` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. With `savingsOnly: true`, a consolidation whose net `saved` would be negative is withheld: `css` comes back untouched, `applied` is empty, `bytes` reports no change (that’s what actually happened), and the declined outcome arrives as `withheld: { count, bytes }`—the number of merges and the byte counts the consolidation would have had (`withheld` is absent whenever nothing was withheld). `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
+`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten style sheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the style sheet before and after, since that’s what changes over the wire, not the character count, covering everything `--fix` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. With `savingsOnly: true`, a consolidation whose net `saved` would be negative is withheld: `css` comes back untouched, `applied` is empty, `bytes` reports no change (that’s what actually happened), and the declined outcome arrives as `withheld: { count, bytes }`—the number of merges and the byte counts the consolidation would have had (`withheld` is absent whenever nothing was withheld). `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
 
 ### PostCSS Plugin Use
 
@@ -173,7 +175,7 @@ CSS Dedup:
 
 1. …**parses** the CSS with [PostCSS](https://postcss.org/).
 
-2. …**scopes** rules by their DRY boundary—the root stylesheet, the contents of an `@media`/`@supports`/`@layer` condition, or one specific nested rule (native CSS nesting).
+2. …**scopes** rules by their DRY boundary—the root style sheet, the contents of an `@media`/`@supports`/`@layer` condition, or one specific nested rule (native CSS nesting).
    - Declarations are only ever compared within the same scope: A rule’s own declarations are never compared against those of rules nested inside it, and rules in different `@layer`s (or different `@media`/`@supports` conditions) can’t share a merged rule.
    - For _reporting_, two blocks with the _same_ condition are the same scope even when written separately in the source (e.g., two `@media (min-width: 768px) {}` blocks in different parts of the file)—matching is whitespace-insensitive but case-sensitive, since `@layer` names and selectors can be case-significant.
    - `--fix` is more conservative here: It only ever folds rules that already live in the same physical block, since merging across two separate blocks would relocate a declaration past whatever sits between those blocks in the source—including rules in an entirely different scope, which the merge-safety check (step 6) has no visibility into. A duplicate split across two same-condition blocks is therefore reported, not auto-merged (unless `--aggressive` is enabled—see [aggressive mode](#aggressive-mode)).
@@ -191,6 +193,9 @@ CSS Dedup:
    - Treats `font-weight: bold`/`700` and `normal`/`400` as equivalent (the longhand only—picking the weight out of the `font` shorthand would require parsing the value).
    - Collapses repeated shorthand values, following the omission rules in reverse: `margin: 0 0` matches `margin: 0`, `padding: 1px 2px 1px 2px` matches `1px 2px`, `border-radius: 1px/1px` matches `1px`, and two-value pairs like `gap`/`overflow`/`place-items` collapse the same way.
    - Treats the `border`/`outline` `none` and `0` values as equivalent.
+   - Canonicalizes `<time>` values to milliseconds: `0.3s` matches `300ms`. Always exact—converting `s` to `ms` is a decimal-point shift, never rounding—so this runs regardless of aggressive mode, the same as the zero-value and decimal collapsing above.
+   - Sorts `min()`/`max()` arguments, including nested calls: `min(100%, 500px)` matches `min(500px, 100%)`, since mathematical min/max is commutative. `clamp()`’s three arguments are positional (minimum, preferred, maximum) and are left in place, as is `minmax()` (grid track sizing—a different function, despite the name).
+   - In [aggressive mode](#aggressive-mode) only: Canonicalizes `<angle>` values to degrees—`90deg` matches `0.25turn` and `100grad`. `grad`/`turn` convert to degrees exactly; `rad` involves π, so that conversion is rounded, the same lossy-but-aggressive-only treatment `hsl()` gets above.
 
 5. …**reports** any normalized declaration that occurs in more than one rule within a scope, and separately flags declarations repeated within a single rule—including within a selector-less at-rule block like `@font-face` or `@page`, which have declarations of their own but, unlike two rules, are never compared against each other (there’s no selector list to fold two `@font-face` blocks into). It also reports a selector (list) written more than once within one scope—the same smell one level up from a repeated declaration—matched as a set, so `.a, .b` and `.b, .a` count as the same selector list; only within one physical block, though, since two same-condition `@media` blocks repeat their selectors by construction.
 
@@ -209,7 +214,7 @@ CSS Dedup:
 
 Overall, CSS Dedup is conservative by design and will leave some safe merges for manual review.
 
-`test/fixtures/*.css` contains small example stylesheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/css-dedup.js test/fixtures/<file>.css` (add `--fix` for `merge-safety.css`, and `--aggressive` for `aggressive.css`) to see them in action.
+`test/fixtures/*.css` contains small example style sheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/css-dedup.js test/fixtures/<file>.css` (add `--fix` for `merge-safety.css`, and `--aggressive` for `aggressive.css`) to see them in action.
 
 ### Aggressive Mode
 
@@ -221,11 +226,13 @@ By default, CSS Dedup only consolidates what it can prove safe. `--aggressive` (
 
 * **Rounding-based color equivalences.** `hsl(0 0% 100%)` ≡ `#fff`, and percentage `rgb()` channels (`rgb(100% 0% 0%)` ≡ `#f00`)—excluded by default because the equivalence goes through browser rounding rather than being purely textual.
 
+* **Rounding-based angle equivalences.** `<angle>` values canonicalize to degrees: `90deg` ≡ `0.25turn` ≡ `100grad`. `grad`/`turn` convert exactly, but `rad` involves π, so any non-zero `rad` value is rounded to compare—the whole feature is gated behind the flag rather than splitting it by which unit pair happens to be exact.
+
 * **Property aliases.** `word-wrap`/`overflow-wrap` and `grid-gap`/`gap` (plus the row/column variants) are pure synonyms in current browsers, so their duplicates merge—keeping the last occurrence’s spelling, which changes the legacy-support surface (a browser old enough to know only `word-wrap` loses the declaration when `overflow-wrap` is the spelling kept).
 
 What aggressive mode deliberately does _not_ do: drop same-rule overrides with differing values (`color: red; color: oklch(…)`). That pattern is CSS’s fallback mechanism for progressive enhancement, and there is no way to tell an intentional fallback from an accident. (Overrides that are really the same color spelled two ways—`color: #fff; color: hsl(0 0% 100%)`—do collapse, via the color equivalence above.)
 
-The byte economics don’t change with the flag—aggressive mode just unlocks more merges, each carrying the same trade-off between the declaration removed and the selector-list bytes added. Cross-block merges usually save, since they remove whole rules or blocks; declaration-only merges between rules with long selectors can grow the file, so `--aggressive` can also tip a stylesheet further into growth. Either way, the usual growth notes call it out—including in the parenthetical previews shown when the flag is off.
+The byte economics don’t change with the flag—aggressive mode just unlocks more merges, each carrying the same trade-off between the declaration removed and the selector-list bytes added. Cross-block merges usually save, since they remove whole rules or blocks; declaration-only merges between rules with long selectors can grow the file, so `--aggressive` can also tip a style sheet further into growth. Either way, the usual growth notes call it out—including in the parenthetical previews shown when the flag is off.
 
 `--aggressive` deliberately doesn’t imply `--fix`: The two flags are orthogonal—`--aggressive` sets how much risk to accept, `--fix` whether to write. On its own, `--aggressive` widens report mode (aggressive equivalences surface as findings, the savings estimate includes the aggressive merges), which is exactly the preview you want for the merges that carry risk; add `--fix` to apply them. Since these merges are not provable, review the diff and test the affected pages after an aggressive `--fix`—the CLI reminds you, counting how many of the merges actually rode on the flag. Conversely, without the flag, reports and `--fix` runs note in parentheses what `--aggressive` would add.
 

@@ -333,7 +333,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       aggressiveOnly = Math.max(applied.length - baseline.applied.length, 0);
     }
 
-    // STDOUT must always carry the complete stylesheet for STDIN input—
+    // STDOUT must always carry the complete style sheet for STDIN input—
     // even with nothing consolidated (or everything withheld), a pipeline
     // consuming it would otherwise receive nothing and lose the CSS entirely
     if (isStdin) {
@@ -366,13 +366,13 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       }
       if (!isStdin) log(`Wrote ${label}`);
       if (RE_SOURCE_MAP.test(css)) {
-        log(styleText('yellow', `Note: ${isStdin ? 'this stylesheet' : label} references a source map (\`sourceMappingURL\`); \`--fix\` doesn’t regenerate it, so the map is now stale.`));
+        log(styleText('yellow', `Note: ${isStdin ? 'this style sheet' : label} references a source map (\`sourceMappingURL\`); \`--fix\` doesn’t regenerate it, so the map is now stale.`));
       }
     }
     // What `--aggressive` would actually change on disk, measured against
     // this run’s real outcome: `potential` went through the same
     // `savingsOnly` gate as this run, so an aggressive result the re-run
-    // would withhold compares equal to the untouched stylesheet and earns
+    // would withhold compares equal to the untouched style sheet and earns
     // no hint
     if (potential && potential.css !== output) {
       const extra = potential.applied.length - applied.length;
@@ -419,7 +419,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     console.log('');
   }
 
-  // Summary and `--fix` payoff close each stylesheet’s report, so with
+  // Summary and `--fix` payoff close each style sheet’s report, so with
   // several files it’s unambiguous which file they refer to
   console.log(`${styleText('bold', 'Summary:')} ${findings.length} finding${findings.length !== 1 ? 's' : ''}`);
   if (withheld) {

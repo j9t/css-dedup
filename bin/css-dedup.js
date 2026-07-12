@@ -3,7 +3,7 @@
 import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { parseArgs, styleText } from 'node:util';
-import { resolve, join, extname } from 'node:path';
+import { resolve, relative, join, extname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { analyze, dedup } from '../src/index.js';
 import { declarationKey } from '../src/normalization.js';
@@ -11,12 +11,30 @@ import { declarationKey } from '../src/normalization.js';
 // Directories skipped when recursing into a target directory
 const DIRS_IGNORED = new Set(['node_modules']);
 
+// A single-dash spelling of a long option name (`-fix` for `--fix`) isn’t a
+// typo `parseArgs` below rejects: With `strict: true`, it only rejects
+// letters that don’t resolve to some short flag, so it silently reads
+// `-fix` as the boolean `-f` plus `-i` (`--ignore-selector`) with the
+// attached value `"x"`—consolidation quietly runs with a bogus selector
+// filter instead of failing loudly. Catch the exact-spelling case before
+// `parseArgs` gets a chance to cluster it.
+const LONG_OPTION_NAMES = ['fix', 'aggressive', 'savings-only', 'ignore-selector', 'ignore-path', 'no-ignore-selectors-defaults', 'config', 'help'];
+for (const arg of process.argv.slice(2)) {
+  if (!arg.startsWith('-') || arg.startsWith('--')) continue;
+  const name = arg.slice(1);
+  if (LONG_OPTION_NAMES.includes(name)) {
+    console.error(`Unknown option \`${arg}\`. Did you mean \`--${name}\`? (A single dash groups letters as short flags instead—e.g., \`-i\` takes an attached value—so '${arg}' doesn’t parse as that long option.)`);
+    process.exit(1);
+  }
+}
+
 const { values, positionals } = parseArgs({
   options: {
     fix: { type: 'boolean', short: 'f', default: false },
     aggressive: { type: 'boolean', short: 'a', default: false },
     'savings-only': { type: 'boolean', short: 's', default: false },
     'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
+    'ignore-path': { type: 'string', short: 'p', multiple: true, default: [] },
     'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
     config: { type: 'string', short: 'c' },
     help: { type: 'boolean', short: 'h', default: false },
@@ -38,6 +56,7 @@ Options:
   -a, --aggressive                 Also allow merges that are probably—but not provably—safe; on its own this widens the report, with \`--fix\` it applies the merges (test afterwards)
   -s, --savings-only               With \`--fix\`: Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file)
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
+  -p, --ignore-path <pattern>      Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable)
   -n, --no-ignore-selectors-defaults  Disable the built-in selector-hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
   -c, --config <path>              Path to a config file (defaults to \`css-dedup.config.js\` in the working directory, if present)
   -h, --help                       Show this help`);
@@ -91,8 +110,11 @@ async function collectCssFiles(dirPath) {
 
 // Expands each positional into one or more file paths: `-` (STDIN) and
 // plain files pass through as-is, a directory recurses into its .css
-// files (sorted, for stable output across runs)
-async function expandTargets(targets) {
+// files (sorted, for stable output across runs); `ignorePathPatterns` then
+// filters the combined list, so an explicit file argument is excluded the
+// same way a directory-discovered one is, matched against the path relative
+// to the working directory (portable across machines, unlike an absolute one)
+async function expandTargets(targets, ignorePathPatterns) {
   const expanded = [];
 
   for (const target of targets) {
@@ -107,7 +129,45 @@ async function expandTargets(targets) {
     else expanded.push(pathResolved);
   }
 
-  return expanded;
+  if (!ignorePathPatterns.length) return expanded;
+  return expanded.filter(file => file === '-' || !ignorePathPatterns.some(pattern => pattern.test(relative(process.cwd(), file))));
+}
+
+// A `/*# sourceMappingURL=… */` comment means a build tool generated this
+// file alongside a source map; `--fix` rewrites the CSS text without
+// touching (or regenerating) that map, so its line/column data goes stale—
+// worth a one-line heads-up rather than a silently drifting map
+const RE_SOURCE_MAP = /\/\*#\s*sourceMappingURL=/;
+
+// Concurrency cap for `prefetchContents()` below
+const CONCURRENCY_READ = 8;
+
+// Reads every non-STDIN target concurrently, ahead of the (sequential)
+// per-file processing loop in `main()`—so disk I/O for file N+1 overlaps
+// with the parsing/analysis CPU work for file N, instead of each file’s
+// read waiting behind the previous file’s full report. Outcomes are
+// captured rather than thrown, so a read failure still surfaces through
+// `processTarget`’s existing per-file error message, one file at a time,
+// in the files' original order.
+async function prefetchContents(files) {
+  const contents = new Array(files.length);
+  let next = 0;
+
+  async function worker() {
+    while (next < files.length) {
+      const index = next++;
+      const file = files[index];
+      if (file === '-') continue;
+      try {
+        contents[index] = { css: await readFile(resolve(file), 'utf8') };
+      } catch (err) {
+        contents[index] = { err };
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY_READ, files.length) }, worker));
+  return contents;
 }
 
 function formatBytesSummary({ before, after, saved }) {
@@ -168,18 +228,26 @@ function printFindings(findings) {
 // is a special case: There is no file to rewrite in place, so the
 // consolidated CSS is printed to STDOUT instead—and, so that stream stays
 // pipeable, the usual status/summary lines go to STDERR rather than STDOUT.
-async function processTarget(file, options, { multi }) {
+async function processTarget(file, options, { multi }, preread) {
   const isStdin = file === '-';
   const label = isStdin ? '(stdin)' : resolve(file);
 
   if (multi) console.log(styleText('bold', label));
 
   let css;
-  try {
-    css = isStdin ? await readStdin() : await readFile(label, 'utf8');
-  } catch (err) {
-    console.error(styleText('red', `Could not read ${label}: ${err.message}`));
-    return true;
+  if (preread) {
+    if (preread.err) {
+      console.error(styleText('red', `Could not read ${label}: ${preread.err.message}`));
+      return true;
+    }
+    css = preread.css;
+  } else {
+    try {
+      css = isStdin ? await readStdin() : await readFile(label, 'utf8');
+    } catch (err) {
+      console.error(styleText('red', `Could not read ${label}: ${err.message}`));
+      return true;
+    }
   }
 
   const targetOptions = { ...options, from: isStdin ? undefined : label };
@@ -297,6 +365,9 @@ async function processCss(css, targetOptions, { isStdin, label }) {
         log(styleText('yellow', `Note: This consolidation makes the file ${formatBytesShare(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--fix\` here if you care more about transfer size.`));
       }
       if (!isStdin) log(`Wrote ${label}`);
+      if (RE_SOURCE_MAP.test(css)) {
+        log(styleText('yellow', `Note: ${isStdin ? 'this stylesheet' : label} references a source map (\`sourceMappingURL\`); \`--fix\` doesn’t regenerate it, so the map is now stale.`));
+      }
     }
     // What `--aggressive` would actually change on disk, measured against
     // this run’s real outcome: `potential` went through the same
@@ -391,21 +462,26 @@ async function main() {
     aggressive: values.aggressive || (config.aggressive ?? false),
     savingsOnly: values['savings-only'] || (config.savingsOnly ?? false),
   };
+  const ignorePathPatterns = [
+    ...(config.ignorePaths ?? []),
+    ...values['ignore-path'].map(pattern => new RegExp(pattern, 'i')),
+  ];
 
-  const files = await expandTargets(positionals);
+  const files = await expandTargets(positionals, ignorePathPatterns);
   if (!files.length) {
     console.error(`No \`.css\` files found under ${positionals.join(', ')}.`);
     process.exit(1);
   }
 
   const multi = files.length > 1;
+  const prefetched = await prefetchContents(files);
   let failed = false;
 
   for (const [index, file] of files.entries()) {
     // Two blank lines between per-file reports, so each file’s closing
     // summary is visually separated from the next file’s header
     if (multi && index > 0) console.log('\n');
-    if (await processTarget(file, options, { multi })) failed = true;
+    if (await processTarget(file, options, { multi }, prefetched[index])) failed = true;
   }
 
   if (failed) process.exitCode = 1;

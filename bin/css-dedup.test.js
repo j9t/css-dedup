@@ -1792,4 +1792,108 @@ describe('CLI', () => {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
   });
+
+  test('Excludes a file via `--ignore-path`/`-p`, matched against the path relative to the working directory', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_ignore_path');
+    fs.mkdirSync(path.join(dirTemp, 'dist'), { recursive: true });
+    fs.mkdirSync(path.join(dirTemp, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'dist', 'bundle.css'), '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(path.join(dirTemp, 'src', 'main.css'), '.c { color: blue; }\n.d { color: blue; }\n');
+
+    try {
+      const excluded = run(['--ignore-path', 'dist/', dirTemp]);
+      assert.ok(!excluded.stdout.includes('color: red'));
+      assert.ok(excluded.stdout.includes('color: blue'));
+
+      const short = run(['-p', 'dist/', dirTemp]);
+      assert.ok(!short.stdout.includes('color: red'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Excludes a file matching `ignorePaths` from the config file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_config_ignore_path');
+    fs.mkdirSync(path.join(dirTemp, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { ignorePaths: [/dist\\//] };\n');
+    fs.writeFileSync(path.join(dirTemp, 'dist', 'bundle.css'), '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(path.join(dirTemp, 'main.css'), '.c { color: blue; }\n.d { color: blue; }\n');
+
+    try {
+      const { stdout } = run(['.'], { cwd: dirTemp });
+      assert.ok(!stdout.includes('color: red'));
+      assert.ok(stdout.includes('color: blue'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Warns when `--fix` rewrites a file that references a source map', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_source_map');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'bundle.css');
+    fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n/*# sourceMappingURL=bundle.css.map */\n');
+
+    try {
+      const { stdout } = run(['--fix', file]);
+      assert.match(stdout, /references a source map \(`sourceMappingURL`\); `--fix` doesn’t regenerate it, so the map is now stale\./);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Does not warn about a source map when nothing was consolidated', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_source_map_clean');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'clean.css');
+    fs.writeFileSync(file, '.a { color: red; }\n/*# sourceMappingURL=clean.css.map */\n');
+
+    try {
+      const { stdout } = run(['--fix', file]);
+      assert.ok(!stdout.includes('sourceMappingURL'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Rejects a single-dash long-option spelling (`-fix`) instead of silently clustering it as `-f -i x`', () => {
+    const { stderr, status } = run(['-fix', path.join(fixturesDir, 'basic.css')]);
+    assert.strictEqual(status, 1);
+    assert.ok(stderr.includes('Unknown option `-fix`. Did you mean `--fix`?'));
+  });
+
+  test('Still allows genuine short-flag clustering (`-fa` for `-f -a`)', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_cluster');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'basic.css');
+    fs.copyFileSync(path.join(fixturesDir, 'basic.css'), file);
+
+    try {
+      const { stdout, status } = run(['-fa', file]);
+      assert.strictEqual(status, 0);
+      assert.ok(stdout.includes('consolidated'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Processes multiple files correctly when reads are prefetched concurrently', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_prefetch');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    for (let index = 0; index < 12; index++) {
+      fs.writeFileSync(path.join(dirTemp, `file-${index}.css`), `.a { color: red${index}; }\n.b { color: red${index}; }\n`);
+    }
+
+    try {
+      const { stdout, status } = run([dirTemp]);
+      assert.strictEqual(status, 1);
+      for (let index = 0; index < 12; index++) {
+        assert.ok(stdout.includes(path.join(dirTemp, `file-${index}.css`)));
+      }
+      // Each file’s own report must stay intact and in order, not interleaved
+      assert.match(stdout, /file-0\.css[\s\S]*file-1\.css[\s\S]*file-11\.css/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
 });

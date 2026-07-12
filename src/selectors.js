@@ -152,13 +152,26 @@ function scanSelector(selector) {
   return { combinatorRuns, parenDepths };
 }
 
+// A type selector at the start of a compound (`div`, `input`—never `*`)
+const RE_TYPE_SELECTOR = /^[a-zA-Z][\w-]*/;
+
 // The identity tokens—type, IDs, classes—of a selector’s subject compound
 // (its rightmost one). Returns “null” when the compound can’t be read
 // confidently: An escape could hide a `.`/`#` behind content, and a
 // selector-taking pseudo-class (`:is()`, `:not()`, `:where()`, …) can smuggle
 // in arbitrary further identity—both fall back to “can’t tell” rather than
 // risk a wrong disjointness call.
+const subjectIdentities = new Map();
+
 function subjectIdentity(selector) {
+  if (subjectIdentities.has(selector)) return subjectIdentities.get(selector);
+
+  const identity = computeSubjectIdentity(selector);
+  subjectIdentities.set(selector, identity);
+  return identity;
+}
+
+function computeSubjectIdentity(selector) {
   const scan = scanSelector(selector);
   const lastRun = scan.combinatorRuns.at(-1);
   const compound = selector.slice(lastRun ? lastRun.end : 0);
@@ -168,9 +181,9 @@ function subjectIdentity(selector) {
   // Attribute selectors go first—their values can contain `.`/`#` characters
   // that would otherwise read as classes/IDs
   const stripped = compound.replace(RE_ATTRIBUTE_SELECTOR, ' ');
-  const type = /^[a-zA-Z][\w-]*/.exec(compound)?.[0].toLowerCase() ?? null;
-  const classes = new Set([...stripped.matchAll(/\.([\w-]+)/g)].map(match => match[1]));
-  const ids = new Set([...stripped.matchAll(/#([\w-]+)/g)].map(match => match[1]));
+  const type = RE_TYPE_SELECTOR.exec(compound)?.[0].toLowerCase() ?? null;
+  const classes = new Set(Array.from(stripped.matchAll(/\.([\w-]+)/g), match => match[1]));
+  const ids = new Set(Array.from(stripped.matchAll(/#([\w-]+)/g), match => match[1]));
 
   return { type, classes, ids };
 }

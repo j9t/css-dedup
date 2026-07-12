@@ -401,10 +401,12 @@ function findBlockingRule(scope, distinctRules, exemptRules, firstIndex, lastInd
     if (!conflict) continue;
 
     const candidateSelectors = splitSelectors(rule.selector);
+    // The (memoized, cheap) heuristic goes first: In aggressive mode it
+    // clears most pairs, saving the exclusivity proof’s full selector parse
     const disjoint = candidateSelectors.every(candidateSelector => (
       groupSelectors.every(groupSelector => (
-        selectorsAreMutuallyExclusive(candidateSelector, groupSelector)
-        || (aggressive && selectorsLikelyDisjoint(candidateSelector, groupSelector))
+        (aggressive && selectorsLikelyDisjoint(candidateSelector, groupSelector))
+        || selectorsAreMutuallyExclusive(candidateSelector, groupSelector)
       ))
     ));
     if (disjoint) continue;

@@ -56,10 +56,16 @@ const RE_RGB_FUNCTION = /\brgba?\(([^()]*)\)/g;
 // since `hsl()` equivalence goes through rounding (see `canonicalizeHsl()`)
 const RE_HSL_FUNCTION = /\bhsla?\(([^()]*)\)/g;
 
+// A plain 0–255 integer channel (the only form safe mode canonicalizes)
+const RE_INTEGER_CHANNEL = /^\d{1,3}$/;
+
+// A hue (a number with an optional angle unit)
+const RE_HUE = /^(-?[\d.]+)(deg|grad|rad|turn)?$/;
+
 // `#abc` → `#aabbcc`, `#abcd` → `#aabbccdd`; a fully opaque alpha channel is
 // the default, so `…ff` is dropped from an eight-digit form
 function expandHex(hex) {
-  const digits = hex.length <= 4 ? [...hex].map(digit => digit + digit).join('') : hex;
+  const digits = hex.length <= 4 ? Array.from(hex, digit => digit + digit).join('') : hex;
   return digits.length === 8 && digits.endsWith('ff') ? digits.slice(0, 6) : digits;
 }
 
@@ -91,7 +97,7 @@ function canonicalizeRgb(args, aggressive) {
   if (parts.length < 3 || parts.length > 4) return null;
 
   const channels = parts.slice(0, 3).map(part => {
-    if (/^\d{1,3}$/.test(part)) return Number(part);
+    if (RE_INTEGER_CHANNEL.test(part)) return Number(part);
     if (!aggressive) return null;
     const number = part.endsWith('%') ? (Number(part.slice(0, -1)) / 100) * 255 : Number(part);
     if (!Number.isFinite(number)) return null;
@@ -119,7 +125,7 @@ function hslToRgb(hue, saturation, lightness) {
 
 // A hue is a plain angle; `deg` is the default unit
 function parseHue(raw) {
-  const match = /^(-?[\d.]+)(deg|grad|rad|turn)?$/.exec(raw);
+  const match = RE_HUE.exec(raw);
   if (!match) return null;
   const number = Number(match[1]);
   if (!Number.isFinite(number)) return null;

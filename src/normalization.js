@@ -156,7 +156,11 @@ function reduceShorthandRepetition(propNormalized, value) {
 // the multiplication on the digit string via `BigInt`, then relocating the
 // decimal point, is exact for any finite decimal—`denominatorPow10` only
 // ever divides by a power of ten, so that step is point relocation, not
-// true division.
+// true division. Matches a result of all zeros (`0`, `0.0`, …)—used below to
+// drop a negative sign `scaleDecimalExact` would otherwise carry over from a
+// negative-zero input (`-0`, `-0.0`).
+const RE_ALL_ZERO = /^0\.?0*$/;
+
 function scaleDecimalExact(text, numerator, denominatorPow10 = 0) {
   const negative = text.startsWith('-');
   const unsigned = negative ? text.slice(1) : text;
@@ -166,18 +170,26 @@ function scaleDecimalExact(text, numerator, denominatorPow10 = 0) {
   const padded = scaled.padStart(decimalPlaces + 1, '0');
   const pointIndex = padded.length - decimalPlaces;
   const result = decimalPlaces > 0 ? `${padded.slice(0, pointIndex)}.${padded.slice(pointIndex)}` : padded;
-  return (negative && !/^0\.?0*$/.test(result) ? '-' : '') + result;
+  return (negative && !RE_ALL_ZERO.test(result) ? '-' : '') + result;
 }
 
-const RE_NUMBER = '(-?(?:\\d+(?:\\.\\d+)?|\\.\\d+))';
+// A number token must not be preceded by an identifier character, either—
+// without this, `RE_TIME`/`RE_ANGLE` below would match `2s` inside a
+// case-sensitive custom ident like `animation-name: fade2s` (a real
+// `@keyframes` name) and silently rewrite it to `fade2000ms`, corrupting
+// the identifier and risking a false duplicate (or, in `--fix`, an unsafe
+// merge) against an unrelated animation that happens to share the
+// resulting spelling
+const RE_NUMBER = '(?<![\\w-])(-?(?:\\d+(?:\\.\\d+)?|\\.\\d+))';
 
 // Canonicalizes time values to milliseconds for comparison: `1s` and
 // `1000ms` are exactly interchangeable per the CSS `<time>` grammar, and
 // converting `s` to `ms` is only ever a decimal-point shift—never lossy—so
 // this runs unconditionally, the same way zero-value units do. Matches
 // regardless of surrounding property (including inside the `transition`/
-// `animation` shorthand, alongside a case-sensitive `animation-name`),
-// since the pattern can’t collide with anything but an actual time value.
+// `animation` shorthand, alongside a case-sensitive `animation-name`)—see
+// `RE_NUMBER`’s left-boundary check for why this can’t collide with an
+// actual identifier.
 const RE_TIME = new RegExp(`${RE_NUMBER}(ms|s)\\b`, 'gi');
 
 function normalizeTimeUnits(value) {
@@ -238,6 +250,10 @@ function splitTopLevelCommas(text) {
 // mistaken for the function (a plain `\b` wouldn’t reject a hyphenated one)
 const RE_IDENT_CHAR = /[\w-]/;
 
+// Tested once per scanned character in `sortMinMaxArguments()` below—hoisted
+// so the loop doesn’t recompile the same literal on every iteration
+const RE_MIN_MAX_START = /^(min|max)\(/i;
+
 // Sorts a top-level `min()`/`max()` call’s comma-separated arguments
 // canonically—mathematical min/max is commutative, so argument order
 // carries no meaning (`min(100%, 500px)` ≡ `min(500px, 100%)`). `clamp()`
@@ -252,7 +268,7 @@ function sortMinMaxArguments(value) {
 
   while (index < value.length) {
     const boundaryOk = index === 0 || !RE_IDENT_CHAR.test(value[index - 1]);
-    const match = boundaryOk ? /^(min|max)\(/i.exec(value.slice(index)) : null;
+    const match = boundaryOk ? RE_MIN_MAX_START.exec(value.slice(index)) : null;
     if (!match) {
       result += value[index];
       index++;

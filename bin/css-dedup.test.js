@@ -6,6 +6,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { stripVTControlCharacters } from 'node:util';
 import { analyze, dedup } from '../src/index.js';
+import { normalizeValue } from '../src/normalization.js';
 import { splitSelectors, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint } from '../src/selectors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -229,6 +230,29 @@ describe('Analysis', () => {
     assert.strictEqual(findings.length, 1);
     // A differently-cased animation name must still be treated as distinct
     assert.strictEqual(analyze('.a { animation: Spin 2s linear; } .b { animation: spin 2000ms linear; }').findings.length, 0);
+  });
+
+  test('Does not mistake digits inside a case-sensitive custom ident for a time or angle value', () => {
+    // `fade2s` is a real, single `@keyframes` name here—without a left
+    // boundary on the number match, `2s` inside it would silently rewrite
+    // to `2000ms`, corrupting the identifier
+    assert.strictEqual(normalizeValue('animation-name', 'fade2s', false), 'fade2s');
+    assert.strictEqual(normalizeValue('animation-name', 'spin100grad', true), 'spin100grad');
+    assert.strictEqual(normalizeValue('animation-name', 'spin1turn', true), 'spin1turn');
+    assert.strictEqual(normalizeValue('animation', 'Spin2s linear infinite', false), 'Spin2s linear infinite');
+
+    // Two rules using genuinely different `@keyframes` names (one of which
+    // looks like a corrupted spelling the bug would have produced) must
+    // never be treated as duplicates—that would let `--fix` merge them and
+    // silently drop one animation
+    const { findings } = analyze('.a { animation-name: fade2s; } .b { animation-name: fade2000ms; }');
+    assert.strictEqual(findings.length, 0);
+
+    // `--fix` must leave the identifier untouched in the written output, too
+    const { css, applied } = dedup('.a { animation-name: fade2s; }\n.b { animation-name: fade2s; }\n');
+    assert.strictEqual(applied.length, 1);
+    assert.ok(css.includes('fade2s'));
+    assert.ok(!css.includes('fade2000ms'));
   });
 
   test('Sorts `min()`/`max()` arguments, since mathematical min/max is commutative', () => {
@@ -1862,6 +1886,23 @@ describe('CLI', () => {
 
       const short = run(['-p', 'dist/', dirTemp]);
       assert.ok(!short.stdout.includes('color: red'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Reports that files were excluded, not that none were found, when `--ignore-path` removes every discovered file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_ignore_path_all');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'one.css'), '.a { color: red; }\n');
+    fs.writeFileSync(path.join(dirTemp, 'two.css'), '.b { color: blue; }\n');
+
+    try {
+      const { stderr, status } = run(['--ignore-path', '\\.css$', dirTemp]);
+      assert.strictEqual(status, 1);
+      assert.ok(stderr.includes('All 2 `.css` files found under'));
+      assert.ok(stderr.includes('excluded by `--ignore-path`'));
+      assert.ok(!stderr.includes('No `.css` files found'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

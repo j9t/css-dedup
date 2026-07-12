@@ -11,6 +11,20 @@ import { declarationKey } from '../src/normalization.js';
 // Directories skipped when recursing into a target directory
 const DIRS_IGNORED = new Set(['node_modules']);
 
+// Shared between `parseArgs` below and the single-dash guard that runs
+// before it—one definition, so an option added here can’t drift out of
+// sync with a separately maintained name list
+const OPTIONS_CONFIG = {
+  fix: { type: 'boolean', short: 'f', default: false },
+  aggressive: { type: 'boolean', short: 'a', default: false },
+  'savings-only': { type: 'boolean', short: 's', default: false },
+  'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
+  'ignore-path': { type: 'string', short: 'p', multiple: true, default: [] },
+  'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
+  config: { type: 'string', short: 'c' },
+  help: { type: 'boolean', short: 'h', default: false },
+};
+
 // A single-dash spelling of a long option name (`-fix` for `--fix`) isn’t a
 // typo `parseArgs` below rejects: With `strict: true`, it only rejects
 // letters that don’t resolve to some short flag, so it silently reads
@@ -18,27 +32,17 @@ const DIRS_IGNORED = new Set(['node_modules']);
 // attached value `"x"`—consolidation quietly runs with a bogus selector
 // filter instead of failing loudly. Catch the exact-spelling case before
 // `parseArgs` gets a chance to cluster it.
-const LONG_OPTION_NAMES = ['fix', 'aggressive', 'savings-only', 'ignore-selector', 'ignore-path', 'no-ignore-selectors-defaults', 'config', 'help'];
 for (const arg of process.argv.slice(2)) {
   if (!arg.startsWith('-') || arg.startsWith('--')) continue;
   const name = arg.slice(1);
-  if (LONG_OPTION_NAMES.includes(name)) {
+  if (Object.hasOwn(OPTIONS_CONFIG, name)) {
     console.error(`Unknown option \`${arg}\`. Did you mean \`--${name}\`? (A single dash groups letters as short flags instead—e.g., \`-i\` takes an attached value—so '${arg}' doesn’t parse as that long option.)`);
     process.exit(1);
   }
 }
 
 const { values, positionals } = parseArgs({
-  options: {
-    fix: { type: 'boolean', short: 'f', default: false },
-    aggressive: { type: 'boolean', short: 'a', default: false },
-    'savings-only': { type: 'boolean', short: 's', default: false },
-    'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
-    'ignore-path': { type: 'string', short: 'p', multiple: true, default: [] },
-    'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
-    config: { type: 'string', short: 'c' },
-    help: { type: 'boolean', short: 'h', default: false },
-  },
+  options: OPTIONS_CONFIG,
   allowPositionals: true,
   strict: true,
 });
@@ -113,7 +117,11 @@ async function collectCssFiles(dirPath) {
 // files (sorted, for stable output across runs); `ignorePathPatterns` then
 // filters the combined list, so an explicit file argument is excluded the
 // same way a directory-discovered one is, matched against the path relative
-// to the working directory (portable across machines, unlike an absolute one)
+// to the working directory (portable across machines, unlike an absolute one).
+// Returns `discovered` alongside the filtered `files` so the caller can
+// tell “nothing under these targets” apart from “everything under these
+// targets got excluded”—two different situations that deserve two
+// different error messages.
 async function expandTargets(targets, ignorePathPatterns) {
   const expanded = [];
 
@@ -129,9 +137,11 @@ async function expandTargets(targets, ignorePathPatterns) {
     else expanded.push(pathResolved);
   }
 
-  if (!ignorePathPatterns.length) return expanded;
+  if (!ignorePathPatterns.length) return { files: expanded, discovered: expanded.length };
+
   // Normalize to `/` before testing, regardless of host OS
-  return expanded.filter(file => file === '-' || !ignorePathPatterns.some(pattern => pattern.test(relative(process.cwd(), file).split(sep).join('/'))));
+  const files = expanded.filter(file => file === '-' || !ignorePathPatterns.some(pattern => pattern.test(relative(process.cwd(), file).split(sep).join('/'))));
+  return { files, discovered: expanded.length };
 }
 
 // A `/*# sourceMappingURL=… */` comment means a build tool generated this
@@ -468,9 +478,13 @@ async function main() {
     ...values['ignore-path'].map(pattern => new RegExp(pattern, 'i')),
   ];
 
-  const files = await expandTargets(positionals, ignorePathPatterns);
+  const { files, discovered } = await expandTargets(positionals, ignorePathPatterns);
   if (!files.length) {
-    console.error(`No \`.css\` files found under ${positionals.join(', ')}.`);
+    if (discovered > 0) {
+      console.error(`All ${discovered} \`.css\` file${discovered !== 1 ? 's' : ''} found under ${positionals.join(', ')} ${discovered !== 1 ? 'were' : 'was'} excluded by \`--ignore-path\`.`);
+    } else {
+      console.error(`No \`.css\` files found under ${positionals.join(', ')}.`);
+    }
     process.exit(1);
   }
 

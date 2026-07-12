@@ -10,19 +10,27 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.6.0",
-    "globals": "^17.6.0"
+    "globals": "^17.6.0",
+    "typescript": "^6.0.3"
   },
   "engines": {
     "node": ">=20.12.0"
   },
   "exports": {
-    ".": "./src/index.js",
-    "./plugin": "./src/plugin.js"
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./plugin": {
+      "types": "./src/plugin.d.ts",
+      "default": "./src/plugin.js"
+    }
   },
   "files": [
     "bin/css-dedup.js",
     "src/",
-    "!src/plugin.test.js"
+    "!src/plugin.test.js",
+    "!src/index.test.ts"
   ],
   "funding": "https://github.com/j9t/css-dedup?sponsor=1",
   "homepage": "https://github.com/j9t/css-dedup",
@@ -47,8 +55,10 @@
     "lint:fix": "eslint . --fix",
     "prepare": "git config core.hooksPath .githooks || true",
     "start": "node ./bin/css-dedup.js",
-    "test": "node --test bin/css-dedup.test.js src/plugin.test.js"
+    "test": "npm run test:types && node --test bin/css-dedup.test.js src/plugin.test.js",
+    "test:types": "tsc"
   },
   "type": "module",
-  "version": "1.1.0"
+  "types": "src/index.d.ts",
+  "version": "1.2.0"
 }

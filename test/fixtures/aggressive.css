@@ -1,0 +1,14 @@
+/* Only aggressive mode consolidates this file: the duplicate hides behind a
+   rounding-based color equivalence (hsl vs. hex), split across two
+   separately-written same-condition blocks */
+@media (min-width: 768px) {
+  .a {
+    color: hsl(0 0% 100%);
+  }
+}
+
+@media (min-width: 768px) {
+  .b {
+    color: #fff;
+  }
+}

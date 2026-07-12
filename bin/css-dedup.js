@@ -6,6 +6,7 @@ import { parseArgs, styleText } from 'node:util';
 import { resolve, join, extname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { analyze, dedup } from '../src/index.js';
+import { declarationKey } from '../src/normalization.js';
 
 // Directories skipped when recursing into a target directory
 const DIRS_IGNORED = new Set(['node_modules']);
@@ -13,6 +14,8 @@ const DIRS_IGNORED = new Set(['node_modules']);
 const { values, positionals } = parseArgs({
   options: {
     fix: { type: 'boolean', short: 'f', default: false },
+    aggressive: { type: 'boolean', short: 'a', default: false },
+    'savings-only': { type: 'boolean', short: 's', default: false },
     'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
     'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
     config: { type: 'string', short: 'c' },
@@ -32,6 +35,8 @@ Arguments:
 
 Options:
   -f, --fix                        Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)
+  -a, --aggressive                 Also allow merges that are probably—but not provably—safe; on its own this widens the report, with \`--fix\` it applies the merges (test afterwards)
+  -s, --savings-only               With \`--fix\`: Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file)
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -n, --no-ignore-selectors-defaults  Disable the built-in selector-hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
   -c, --config <path>              Path to a config file (defaults to \`css-dedup.config.js\` in the working directory, if present)
@@ -41,6 +46,13 @@ Options:
 
 if (positionals.includes('-') && positionals.length > 1) {
   console.error('Cannot combine stdin (`-`) with other file arguments.');
+  process.exit(1);
+}
+
+// A write policy needs a write mode: Report mode never touches a file, so a
+// bare `--savings-only` could only sit inert and mislead
+if (values['savings-only'] && !values.fix) {
+  console.error('`--savings-only` only applies together with `--fix` (report mode never writes).');
   process.exit(1);
 }
 
@@ -104,12 +116,13 @@ function formatBytesSummary({ before, after, saved }) {
   return `${before.toLocaleString()} → ${after.toLocaleString()} bytes (${sign}${Math.abs(saved).toLocaleString()} B, ${sign}${Math.abs(percent).toFixed(1)}%)`;
 }
 
-// A merged selector list can cost more bytes than the declaration it removes
-// saves (e.g., two long, single-use selectors sharing one short declaration),
-// so consolidation isn’t always a net win for transfer size—only ever for
-// maintainability (using the declaration just once). Surface that plainly
-// rather than silently reporting negative “savings.”
-function formatGrowth(bytes) {
+// The magnitude of a byte delta as “N bytes (P%)”, sign-blind—used for
+// savings and growth alike, with the direction spelled out in the
+// surrounding sentence. (Growth is real: A merged selector list can cost
+// more bytes than the declaration it removes saves, so consolidation isn’t
+// always a net win for transfer size—only ever for maintainability. Surface
+// that plainly rather than silently reporting negative “savings.”)
+function formatBytesShare(bytes) {
   const percent = bytes.before ? (Math.abs(bytes.saved) / bytes.before) * 100 : 0;
   return `${Math.abs(bytes.saved).toLocaleString()} bytes (${percent.toFixed(1)}%)`;
 }
@@ -186,14 +199,75 @@ async function processTarget(file, options, { multi }) {
   }
 }
 
+// The opposite-mode consolidation of the same source—a second, discarded
+// pass serving as the aggressive preview on default runs, and as the
+// default-mode baseline that measures what rode on the flag on aggressive
+// runs
+function oppositePass(css, targetOptions) {
+  return dedup(css, { ...targetOptions, aggressive: !targetOptions.aggressive });
+}
+
+// A skipped group’s key as the aggressive pass would spell it: Aggressive
+// normalization can rewrite the default spelling (`hsl()` onto hex,
+// `word-wrap` onto `overflow-wrap`), so matching the default spelling alone
+// would hint at groups the aggressive pass also skips. Selector-list keys
+// (blocked same-selector folds) carry no `prop: value` shape and pass
+// through unchanged.
+function aggressiveKeySpelling(key) {
+  const important = key.endsWith(' !important');
+  const base = important ? key.slice(0, -' !important'.length) : key;
+  const separator = base.indexOf(': ');
+  if (separator === -1) return key;
+  return declarationKey(base.slice(0, separator), base.slice(separator + 2), important, true);
+}
+
+// The scope + key identities of the groups the aggressive pass still skipped,
+// as one Set—so the “may merge” hint check below is a lookup, not a scan of
+// the whole skipped list per printed line
+function skippedWithAggressive(potential) {
+  return potential ? new Set(potential.skipped.map(item => `${item.scope}\0${item.key}`)) : null;
+}
+
+// One skipped-group line, for fix and report mode alike—with the “may merge
+// with `--aggressive`” hint when the aggressive pass didn’t skip the group,
+// matched under both the default and the aggressive spelling of the key, so
+// a respelled key never produces a false hint
+function formatSkippedLine(item, skippedAggressive) {
+  const stillSkipped = !skippedAggressive
+    || skippedAggressive.has(`${item.scope}\0${item.key}`)
+    || skippedAggressive.has(`${item.scope}\0${aggressiveKeySpelling(item.key)}`);
+  const hint = stillSkipped ? '' : ` (may merge with \`--aggressive\`)`;
+  return `  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}${hint}`;
+}
+
 async function processCss(css, targetOptions, { isStdin, label }) {
+  const potential = targetOptions.aggressive ? null : oppositePass(css, targetOptions);
+  const skippedAggressive = skippedWithAggressive(potential);
+
   if (values.fix) {
-    const { css: output, applied, skipped, bytes } = dedup(css, targetOptions);
+    // `savingsOnly` is the engine’s gate (see `dedupRoot()`): A withheld
+    // result arrives as the untouched style sheet, with `applied` empty and
+    // the declined outcome under `withheld`
+    const { css: output, applied, skipped, bytes, withheld } = dedup(css, targetOptions);
     const log = isStdin ? console.error : console.log;
 
+    // Whether anything actually rode on the flag—measured by comparing
+    // output against a discarded default-mode pass, never by entry counts:
+    // One aggressive cross-block or alias fold can absorb what the default
+    // pass would have done in more, separate merges, so a count delta can be
+    // zero or negative on a run whose merges were entirely aggressive-only.
+    // The count survives only as the message’s detail, where it’s positive.
+    let aggressiveDiffers = false;
+    let aggressiveOnly = 0;
+    if (targetOptions.aggressive && applied.length) {
+      const baseline = oppositePass(css, targetOptions);
+      aggressiveDiffers = output !== baseline.css;
+      aggressiveOnly = Math.max(applied.length - baseline.applied.length, 0);
+    }
+
     // STDOUT must always carry the complete stylesheet for STDIN input—
-    // even with nothing consolidated, a pipeline consuming it would
-    // otherwise receive nothing and lose the CSS entirely
+    // even with nothing consolidated (or everything withheld), a pipeline
+    // consuming it would otherwise receive nothing and lose the CSS entirely
     if (isStdin) {
       process.stdout.write(output);
     } else if (applied.length) {
@@ -201,25 +275,50 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     }
 
     const skippedNote = skipped.length ? ' (considered unsafe to auto-merge)' : '';
-    log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
+    if (withheld) {
+      log(`${styleText('green', '0 consolidated')}, ${styleText('yellow', `${withheld.count} withheld`)} (consolidating would make the file ${formatBytesShare(withheld.bytes)} bigger—\`--savings-only\`), ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
+    } else {
+      log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
+    }
     for (const item of skipped) {
-      log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
+      log(formatSkippedLine(item, skippedAggressive));
     }
     if (applied.length) {
       log(`\n${formatBytesSummary(bytes)}`);
       if (bytes.saved < 0) {
-        log(styleText('yellow', `Note: this consolidation makes the file ${formatGrowth(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--fix\` here if you care more about transfer size.`));
+        log(styleText('yellow', `Note: this consolidation makes the file ${formatBytesShare(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--fix\` here if you care more about transfer size.`));
       }
       if (!isStdin) log(`Wrote ${label}`);
     }
+    // What `--aggressive` would actually change on disk, measured against
+    // this run’s real outcome: `potential` went through the same
+    // `savingsOnly` gate as this run, so an aggressive result the re-run
+    // would withhold compares equal to the untouched stylesheet and earns
+    // no hint
+    if (potential && potential.css !== output) {
+      const extra = potential.applied.length - applied.length;
+      const extraSaved = bytes.after - potential.bytes.after;
+      const savings = extraSaved > 0 ? `, saving another ${extraSaved.toLocaleString()} bytes`
+        : extraSaved < 0 ? `, though growing the file by ${Math.abs(extraSaved).toLocaleString()} bytes` : '';
+      log(`(Re-running with \`--aggressive\` would consolidate ${extra > 0 ? `${extra} more` : 'further'}${savings}.)`);
+    }
+    if (aggressiveDiffers) {
+      const share = aggressiveOnly > 0
+        ? `${aggressiveOnly} of these merges ${aggressiveOnly !== 1 ? 'are' : 'is'}`
+        : 'Some of these merges are';
+      log(styleText('yellow', `${share} aggressive-only—probably, but not provably, safe. Review the diff and test the affected pages.`));
+    }
 
-    return skipped.length > 0;
+    return skipped.length > 0 || Boolean(withheld);
   }
 
   const { findings } = analyze(css, targetOptions);
 
   if (!findings.length) {
-    console.log('No duplicate declarations found.');
+    const note = potential?.applied.length
+      ? ` With \`--aggressive\`: ${potential.applied.length} consolidation${potential.applied.length !== 1 ? 's' : ''} possible.`
+      : '';
+    console.log(`No duplicate declarations found.${note}`);
     return false;
   }
 
@@ -227,7 +326,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
 
   // A dry-run consolidation, purely to report the payoff—same safety rules
   // as `--fix`, just discarded instead of written
-  const { applied, skipped, bytes } = dedup(css, targetOptions);
+  const { css: cssDryRun, applied, skipped, bytes, withheld } = dedup(css, targetOptions);
 
   // Findings above don't distinguish safe from unsafe—without this, a
   // duplicate group that `--fix` would just skip (see its own safety
@@ -236,7 +335,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
   if (skipped.length) {
     console.log(styleText('yellow', `${skipped.length} duplicate group${skipped.length !== 1 ? 's' : ''} considered unsafe to auto-merge:`));
     for (const item of skipped) {
-      console.log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}`);
+      console.log(formatSkippedLine(item, skippedAggressive));
     }
     console.log('');
   }
@@ -244,13 +343,30 @@ async function processCss(css, targetOptions, { isStdin, label }) {
   // Summary and `--fix` payoff close each stylesheet’s report, so with
   // several files it’s unambiguous which file they refer to
   console.log(`${styleText('bold', 'Summary:')} ${findings.length} finding${findings.length !== 1 ? 's' : ''}`);
-  if (applied.length) {
+  if (withheld) {
+    // The dry run went through the engine’s `savingsOnly` gate (set via the
+    // config file—the CLI flag itself requires `--fix`), so `--fix` here
+    // would decline to write; say so instead of promising a change
+    console.log(styleText('yellow', `\`--fix\` would leave this file untouched—\`savingsOnly\` is set, and consolidating would make it ${formatBytesShare(withheld.bytes)} bigger.`));
+  } else if (applied.length) {
     if (bytes.saved > 0) {
-      const percent = bytes.before ? (bytes.saved / bytes.before) * 100 : 0;
-      console.log(`Run with \`--fix\` to save ${bytes.saved.toLocaleString()} bytes (${percent.toFixed(1)}%).`);
+      console.log(`Run with \`--fix\` to save ${formatBytesShare(bytes)}.`);
     } else if (bytes.saved < 0) {
-      console.log(styleText('yellow', `Running \`--fix\` here would make the file ${formatGrowth(bytes)} bigger, not smaller (worth it for maintainability but not for transfer size).`));
+      console.log(styleText('yellow', `Running \`--fix\` here would make the file ${formatBytesShare(bytes)} bigger, not smaller (worth it for maintainability but not for transfer size).`));
     }
+  }
+  // Gated on the outputs differing, never on entry counts: One aggressive
+  // cross-block or alias fold can absorb what the default pass would have
+  // done in more, separate merges, so a count delta can be zero or negative
+  // on exactly the files where `--aggressive` changes (and saves) the most
+  if (potential && potential.css !== cssDryRun) {
+    const extra = potential.applied.length - applied.length;
+    const totals = potential.bytes.saved > 0
+      ? `, saving ${formatBytesShare(potential.bytes)} in total`
+      : potential.bytes.saved < 0
+        ? `, though growing the file by ${formatBytesShare(potential.bytes)} in total`
+        : '';
+    console.log(`With \`--fix --aggressive\`: ${extra > 0 ? `${extra} more consolidation${extra !== 1 ? 's' : ''}` : 'further consolidation'}${totals}.`);
   }
 
   return true;
@@ -264,6 +380,8 @@ async function main() {
       ...values['ignore-selector'].map(pattern => new RegExp(pattern, 'i')),
     ],
     ignoreSelectorsDefaults: values['no-ignore-selectors-defaults'] ? false : (config.ignoreSelectorsDefaults ?? true),
+    aggressive: values.aggressive || (config.aggressive ?? false),
+    savingsOnly: values['savings-only'] || (config.savingsOnly ?? false),
   };
 
   const files = await expandTargets(positionals);

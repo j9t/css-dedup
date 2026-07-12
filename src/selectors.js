@@ -152,6 +152,88 @@ function scanSelector(selector) {
   return { combinatorRuns, parenDepths };
 }
 
+// A type selector at the start of a compound (`div`, `input`—never `*`)
+const RE_TYPE_SELECTOR = /^[a-zA-Z][\w-]*/;
+
+// The identity tokens—type, IDs, classes—of a selector’s subject compound
+// (its rightmost one). Returns “null” when the compound can’t be read
+// confidently: An escape could hide a `.`/`#` behind content, and a
+// selector-taking pseudo-class (`:is()`, `:not()`, `:where()`, …) can smuggle
+// in arbitrary further identity—both fall back to “can’t tell” rather than
+// risk a wrong disjointness call.
+//
+// Memoized, and scoped to one consolidation run (see
+// `resetSubjectIdentities()`): The merge-safety scan asks about the same
+// selectors over and over within a run, but a long-lived process (a PostCSS
+// watch build, say) must not accumulate every selector—think generated or
+// hashed class names—it has ever seen.
+const subjectIdentities = new Map();
+
+// Called at the start of each top-level `dedupRoot()` run—the only flow that
+// reaches `subjectIdentity()`
+export function resetSubjectIdentities() {
+  subjectIdentities.clear();
+}
+
+function subjectIdentity(selector) {
+  if (subjectIdentities.has(selector)) return subjectIdentities.get(selector);
+
+  const identity = computeSubjectIdentity(selector);
+  subjectIdentities.set(selector, identity);
+  return identity;
+}
+
+function computeSubjectIdentity(selector) {
+  const scan = scanSelector(selector);
+  const lastRun = scan.combinatorRuns.at(-1);
+  const compound = selector.slice(lastRun ? lastRun.end : 0);
+
+  // `|` marks a namespace (`svg|rect`, `[xlink|href=…]`)—neither the type
+  // regex nor the attribute-selector regex understands those, so reading on
+  // would fabricate identity (`svg|rect` as type `svg`, an attribute value’s
+  // `.zzz` as a class); like escapes and parens, that’s a “can’t tell”
+  if (compound.includes('\\') || compound.includes('(') || compound.includes('|')) return null;
+
+  // Attribute selectors go first—their values can contain `.`/`#` characters
+  // that would otherwise read as classes/IDs
+  const stripped = compound.replace(RE_ATTRIBUTE_SELECTOR, ' ');
+  const type = RE_TYPE_SELECTOR.exec(compound)?.[0].toLowerCase() ?? null;
+  const classes = new Set(Array.from(stripped.matchAll(/\.([\w-]+)/g), match => match[1]));
+  const ids = new Set(Array.from(stripped.matchAll(/#([\w-]+)/g), match => match[1]));
+
+  return { type, classes, ids };
+}
+
+// No allocation—this runs per selector pair on the aggressive merge-safety
+// hot path; iterating the smaller set keeps the lookups on the cheap side
+function setsDisjoint(a, b) {
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  for (const member of small) {
+    if (large.has(member)) return false;
+  }
+  return true;
+}
+
+// “True” if the two selectors’ subject compounds carry conflicting identity:
+// different type selectors, different IDs, or non-empty class sets with no
+// class in common. The type and ID cases are close to provable (one element
+// has one tag and one ID); The class case is the aggressive-mode heuristic—
+// `.card` and `.btn:hover` are assumed to target different elements, which
+// BEM-style naming makes almost always true in practice, but which nothing
+// stops a `class="card btn"` element from violating. Not consulted outside
+// aggressive mode.
+export function selectorsLikelyDisjoint(a, b) {
+  const identityA = subjectIdentity(a.trim());
+  const identityB = subjectIdentity(b.trim());
+  if (!identityA || !identityB) return false;
+
+  if (identityA.type && identityB.type && identityA.type !== identityB.type) return true;
+  if (identityA.ids.size && identityB.ids.size && setsDisjoint(identityA.ids, identityB.ids)) return true;
+  if (identityA.classes.size && identityB.classes.size && setsDisjoint(identityA.classes, identityB.classes)) return true;
+
+  return false;
+}
+
 // The “an attribute can only hold one value” argument requires the two
 // differing attribute selectors to be evaluated against the same element in
 // any hypothetical joint match. That’s only guaranteed when the attribute’s

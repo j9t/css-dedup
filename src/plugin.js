@@ -10,7 +10,10 @@ export default function cssdedup(options = {}) {
     postcssPlugin: 'css-dedup',
     OnceExit(root, { result }) {
       if (options.fix) {
-        const { skipped } = dedupRoot(root, options);
+        const { skipped, withheld } = dedupRoot(root, options);
+        if (withheld) {
+          root.warn(result, `Consolidation withheld (\`savingsOnly\`): ${withheld.count} merge${withheld.count !== 1 ? 's' : ''} would make the stylesheet ${Math.abs(withheld.bytes.saved)} bytes bigger`);
+        }
         for (const item of skipped) {
           root.warn(result, `Duplicate \`${item.key}\` left unmerged (${item.scope === 'root' ? 'root' : item.scope}): ${item.reason}`);
         }

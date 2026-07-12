@@ -3,7 +3,7 @@
 import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { parseArgs, styleText } from 'node:util';
-import { resolve, relative, join, extname } from 'node:path';
+import { resolve, relative, join, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { analyze, dedup } from '../src/index.js';
 import { declarationKey } from '../src/normalization.js';
@@ -130,7 +130,8 @@ async function expandTargets(targets, ignorePathPatterns) {
   }
 
   if (!ignorePathPatterns.length) return expanded;
-  return expanded.filter(file => file === '-' || !ignorePathPatterns.some(pattern => pattern.test(relative(process.cwd(), file))));
+  // Normalize to `/` before testing, regardless of host OS
+  return expanded.filter(file => file === '-' || !ignorePathPatterns.some(pattern => pattern.test(relative(process.cwd(), file).split(sep).join('/'))));
 }
 
 // A `/*# sourceMappingURL=… */` comment means a build tool generated this

@@ -3,6 +3,9 @@ import assert from 'node:assert';
 import postcss from 'postcss';
 import cssdedup from './plugin.js';
 
+// The merged-rule shape several tests assert on
+const RE_MERGED_AB = /\.a,\s*\.b\s*{\s*color: red;\s*}/;
+
 describe('Plugin: Analysis', () => {
   test('Warns about a duplicate declaration', async () => {
     const result = await postcss([cssdedup()]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
@@ -31,7 +34,7 @@ describe('Plugin: Analysis', () => {
 describe('Plugin: Dedup', () => {
   test('Merges a duplicate declaration in place', async () => {
     const result = await postcss([cssdedup({ fix: true })]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
-    assert.match(result.css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+    assert.match(result.css, RE_MERGED_AB);
   });
 
   test('Warns about a skipped (unsafe) merge', async () => {
@@ -49,7 +52,7 @@ describe('Plugin: Dedup', () => {
 
   test('`savingsOnly: true` still applies a shrinking consolidation', async () => {
     const result = await postcss([cssdedup({ fix: true, savingsOnly: true })]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
-    assert.match(result.css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+    assert.match(result.css, RE_MERGED_AB);
     assert.strictEqual(result.warnings().length, 0);
   });
 

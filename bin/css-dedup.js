@@ -225,7 +225,7 @@ function aggressiveKeySpelling(key) {
 // as one Set—so the “may merge” hint check below is a lookup, not a scan of
 // the whole skipped list per printed line
 function skippedWithAggressive(potential) {
-  return potential ? new Set(potential.skipped.map(item => `${item.scope} ${item.key}`)) : null;
+  return potential ? new Set(potential.skipped.map(item => `${item.scope}\0${item.key}`)) : null;
 }
 
 // One skipped-group line, for fix and report mode alike—with the “may merge
@@ -234,8 +234,8 @@ function skippedWithAggressive(potential) {
 // a respelled key never produces a false hint
 function formatSkippedLine(item, skippedAggressive) {
   const stillSkipped = !skippedAggressive
-    || skippedAggressive.has(`${item.scope} ${item.key}`)
-    || skippedAggressive.has(`${item.scope} ${aggressiveKeySpelling(item.key)}`);
+    || skippedAggressive.has(`${item.scope}\0${item.key}`)
+    || skippedAggressive.has(`${item.scope}\0${aggressiveKeySpelling(item.key)}`);
   const hint = stillSkipped ? '' : ` (may merge with \`--aggressive\`)`;
   return `  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}${hint}`;
 }

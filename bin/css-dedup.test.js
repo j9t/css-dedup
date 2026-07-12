@@ -26,6 +26,13 @@ const cssGrowingAggressive = [
   '',
 ].join('\n');
 
+// Assertion patterns shared across several tests
+const RE_WITHHELD_ONE = /1 withheld/;
+const RE_MERGED_AB = /\.a,\s*\.b\s*{\s*color: red;\s*}/;
+const RE_MERGED_AC = /\.a,\s*\.c\s*{\s*color: red;\s*}/;
+const RE_PAYOFF_FIX = /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\./;
+const RE_SYNTAX_ERROR = /Unknown word/;
+
 function run(args, spawnOptions = {}) {
   const result = spawnSync('node', [scriptPath, ...args], { encoding: 'utf-8', timeout: 30_000, ...spawnOptions });
   return {
@@ -547,7 +554,7 @@ describe('Deduplication', () => {
     const { css, applied, skipped } = dedup('.a { color: red; }\n.b { color: red; }\n');
     assert.strictEqual(applied.length, 1);
     assert.strictEqual(skipped.length, 0);
-    assert.match(css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+    assert.match(css, RE_MERGED_AB);
   });
 
   test('Keeps the shortest equivalent value, regardless of which occurrence it came from', () => {
@@ -988,7 +995,7 @@ describe('Deduplication', () => {
 
   test('Cleans up a same-rule duplicate before also merging that rule across the scope', () => {
     const { css, applied } = dedup('.a { color: red; color: red; }\n.b { color: red; }\n');
-    assert.match(css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+    assert.match(css, RE_MERGED_AB);
     assert.strictEqual(applied.length, 2);
     assert.ok(applied.some(item => item.redundant));
     assert.ok(applied.some(item => !item.redundant));
@@ -1036,7 +1043,7 @@ describe('Aggressive mode', () => {
     assert.strictEqual(applied.length, 1);
     assert.strictEqual(skipped.length, 0);
     assert.strictEqual(output.match(/@media/g).length, 1);
-    assert.match(output, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+    assert.match(output, RE_MERGED_AB);
   });
 
   test('Still honors an intervening rule inside the merged scope when merging across blocks', () => {
@@ -1072,7 +1079,7 @@ describe('Aggressive mode', () => {
     assert.strictEqual(dedup(css).skipped.length, 1);
     const { css: output, skipped } = dedup(css, { aggressive: true });
     assert.strictEqual(skipped.length, 0);
-    assert.match(output, /\.a,\s*\.c\s*{\s*color: red;\s*}/);
+    assert.match(output, RE_MERGED_AC);
   });
 
   test('Still blocks on an intervening rule sharing a class with the group', () => {
@@ -1210,7 +1217,7 @@ describe('Fixtures', () => {
 
   test('merge-safety.css report mode explains the unsafe group alongside the safe one’s savings estimate', () => {
     const { stdout } = run([path.join(fixturesDir, 'merge-safety.css')]);
-    assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\./);
+    assert.match(stdout, RE_PAYOFF_FIX);
     assert.ok(stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
     assert.match(stdout, /background: #ffffff — intervening `background` declaration in `\.y`/);
   });
@@ -1238,7 +1245,7 @@ describe('Fixtures', () => {
       assert.match(stdout, /\d+ → \d+ bytes \(-\d+ B, -\d+\.\d%\)/);
 
       const output = fs.readFileSync(file, 'utf8');
-      assert.match(output, /\.a,\s*\.c\s*{\s*color: red;\s*}/);
+      assert.match(output, RE_MERGED_AC);
       assert.ok(output.includes('.x {'));
       assert.ok(output.includes('.z {'));
     } finally {
@@ -1263,7 +1270,7 @@ describe('Fixtures', () => {
 
   test('basic.css report mode suggests the byte savings from running `--fix`', () => {
     const { stdout } = run([path.join(fixturesDir, 'basic.css')]);
-    assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\./);
+    assert.match(stdout, RE_PAYOFF_FIX);
   });
 
   test('aggressive.css reports nothing by default, but notes the `--aggressive` potential in parentheses', () => {
@@ -1324,7 +1331,7 @@ describe('Fixtures', () => {
       assert.ok(stdout.includes('1 consolidated'));
 
       const output = fs.readFileSync(file, 'utf8');
-      assert.match(output, /\.a,\s*\.c\s*{\s*color: red;\s*}/);
+      assert.match(output, RE_MERGED_AC);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1439,7 +1446,7 @@ describe('CLI', () => {
     try {
       const { stdout, status } = run(['-f', '-a', '-s', file]);
       assert.strictEqual(status, 1);
-      assert.match(stdout, /1 withheld/);
+      assert.match(stdout, RE_WITHHELD_ONE);
       assert.strictEqual(fs.readFileSync(file, 'utf8'), source);
       // Nothing was written, so the test-your-pages advice must not appear
       assert.ok(!stdout.includes('aggressive-only'));
@@ -1453,7 +1460,7 @@ describe('CLI', () => {
     const { stdout, stderr, status } = run(['--fix', '-s', '-'], { input: source });
     assert.strictEqual(status, 1);
     assert.strictEqual(stdout, source);
-    assert.match(stderr, /1 withheld/);
+    assert.match(stderr, RE_WITHHELD_ONE);
   });
 
   test('Loads `savingsOnly: true` from the config file', () => {
@@ -1466,7 +1473,7 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run(['--fix', file], { cwd: dirTemp });
-      assert.match(stdout, /1 withheld/);
+      assert.match(stdout, RE_WITHHELD_ONE);
       assert.strictEqual(fs.readFileSync(file, 'utf8'), source);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -1532,7 +1539,7 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run(['-f', '-s', file]);
-      assert.match(stdout, /1 withheld/);
+      assert.match(stdout, RE_WITHHELD_ONE);
       // A `--fix --aggressive --savings-only` re-run would withhold as
       // well, so promising it anything—let alone “savings” measured against
       // the never-written output—would be false
@@ -1592,7 +1599,7 @@ describe('CLI', () => {
       const { stdout } = run(['--fix', fileA, fileB]);
       assert.ok(stdout.includes(fileA));
       assert.ok(stdout.includes(fileB));
-      assert.match(fs.readFileSync(fileA, 'utf8'), /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+      assert.match(fs.readFileSync(fileA, 'utf8'), RE_MERGED_AB);
       assert.match(fs.readFileSync(fileB, 'utf8'), /\.c,\s*\.d\s*{\s*margin: 0;\s*}/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -1642,7 +1649,7 @@ describe('CLI', () => {
 
     try {
       const { stderr, stdout, status } = run([file]);
-      assert.match(stderr, /Unknown word/);
+      assert.match(stderr, RE_SYNTAX_ERROR);
       assert.match(stderr, /\^/);
       assert.ok(!stderr.includes('CssSyntaxError\n    at'));
       assert.strictEqual(stdout, '');
@@ -1660,7 +1667,7 @@ describe('CLI', () => {
 
     try {
       const { stdout, stderr, status } = run([dirTemp]);
-      assert.match(stderr, /Unknown word/);
+      assert.match(stderr, RE_SYNTAX_ERROR);
       assert.ok(stdout.includes(path.join(dirTemp, 'good.css')));
       assert.ok(stdout.includes('1 finding'));
       assert.strictEqual(status, 1);

@@ -1,4 +1,4 @@
-# CSS Dedup, the CSS Declaration De-Duplicator
+# CSS Dedup, the CSS Declaration Deduplicator
 
 [![npm version](https://img.shields.io/npm/v/css-dedup.svg)](https://www.npmjs.com/package/css-dedup) [![Build status](https://github.com/j9t/css-dedup/workflows/Tests/badge.svg)](https://github.com/j9t/css-dedup/actions) [![Socket](https://badge.socket.dev/npm/package/css-dedup)](https://socket.dev/npm/package/css-dedup) [![GitHub Sponsors](https://badgen.net/static/Support/Open%20Source/cyan)](https://github.com/j9t/css-dedup?sponsor=1)
 

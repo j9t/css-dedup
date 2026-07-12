@@ -6,7 +6,7 @@
   "dependencies": {
     "postcss": "^8.5.16"
   },
-  "description": "CSS declaration de-duplicator for maintainability and performance optimization",
+  "description": "CSS declaration deduplicator for maintainability and performance optimization",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.6.0",

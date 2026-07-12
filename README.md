@@ -80,8 +80,8 @@ Pass one or more files—each is analyzed (and, with `--fix`, rewritten) indepen
 | `--aggressive`, `-a` | Also allow merges that are probably—but not provably—safe (see [aggressive mode](#aggressive-mode)); on its own this widens the report, with `--fix` it applies the merges |
 | `--savings-only`, `-s` | Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file); only valid together with `--fix`, since report mode never writes |
 | `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
-| `--ignore-path <pattern>`, `-p` | Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable) |
 | `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector-hack ignore list |
+| `--ignore-path <pattern>`, `-p` | Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable) |
 | `--config <path>`, `-c <path>` | Path to a config file (defaults to `css-dedup.config.js` in the working directory, if present) |
 | `--help`, `-h` | Show usage information |
 
@@ -102,11 +102,11 @@ These are the supported options, shown with their defaults (each can be omitted)
 ```javascript
 // css-dedup.config.js
 export default {
-  ignoreSelectors: [],            // additional selector patterns to exclude, e.g., [/^\.legacy-/]
-  ignoreSelectorsDefaults: true,  // set to `false` to disable the built-in hack list
-  ignorePaths: [],                // file paths to exclude, matched relative to the working directory, e.g., [/dist\//]
   aggressive: false,              // set to `true` to also allow probably-safe merges
-  savingsOnly: false              // set to `true` to skip files whose consolidation would grow them (`--fix` runs only)
+  savingsOnly: false,             // set to `true` to skip files whose consolidation would grow them (`--fix` runs only)
+  ignoreSelectors: [],            // additional selector patterns to exclude, e.g., `[/^\.legacy-/]`
+  ignoreSelectorsDefaults: true,  // set to `false` to disable the built-in hack list
+  ignorePaths: []                 // file paths to exclude, matched relative to the working directory, e.g., `[/dist\//]`
 };
 ```
 
@@ -123,15 +123,17 @@ const { findings } = analyze(css);
 const { css: output, applied, skipped } = dedup(css);
 ```
 
+`analyze()` is report mode; `dedup()` is fix mode.
+
 Both functions accept an options object:
 
 ```javascript
 {
-  from: 'path/to/file.css',         // used for source-map-style line numbers only
-  ignoreSelectors: [/^\.legacy-/],  // additional selector patterns to exclude
-  ignoreSelectorsDefaults: true,    // set to `false` to disable the built-in hack list
+  from: 'path/to/file.css',         // forwarded to PostCSS; names the file in syntax-error messages
   aggressive: false,                // set to `true` to also allow probably-safe merges
   savingsOnly: false,               // set to `true` to withhold a consolidation that would grow the style sheet (`dedup()` only)
+  ignoreSelectors: [/^\.legacy-/],  // additional selector patterns to exclude
+  ignoreSelectorsDefaults: true     // set to `false` to disable the built-in hack list
 }
 ```
 

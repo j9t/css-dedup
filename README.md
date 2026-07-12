@@ -218,6 +218,8 @@ By default, CSS Dedup only consolidates what it can prove safe. `--aggressive` (
 
 What aggressive mode deliberately does _not_ do: drop same-rule overrides with differing values (`color: red; color: oklch(…)`). That pattern is CSS’s fallback mechanism for progressive enhancement, and there is no way to tell an intentional fallback from an accident. (Overrides that are really the same color spelled two ways—`color: #fff; color: hsl(0 0% 100%)`—do collapse, via the color equivalence above.)
 
+The byte economics don’t change with the flag—aggressive mode just unlocks more merges, each carrying the same trade-off between the declaration removed and the selector-list bytes added. Cross-block merges usually save, since they remove whole rules or blocks; declaration-only merges between rules with long selectors can grow the file, so `--aggressive` can also tip a stylesheet further into growth. Either way, the usual growth notes call it out—including in the parenthetical previews shown when the flag is off.
+
 `--aggressive` deliberately doesn’t imply `--fix`: The two flags are orthogonal—`--aggressive` sets how much risk to accept, `--fix` whether to write. On its own, `--aggressive` widens report mode (aggressive equivalences surface as findings, the savings estimate includes the aggressive merges), which is exactly the preview you want for the merges that carry risk; add `--fix` to apply them. Since these merges are not provable, review the diff and test the affected pages after an aggressive `--fix`—the CLI reminds you, counting how many of the merges actually rode on the flag. Conversely, without the flag, reports and `--fix` runs note in parentheses what `--aggressive` would add.
 
 ***

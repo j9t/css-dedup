@@ -1296,6 +1296,31 @@ describe('CLI', () => {
     }
   });
 
+  test('Notes when the `--aggressive` extras would grow the file rather than shrink it', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_growth_aggressive');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'grow.css');
+    // Only aggressive mode merges this (the intervening `.unrelated:hover`
+    // blocks the default pass), and both rules keep another declaration, so
+    // the merge adds the long selector list without removing a rule
+    fs.writeFileSync(file, [
+      '.module-header-navigation-primary-link { color: red; font-size: 14px; }',
+      '.unrelated-widget:hover { color: blue; }',
+      '.module-footer-navigation-secondary-link { color: red; letter-spacing: 1px; }',
+      '',
+    ].join('\n'));
+
+    try {
+      const report = run([file]);
+      assert.match(report.stdout, /With `--fix --aggressive`: 1 more consolidation, though growing the file by \d+ bytes \(\d+\.\d%\) in total\./);
+
+      const fix = run(['--fix', file]);
+      assert.match(fix.stdout, /\(Re-running with `--aggressive` would consolidate 1 more, though growing the file by \d+ bytes\.\)/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
   test('Processes multiple files in one invocation, with a header per file', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi');
     fs.mkdirSync(dirTemp, { recursive: true });

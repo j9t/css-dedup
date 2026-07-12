@@ -246,7 +246,8 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     if (potential && potential.applied.length > applied.length) {
       const extra = potential.applied.length - applied.length;
       const extraSaved = bytes.after - potential.bytes.after;
-      const savings = extraSaved > 0 ? `, saving another ${extraSaved.toLocaleString()} bytes` : '';
+      const savings = extraSaved > 0 ? `, saving another ${extraSaved.toLocaleString()} bytes`
+        : extraSaved < 0 ? `, though growing the file by ${Math.abs(extraSaved).toLocaleString()} bytes` : '';
       log(`(Re-running with \`--aggressive\` would consolidate ${extra} more${savings}.)`);
     }
     if (aggressiveOnly > 0) {
@@ -299,7 +300,9 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     const extra = potential.applied.length - applied.length;
     const totals = potential.bytes.saved > 0
       ? `, saving ${potential.bytes.saved.toLocaleString()} bytes (${(potential.bytes.before ? (potential.bytes.saved / potential.bytes.before) * 100 : 0).toFixed(1)}%) in total`
-      : '';
+      : potential.bytes.saved < 0
+        ? `, though growing the file by ${formatGrowth(potential.bytes)} in total`
+        : '';
     console.log(`With \`--fix --aggressive\`: ${extra} more consolidation${extra !== 1 ? 's' : ''}${totals}.`);
   }
 

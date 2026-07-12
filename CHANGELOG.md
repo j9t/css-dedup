@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-* `--fix` now prints the skipped-group detail before the consolidated/withheld/skipped counts summary, so the summary always closes a file's report
+* `--fix` now prints the skipped-group detail before the consolidated/withheld/skipped counts summary, so the summary isn't stranded above a long skipped-group list
 
 ## [1.2.0] - 2026-07-12
 

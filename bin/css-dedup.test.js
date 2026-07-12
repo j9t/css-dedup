@@ -1388,7 +1388,7 @@ describe('CLI', () => {
     try {
       const { stdout } = run(['--fix', file]);
       assert.match(stdout, /\+\d+ B, \+\d+\.\d%/);
-      assert.match(stdout, /Note: this consolidation makes the file \d+ bytes \(\d+\.\d%\) bigger, not smaller/);
+      assert.match(stdout, /Note: This consolidation makes the file \d+ bytes \(\d+\.\d%\) bigger, not smaller/);
       assert.ok(fs.readFileSync(file, 'utf8').includes('.very-long-selector-name-one, .b'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -1450,6 +1450,32 @@ describe('CLI', () => {
       assert.strictEqual(fs.readFileSync(file, 'utf8'), source);
       // Nothing was written, so the test-your-pages advice must not appear
       assert.ok(!stdout.includes('aggressive-only'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--fix` prints the skipped-group detail before the counts summary, so the outcome survives at the end of a long list', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_summary_order');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'mixed.css');
+    // Combines `cssGrowing` (withheld under `--savings-only`, since the
+    // split it needs to preserve declaration order costs more bytes than it
+    // saves) with an unsafe `background` pair (skipped), so the run
+    // produces both a withheld count and a skipped-group detail block to
+    // order against it
+    fs.writeFileSync(file, `${cssGrowing}\n.x { background: white; }\n.y { background: black; }\n.z { background: white; }\n`);
+
+    try {
+      const { stdout } = run(['--fix', '--savings-only', file]);
+      const detailIndex = stdout.indexOf('duplicate group considered unsafe to auto-merge:');
+      const countsIndex = stdout.indexOf('0 consolidated, 1 withheld');
+      assert.ok(detailIndex !== -1 && countsIndex !== -1);
+      assert.ok(detailIndex < countsIndex);
+      // The counts line—the run's conclusion—must be among the last things
+      // printed, not stranded above the skipped-group detail
+      assert.ok(stdout.includes('(Re-running with `--aggressive`'));
+      assert.match(stdout, /1 skipped \(considered unsafe to auto-merge\)\n\(Re-running with `--aggressive`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

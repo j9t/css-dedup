@@ -6,6 +6,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { stripVTControlCharacters } from 'node:util';
 import { analyze, dedup } from '../src/index.js';
+import { normalizeValue } from '../src/normalization.js';
 import { splitSelectors, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint } from '../src/selectors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -212,6 +213,84 @@ describe('Analysis', () => {
   test('Does not collapse unitless and unit-bearing zero for angle/time units', () => {
     const { findings } = analyze('.a { transition-delay: 0; } .b { transition-delay: 0s; }');
     assert.strictEqual(findings.length, 0);
+  });
+
+  test('Treats equivalent `s`/`ms` time values as duplicates, unconditionally', () => {
+    assert.strictEqual(analyze('.a { transition-duration: 0.3s; } .b { transition-duration: 300ms; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { transition-delay: 0s; } .b { transition-delay: 0ms; }').findings.length, 1);
+    // A value that loses precision under naive `parseFloat(x) * 1000`
+    // (`1.005 * 1000 === 1004.9999999999999` in IEEE 754) must still compare
+    // exactly equal to its millisecond spelling
+    assert.strictEqual(analyze('.a { transition-duration: 1.005s; } .b { transition-duration: 1005ms; }').findings.length, 1);
+    assert.strictEqual(analyze('.a { animation-duration: 1s; } .b { animation-duration: 2s; }').findings.length, 0);
+  });
+
+  test('Normalizes time units inside the `animation`/`transition` shorthand without touching the case-sensitive animation name', () => {
+    const { findings } = analyze('.a { animation: Spin 2s linear infinite; } .b { animation: Spin 2000ms linear infinite; }');
+    assert.strictEqual(findings.length, 1);
+    // A differently-cased animation name must still be treated as distinct
+    assert.strictEqual(analyze('.a { animation: Spin 2s linear; } .b { animation: spin 2000ms linear; }').findings.length, 0);
+  });
+
+  test('Does not mistake digits inside a case-sensitive custom ident for a time or angle value', () => {
+    // `fade2s` is a real, single `@keyframes` name here—without a left
+    // boundary on the number match, `2s` inside it would silently rewrite
+    // to `2000ms`, corrupting the identifier
+    assert.strictEqual(normalizeValue('animation-name', 'fade2s', false), 'fade2s');
+    assert.strictEqual(normalizeValue('animation-name', 'spin100grad', true), 'spin100grad');
+    assert.strictEqual(normalizeValue('animation-name', 'spin1turn', true), 'spin1turn');
+    assert.strictEqual(normalizeValue('animation', 'Spin2s linear infinite', false), 'Spin2s linear infinite');
+
+    // Two rules using genuinely different `@keyframes` names (one of which
+    // looks like a corrupted spelling the bug would have produced) must
+    // never be treated as duplicates—that would let `--fix` merge them and
+    // silently drop one animation
+    const { findings } = analyze('.a { animation-name: fade2s; } .b { animation-name: fade2000ms; }');
+    assert.strictEqual(findings.length, 0);
+
+    // `--fix` must leave the identifier untouched in the written output, too
+    const { css, applied } = dedup('.a { animation-name: fade2s; }\n.b { animation-name: fade2s; }\n');
+    assert.strictEqual(applied.length, 1);
+    assert.ok(css.includes('fade2s'));
+    assert.ok(!css.includes('fade2000ms'));
+  });
+
+  test('Sorts `min()`/`max()` arguments, since mathematical min/max is commutative', () => {
+    assert.strictEqual(analyze('.a { width: min(100%, 500px); } .b { width: min(500px, 100%); }').findings.length, 1);
+    assert.strictEqual(analyze('.a { width: max(1em, 2em); } .b { width: max(2em, 1em); }').findings.length, 1);
+    // Different raw spellings of the same argument value still land in the
+    // same sort position, since the sort runs after decimal normalization
+    assert.strictEqual(analyze('.a { width: min(0.50, 10px); } .b { width: min(10px, .5); }').findings.length, 1);
+  });
+
+  test('Does not reorder `clamp()` arguments (positional: minimum, preferred, maximum)', () => {
+    const { findings } = analyze('.a { width: clamp(1px, 50%, 500px); } .b { width: clamp(500px, 50%, 1px); }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Does not reorder `minmax()` arguments (positional grid track sizing, not the `min()` function)', () => {
+    const { findings } = analyze('.a { grid-template-columns: minmax(100px, 1fr); } .b { grid-template-columns: minmax(1fr, 100px); }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Sorts arguments of a `min()`/`max()` call nested inside another', () => {
+    const { findings } = analyze('.a { width: min(max(1px, 2px), 3px); } .b { width: min(3px, max(2px, 1px)); }');
+    assert.strictEqual(findings.length, 1);
+  });
+
+  test('Does not treat angle units as equivalent by default (aggressive-only)', () => {
+    const { findings } = analyze('.a { transform: rotate(90deg); } .b { transform: rotate(0.25turn); }');
+    assert.strictEqual(findings.length, 0);
+  });
+
+  test('Treats equivalent angle units as duplicates in aggressive mode', () => {
+    assert.strictEqual(analyze('.a { transform: rotate(90deg); } .b { transform: rotate(0.25turn); }', { aggressive: true }).findings.length, 1);
+    // `grad`→`deg` is an exact rational conversion (×9/10)
+    assert.strictEqual(analyze('.a { transform: rotate(90deg); } .b { transform: rotate(100grad); }', { aggressive: true }).findings.length, 1);
+    // `rad`→`deg` involves π, so it's rounded—still expected to land on the
+    // same canonical key at the conversion's fixed precision
+    assert.strictEqual(analyze('.a { transform: rotate(57.29578deg); } .b { transform: rotate(1rad); }', { aggressive: true }).findings.length, 1);
+    assert.strictEqual(analyze('.a { transform: rotate(45deg); } .b { transform: rotate(1rad); }', { aggressive: true }).findings.length, 0);
   });
 
   test('Does not collapse `0%` and unitless `0` for `flex-basis`', () => {
@@ -1142,7 +1221,7 @@ describe('Aggressive mode', () => {
 });
 
 describe('savingsOnly', () => {
-  test('Withholds a growing consolidation, returning the stylesheet untouched', () => {
+  test('Withholds a growing consolidation, returning the style sheet untouched', () => {
     const css = cssGrowing;
     const { css: output, applied, skipped, bytes, withheld } = dedup(css, { savingsOnly: true });
     assert.strictEqual(output, css);
@@ -1481,7 +1560,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix --savings-only -` still writes the untouched stylesheet to stdout when withholding', () => {
+  test('`--fix --savings-only -` still writes the untouched style sheet to stdout when withholding', () => {
     const source = cssGrowing;
     const { stdout, stderr, status } = run(['--fix', '-s', '-'], { input: source });
     assert.strictEqual(status, 1);
@@ -1713,7 +1792,7 @@ describe('CLI', () => {
     assert.ok(stderr.includes('1 consolidated'));
   });
 
-  test('`--fix -` still writes the full stylesheet to stdout when nothing is consolidated', () => {
+  test('`--fix -` still writes the full style sheet to stdout when nothing is consolidated', () => {
     const input = '.a { color: red; }\n.b { color: blue; }\n';
     const { stdout, stderr } = run(['--fix', '-'], { input });
     assert.strictEqual(stdout, input);
@@ -1788,6 +1867,127 @@ describe('CLI', () => {
       const { stdout, status } = run([file], { cwd: dirTemp });
       assert.strictEqual(status, 1);
       assert.ok(stdout.includes('duplicate'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Excludes a file via `--ignore-path`/`-p`, matched against the path relative to the working directory', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_ignore_path');
+    fs.mkdirSync(path.join(dirTemp, 'dist'), { recursive: true });
+    fs.mkdirSync(path.join(dirTemp, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'dist', 'bundle.css'), '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(path.join(dirTemp, 'src', 'main.css'), '.c { color: blue; }\n.d { color: blue; }\n');
+
+    try {
+      const excluded = run(['--ignore-path', 'dist/', dirTemp]);
+      assert.ok(!excluded.stdout.includes('color: red'));
+      assert.ok(excluded.stdout.includes('color: blue'));
+
+      const short = run(['-p', 'dist/', dirTemp]);
+      assert.ok(!short.stdout.includes('color: red'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Reports that files were excluded, not that none were found, when `--ignore-path` removes every discovered file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_ignore_path_all');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'one.css'), '.a { color: red; }\n');
+    fs.writeFileSync(path.join(dirTemp, 'two.css'), '.b { color: blue; }\n');
+
+    try {
+      const { stderr, status } = run(['--ignore-path', '\\.css$', dirTemp]);
+      assert.strictEqual(status, 1);
+      assert.ok(stderr.includes('All 2 `.css` files found under'));
+      assert.ok(stderr.includes('excluded by `--ignore-path`'));
+      assert.ok(!stderr.includes('No `.css` files found'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Excludes a file matching `ignorePaths` from the config file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_config_ignore_path');
+    fs.mkdirSync(path.join(dirTemp, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { ignorePaths: [/dist\\//] };\n');
+    fs.writeFileSync(path.join(dirTemp, 'dist', 'bundle.css'), '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(path.join(dirTemp, 'main.css'), '.c { color: blue; }\n.d { color: blue; }\n');
+
+    try {
+      const { stdout } = run(['.'], { cwd: dirTemp });
+      assert.ok(!stdout.includes('color: red'));
+      assert.ok(stdout.includes('color: blue'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Warns when `--fix` rewrites a file that references a source map', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_source_map');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'bundle.css');
+    fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n/*# sourceMappingURL=bundle.css.map */\n');
+
+    try {
+      const { stdout } = run(['--fix', file]);
+      assert.match(stdout, /references a source map \(`sourceMappingURL`\); `--fix` doesn’t regenerate it, so the map is now stale\./);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Does not warn about a source map when nothing was consolidated', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_source_map_clean');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'clean.css');
+    fs.writeFileSync(file, '.a { color: red; }\n/*# sourceMappingURL=clean.css.map */\n');
+
+    try {
+      const { stdout } = run(['--fix', file]);
+      assert.ok(!stdout.includes('sourceMappingURL'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Rejects a single-dash long-option spelling (`-fix`) instead of silently clustering it as `-f -i x`', () => {
+    const { stderr, status } = run(['-fix', path.join(fixturesDir, 'basic.css')]);
+    assert.strictEqual(status, 1);
+    assert.ok(stderr.includes('Unknown option `-fix`. Did you mean `--fix`?'));
+  });
+
+  test('Still allows genuine short-flag clustering (`-fa` for `-f -a`)', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_cluster');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'basic.css');
+    fs.copyFileSync(path.join(fixturesDir, 'basic.css'), file);
+
+    try {
+      const { stdout, status } = run(['-fa', file]);
+      assert.strictEqual(status, 0);
+      assert.ok(stdout.includes('consolidated'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Processes multiple files correctly when reads are prefetched concurrently', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_prefetch');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    for (let index = 0; index < 12; index++) {
+      fs.writeFileSync(path.join(dirTemp, `file-${index}.css`), `.a { color: red${index}; }\n.b { color: red${index}; }\n`);
+    }
+
+    try {
+      const { stdout, status } = run([dirTemp]);
+      assert.strictEqual(status, 1);
+      for (let index = 0; index < 12; index++) {
+        assert.ok(stdout.includes(path.join(dirTemp, `file-${index}.css`)));
+      }
+      // Each file’s own report must stay intact and in order, not interleaved
+      assert.match(stdout, /file-0\.css[\s\S]*file-1\.css[\s\S]*file-11\.css/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

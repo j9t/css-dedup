@@ -47,7 +47,7 @@ describe('Plugin: Dedup', () => {
     const input = '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n';
     const result = await postcss([cssdedup({ fix: true, savingsOnly: true })]).process(input, { from: undefined });
     assert.strictEqual(result.css, input);
-    assert.ok(result.warnings().some(warning => /Consolidation withheld \(`savingsOnly`\): 1 merge would make the stylesheet \d+ bytes bigger/.test(warning.text)));
+    assert.ok(result.warnings().some(warning => /Consolidation withheld \(`savingsOnly`\): 1 merge would make the style sheet \d+ bytes bigger/.test(warning.text)));
   });
 
   test('`savingsOnly: true` still applies a shrinking consolidation', async () => {

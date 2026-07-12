@@ -24,7 +24,7 @@ function atRuleScopeSegment(node) {
   return normalizeScopeSegment(`@${node.name} ${node.params}`);
 }
 
-// A “scope” is a DRY boundary: the root stylesheet, or the direct contents of
+// A “scope” is a DRY boundary: the root style sheet, or the direct contents of
 // one specific `@media`/`@supports`/`@layer`/etc. condition, or one specific
 // selector used as a nesting host (native CSS nesting). This computes the
 // label identifying that boundary—used both to keep unrelated scopes apart,
@@ -317,7 +317,7 @@ function describeAtRuleOccurrence(atrule, decl) {
 const RE_MULTILINE_SELECTOR_SEPARATOR = /,\s*\n/;
 const RE_TRAILING_INDENT = /[ \t]*$/;
 
-// Detects whether this stylesheet predominantly writes multi-selector rules
+// Detects whether this style sheet predominantly writes multi-selector rules
 // one selector per line (`.a,\n.b {}`) or comma-separated on one line
 // (`.a, .b {}`), by tallying the existing multi-selector rules already in
 // the source. A merged selector list follows whichever style is prevalent,
@@ -367,7 +367,7 @@ function removeEmptiedConditionBlocks(root, initiallyEmpty) {
 }
 
 // The `savingsOnly` gate: Consolidation runs on a detached clone first, and
-// only a result that doesn’t grow the stylesheet is grafted back onto the
+// only a result that doesn’t grow the style sheet is grafted back onto the
 // real root—so a growing result leaves the root untouched (“withheld”),
 // which is what lets the PostCSS plugin and the CLI share one
 // implementation of the policy. A withheld result reports `applied: []` and
@@ -398,7 +398,7 @@ export function dedupRoot(root, options = {}) {
 
 function consolidateRoot(root, options = {}) {
   // The subject-identity memoization is per run: fresh here, reused across
-  // this run’s fixed-point passes, never carried over to the next stylesheet
+  // this run’s fixed-point passes, never carried over to the next style sheet
   resetSubjectIdentities();
 
   // Taken before any mutation, so it reflects the file as it stood on disk—

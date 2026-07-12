@@ -161,7 +161,19 @@ const RE_TYPE_SELECTOR = /^[a-zA-Z][\w-]*/;
 // selector-taking pseudo-class (`:is()`, `:not()`, `:where()`, …) can smuggle
 // in arbitrary further identity—both fall back to “can’t tell” rather than
 // risk a wrong disjointness call.
+//
+// Memoized, and scoped to one consolidation run (see
+// `resetSubjectIdentities()`): The merge-safety scan asks about the same
+// selectors over and over within a run, but a long-lived process (a PostCSS
+// watch build, say) must not accumulate every selector—think generated or
+// hashed class names—it has ever seen.
 const subjectIdentities = new Map();
+
+// Called at the start of each top-level `dedupRoot()` run—the only flow that
+// reaches `subjectIdentity()`
+export function resetSubjectIdentities() {
+  subjectIdentities.clear();
+}
 
 function subjectIdentity(selector) {
   if (subjectIdentities.has(selector)) return subjectIdentities.get(selector);

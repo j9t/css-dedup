@@ -1,7 +1,7 @@
 import postcss from 'postcss';
 import { normalizeProp, declarationKey } from './normalization.js';
 import { isIgnoredSelector, resolveIgnorePatterns } from './hacks.js';
-import { splitSelectors, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint } from './selectors.js';
+import { splitSelectors, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint, resetSubjectIdentities } from './selectors.js';
 import { propertiesOverlap } from './shorthands.js';
 
 function normalizeScopeSegment(text) {
@@ -442,6 +442,10 @@ function removeEmptiedConditionBlocks(root, initiallyEmpty) {
 }
 
 export function dedupRoot(root, options = {}) {
+  // The subject-identity memoization is per run: fresh here, reused across
+  // this run’s fixed-point passes, never carried over to the next stylesheet
+  resetSubjectIdentities();
+
   // Taken before any mutation, so it reflects the file as it stood on disk—
   // byte counts, not character counts, since the effectiveness this measures
   // (fewer bytes over the wire) is a transfer-size concern

@@ -59,6 +59,11 @@ const RE_HSL_FUNCTION = /\bhsla?\(([^()]*)\)/g;
 // A plain 0–255 integer channel (the only form safe mode canonicalizes)
 const RE_INTEGER_CHANNEL = /^\d{1,3}$/;
 
+// A CSS number, optionally percent-suffixed—what aggressive mode accepts as
+// a channel. Guards the `Number()` call against JavaScript-isms that aren’t
+// CSS numbers (`0x1f`, `Infinity`).
+const RE_NUMBER_CHANNEL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?%?$/i;
+
 // A hue (a number with an optional angle unit)
 const RE_HUE = /^(-?[\d.]+)(deg|grad|rad|turn)?$/;
 
@@ -91,14 +96,23 @@ function formatChannels(channels, alpha) {
 // integers. Percentage or otherwise non-integer channels are left alone:
 // `50%` of 255 is 127.5, and how that rounds is the browser’s business, not
 // a textual equivalence. Aggressive mode accepts the rounding and resolves
-// those channels, too (`Math.round`, matching what current browsers do).
+// those channels, too (`Math.round`, matching what current browsers do),
+// clamping out-of-range channels the way the spec does (`rgb(300 0 0)`
+// renders as pure red).
 function canonicalizeRgb(args, aggressive) {
   const parts = args.trim().split(/[\s,/]+/);
   if (parts.length < 3 || parts.length > 4) return null;
 
+  // Legacy comma syntax requires all three channels to be the same type—a
+  // mixed `rgb(50%, 100, 20)` is invalid CSS that browsers drop, so it must
+  // never compare equal to a valid color (the merge keeps the shortest
+  // spelling, which could be the broken one); the modern space syntax
+  // allows mixing
+  if (args.includes(',') && new Set(parts.slice(0, 3).map(part => part.endsWith('%'))).size > 1) return null;
+
   const channels = parts.slice(0, 3).map(part => {
-    if (RE_INTEGER_CHANNEL.test(part)) return Number(part);
-    if (!aggressive) return null;
+    if (!aggressive) return RE_INTEGER_CHANNEL.test(part) ? Number(part) : null;
+    if (!RE_NUMBER_CHANNEL.test(part)) return null;
     const number = part.endsWith('%') ? (Number(part.slice(0, -1)) / 100) * 255 : Number(part);
     if (!Number.isFinite(number)) return null;
     return Math.round(Math.min(Math.max(number, 0), 255));
@@ -140,6 +154,7 @@ function parseHue(raw) {
 // Saturation/lightness are percentages (CSS Color 5 also allows the bare
 // number spelling of the same 0–100 scale)
 function parseHslComponent(raw) {
+  if (!RE_NUMBER_CHANNEL.test(raw)) return null;
   const number = Number(raw.endsWith('%') ? raw.slice(0, -1) : raw);
   if (!Number.isFinite(number)) return null;
   return Math.min(Math.max(number, 0), 100);
@@ -151,6 +166,13 @@ function parseHslComponent(raw) {
 function canonicalizeHsl(args) {
   const parts = args.trim().split(/[\s,/]+/);
   if (parts.length < 3 || parts.length > 4) return null;
+
+  // Legacy comma syntax requires percentage saturation/lightness—a unitless
+  // `hsl(120,50,50)` is invalid CSS that browsers drop, so it must never
+  // compare equal to a valid color (the merge keeps the shortest spelling,
+  // which could be the broken one); only the modern space syntax allows the
+  // bare-number spelling
+  if (args.includes(',') && (!parts[1].endsWith('%') || !parts[2].endsWith('%'))) return null;
 
   const hue = parseHue(parts[0]);
   const saturation = parseHslComponent(parts[1]);

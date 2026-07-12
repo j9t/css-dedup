@@ -8,26 +8,44 @@ function normalizeScopeSegment(text) {
   return text.trim().replace(/\s+/g, ' ');
 }
 
+// An anonymous `@layer {}` block is its own, distinct cascade layer—unlike
+// two same-name `@layer x {}` blocks, which share one layer—so each block
+// gets a unique label and never matches another scope. Keyed by node
+// identity (a WeakMap, so labels stay stable across passes within a run and
+// entries fall away with their nodes).
+const layersAnonymous = new WeakMap();
+let layersAnonymousCount = 0;
+
+function atRuleScopeSegment(node) {
+  if (node.name.toLowerCase() === 'layer' && !node.params.trim()) {
+    if (!layersAnonymous.has(node)) layersAnonymous.set(node, ++layersAnonymousCount);
+    return `@layer (anonymous ${layersAnonymous.get(node)})`;
+  }
+  return normalizeScopeSegment(`@${node.name} ${node.params}`);
+}
+
 // A “scope” is a DRY boundary: the root stylesheet, or the direct contents of
 // one specific `@media`/`@supports`/`@layer`/etc. condition, or one specific
 // selector used as a nesting host (native CSS nesting). This computes the
 // label identifying that boundary—used both to keep unrelated scopes apart,
 // and (see `mergeScopesByLabel()` below) to recognize the same boundary
-// when it’s written as two separate physical blocks. Whitespace is
-// normalized here (not case—`@layer` names and selectors can be
-// case-sensitive) so `@media (min-width: 768px)` and
+// when it’s written as two separate physical blocks. The label is always the
+// full ancestor chain: a `.card` nesting host at the root and one inside
+// `@media print` are different boundaries, so a bare-selector label would
+// wrongly identify them (and let aggressive mode merge across the
+// condition). Whitespace is normalized here (not case—`@layer` names and
+// selectors can be case-sensitive) so `@media (min-width: 768px)` and
 // `@media (min-width:768px)` produce the same label regardless of
 // formatting.
 function describeScope(container) {
   if (container.type === 'root') return 'root';
-  if (container.type === 'rule') return normalizeScopeSegment(container.selector);
 
   const chain = [];
   let node = container;
   while (node && node.type !== 'root') {
     chain.unshift(node.type === 'rule'
       ? normalizeScopeSegment(node.selector)
-      : normalizeScopeSegment(`@${node.name} ${node.params}`));
+      : atRuleScopeSegment(node));
     node = node.parent;
   }
   return chain.join(' > ');
@@ -166,6 +184,8 @@ function eligibleRules(scope, ignorePatterns) {
 export function analyzeRoot(root, options = {}) {
   const ignorePatterns = resolveIgnorePatterns(options);
   const aggressive = options.aggressive ?? false;
+  // The normalization mode is bound once per run (see `consolidateRoot()`)
+  const keyOf = decl => declarationKey(decl.prop, decl.value, decl.important, aggressive);
   const scopes = collectMergedScopes(root);
   const findings = [];
 
@@ -178,7 +198,7 @@ export function analyzeRoot(root, options = {}) {
       // Only compare a rule’s own direct declarations—not those of any
       // nested rules inside it, which belong to their own scope
       for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
-        const key = declarationKey(decl.prop, decl.value, decl.important, aggressive);
+        const key = keyOf(decl);
         const occurrence = { rule, decl };
 
         if (seenInRule.has(key)) {
@@ -241,7 +261,7 @@ export function analyzeRoot(root, options = {}) {
     const seenInAtrule = new Set();
 
     for (const decl of atrule.nodes.filter(node => node.type === 'decl')) {
-      const key = declarationKey(decl.prop, decl.value, decl.important, aggressive);
+      const key = keyOf(decl);
 
       if (seenInAtrule.has(key)) {
         findings.push({
@@ -320,102 +340,6 @@ function joinSelectors(selectors, rule, multiline) {
   return selectors.join(`,\n${indent}`);
 }
 
-// A declaration repeated verbatim (after normalization, so `RED`/`red` or
-// `.50`/`.5` count too) within the same rule or the same selector-less
-// at-rule block—`.a { color: red; color: red; }`—is always safe to collapse
-// on its own, unlike the cross-container merge below: Nothing relocates
-// across a rule boundary, so there’s no “intervening rule” risk to check
-// for. Later wins regardless of what’s earlier within one container, so
-// dropping every occurrence but the last never changes which value applies.
-// Runs first, so the cross-container merge pass below only ever sees one
-// occurrence per container per key.
-function removeRedundantDuplicates(container, scopeLabel, selectors, aggressive) {
-  const applied = [];
-  const byKey = new Map();
-
-  for (const decl of container.nodes.filter(node => node.type === 'decl')) {
-    const key = declarationKey(decl.prop, decl.value, decl.important, aggressive);
-    if (!byKey.has(key)) byKey.set(key, []);
-    byKey.get(key).push(decl);
-  }
-
-  for (const [key, decls] of byKey) {
-    if (decls.length < 2) continue;
-
-    const last = decls.at(-1);
-    // Same “keep whichever raw spelling is shortest” rule as the
-    // cross-container merge below
-    const shortestValue = decls.reduce((shortest, decl) => (
-      decl.value.length < shortest.length ? decl.value : shortest
-    ), decls[0].value);
-    if (last.value !== shortestValue) last.value = shortestValue;
-
-    for (const decl of decls) {
-      if (decl !== last) decl.remove();
-    }
-
-    applied.push({ scope: scopeLabel, key, redundant: true, selectors, value: shortestValue });
-  }
-
-  return applied;
-}
-
-// “True” if a declaration overlapping `propNormalized` (and not itself the
-// declaration matching `excludeKey`) is a candidate “extra”—one that
-// doesn’t participate in the merge but sits close enough to it, within the
-// same rule, to affect the outcome
-function isOverlappingExtra(node, propNormalized, excludeKey, aggressive) {
-  return node.type === 'decl'
-    && declarationKey(node.prop, node.value, node.important, aggressive) !== excludeKey
-    && propertiesOverlap(normalizeProp(node.prop, aggressive), propNormalized);
-}
-
-// Refuse to merge if any other rule sitting between the group’s first and
-// last occurrence also touches this property, or a shorthand/longhand
-// overlapping it (e.g. `margin-left` overlaps `margin`)—for any selector.
-// Moving the declaration past such a rule could change which value wins for
-// whatever that rule matches. Over-cautious by design: It leaves some
-// genuinely safe merges for manual review rather than risk breaking the
-// cascade.
-//
-// One exception: If every one of the intervening rule’s selectors is
-// provably mutually exclusive with every one of the group’s own selectors
-// (see `selectorsAreMutuallyExclusive()`—e.g. `html[lang="da"] a` vs.
-// `html[lang="de"] a`), it can never match an element the group’s rules do,
-// so scanning continues past it for a real blocker. Aggressive mode widens
-// this to selectors that are merely likely disjoint (see
-// `selectorsLikelyDisjoint()`—subject compounds sharing no class/ID/type),
-// trading the proof for what BEM-style class naming makes almost always
-// true in practice.
-//
-// `exemptRules` widens the “is this rule part of the merge” exclusion
-// beyond this one group’s own members to every rule in its entangled
-// cluster (see `mergeCluster()`): A fellow cluster member isn’t a real
-// intervening threat, since it’s being absorbed into the same coordinated
-// merge rather than staying behind.
-function findBlockingRule(scope, distinctRules, exemptRules, firstIndex, lastIndex, propNormalized, aggressive) {
-  const groupSelectors = distinctRules.flatMap(rule => splitSelectors(rule.selector));
-  for (const [index, rule] of scope.rules.entries()) {
-    if (index <= firstIndex || index >= lastIndex || exemptRules.has(rule)) continue;
-    const conflict = rule.nodes.find(node => node.type === 'decl' && propertiesOverlap(normalizeProp(node.prop, aggressive), propNormalized));
-    if (!conflict) continue;
-
-    const candidateSelectors = splitSelectors(rule.selector);
-    // The (memoized, cheap) heuristic goes first: In aggressive mode it
-    // clears most pairs, saving the exclusivity proof’s full selector parse
-    const disjoint = candidateSelectors.every(candidateSelector => (
-      groupSelectors.every(groupSelector => (
-        (aggressive && selectorsLikelyDisjoint(candidateSelector, groupSelector))
-        || selectorsAreMutuallyExclusive(candidateSelector, groupSelector)
-      ))
-    ));
-    if (disjoint) continue;
-
-    return { rule, prop: normalizeProp(conflict.prop, aggressive) };
-  }
-  return null;
-}
-
 // Conditional group rules whose empty block is inert—an empty `@media`,
 // `@supports`, or `@container` block styles nothing and declares nothing.
 // `@layer` is deliberately absent: A layer’s position in the layer order is
@@ -427,21 +351,52 @@ const INERT_WHEN_EMPTY_ATRULES = new Set(['media', 'supports', 'container']);
 // same-condition blocks, which can drain the earlier one completely. This
 // removes such emptied blocks—only ones this run emptied (`initiallyEmpty`
 // snapshots the source state), and only where emptiness is provably inert.
-// Runs until quiet, since removing an inner block can empty its parent.
+// One walk collects the candidates in document order—parents before
+// children—so the reverse pass below sees each inner block before its
+// parent, and a parent emptied by its child’s removal is caught in the same
+// sweep (no re-walking, no removal during traversal).
 function removeEmptiedConditionBlocks(root, initiallyEmpty) {
-  let removedAny = true;
-  while (removedAny) {
-    removedAny = false;
-    root.walkAtRules(atrule => {
-      if (!INERT_WHEN_EMPTY_ATRULES.has(atrule.name.toLowerCase())) return;
-      if (!atrule.nodes || atrule.nodes.length || initiallyEmpty.has(atrule)) return;
-      atrule.remove();
-      removedAny = true;
-    });
+  const candidates = [];
+  root.walkAtRules(atrule => {
+    if (INERT_WHEN_EMPTY_ATRULES.has(atrule.name.toLowerCase())) candidates.push(atrule);
+  });
+
+  for (const atrule of candidates.reverse()) {
+    if (atrule.nodes && !atrule.nodes.length && !initiallyEmpty.has(atrule)) atrule.remove();
   }
 }
 
+// The `savingsOnly` gate: Consolidation runs on a detached clone first, and
+// only a result that doesn’t grow the stylesheet is grafted back onto the
+// real root—so a growing result leaves the root untouched (“withheld”),
+// which is what lets the PostCSS plugin and the CLI share one
+// implementation of the policy. A withheld result reports `applied: []` and
+// unchanged bytes (that’s what actually happened), with the would-be outcome
+// under `withheld` so callers can explain what was declined. A net-zero
+// result still applies (deduplicated at no byte cost).
 export function dedupRoot(root, options = {}) {
+  if (!options.savingsOnly) return consolidateRoot(root, options);
+
+  const clone = root.clone();
+  const result = consolidateRoot(clone, options);
+  if (result.bytes.saved < 0) {
+    return {
+      applied: [],
+      skipped: result.skipped,
+      bytes: { before: result.bytes.before, after: result.bytes.before, saved: 0 },
+      withheld: { count: result.applied.length, bytes: result.bytes },
+    };
+  }
+
+  if (result.applied.length) {
+    root.raws = clone.raws;
+    root.removeAll();
+    root.append(clone.nodes);
+  }
+  return result;
+}
+
+function consolidateRoot(root, options = {}) {
   // The subject-identity memoization is per run: fresh here, reused across
   // this run’s fixed-point passes, never carried over to the next stylesheet
   resetSubjectIdentities();
@@ -465,6 +420,110 @@ export function dedupRoot(root, options = {}) {
     root.walkAtRules(atrule => {
       if (atrule.nodes && !atrule.nodes.length) initiallyEmpty.add(atrule);
     });
+  }
+
+  // The normalization mode is bound once per run: Everything below keys and
+  // compares declarations through these two, so no call site can fall back
+  // to default-mode normalization by forgetting a flag—which would silently
+  // give the same declaration two different keys in different phases of an
+  // aggressive run
+  const keyOf = decl => declarationKey(decl.prop, decl.value, decl.important, aggressive);
+  const propOf = prop => normalizeProp(prop, aggressive);
+
+  // A declaration repeated verbatim (after normalization, so `RED`/`red` or
+  // `.50`/`.5` count too) within the same rule or the same selector-less
+  // at-rule block—`.a { color: red; color: red; }`—is always safe to collapse
+  // on its own, unlike the cross-container merges below: Nothing relocates
+  // across a rule boundary, so there’s no “intervening rule” risk to check
+  // for. Later wins regardless of what’s earlier within one container, so
+  // dropping every occurrence but the last never changes which value applies.
+  // Runs first, so the cross-container merge passes below only ever see one
+  // occurrence per container per key.
+  function removeRedundantDuplicates(container, scopeLabel, selectors) {
+    const collapsed = [];
+    const byKey = new Map();
+
+    for (const decl of container.nodes.filter(node => node.type === 'decl')) {
+      const key = keyOf(decl);
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(decl);
+    }
+
+    for (const [key, decls] of byKey) {
+      if (decls.length < 2) continue;
+
+      const last = decls.at(-1);
+      // Same “keep whichever raw spelling is shortest” rule as the
+      // cross-container merges below
+      const shortestValue = decls.reduce((shortest, decl) => (
+        decl.value.length < shortest.length ? decl.value : shortest
+      ), decls[0].value);
+      if (last.value !== shortestValue) last.value = shortestValue;
+
+      for (const decl of decls) {
+        if (decl !== last) decl.remove();
+      }
+
+      collapsed.push({ scope: scopeLabel, key, redundant: true, selectors, value: shortestValue });
+    }
+
+    return collapsed;
+  }
+
+  // “True” if a declaration overlapping `propNormalized` (and not itself the
+  // declaration matching `excludeKey`) is a candidate “extra”—one that
+  // doesn’t participate in the merge but sits close enough to it, within the
+  // same rule, to affect the outcome
+  function isOverlappingExtra(node, propNormalized, excludeKey) {
+    return node.type === 'decl'
+      && keyOf(node) !== excludeKey
+      && propertiesOverlap(propOf(node.prop), propNormalized);
+  }
+
+  // Refuse to merge if any other rule sitting between the group’s first and
+  // last occurrence also touches this property, or a shorthand/longhand
+  // overlapping it (e.g. `margin-left` overlaps `margin`)—for any selector.
+  // Moving the declaration past such a rule could change which value wins for
+  // whatever that rule matches. Over-cautious by design: It leaves some
+  // genuinely safe merges for manual review rather than risk breaking the
+  // cascade.
+  //
+  // One exception: If every one of the intervening rule’s selectors is
+  // provably mutually exclusive with every one of the group’s own selectors
+  // (see `selectorsAreMutuallyExclusive()`—e.g. `html[lang="da"] a` vs.
+  // `html[lang="de"] a`), it can never match an element the group’s rules do,
+  // so scanning continues past it for a real blocker. Aggressive mode widens
+  // this to selectors that are merely likely disjoint (see
+  // `selectorsLikelyDisjoint()`—subject compounds sharing no class/ID/type),
+  // trading the proof for what BEM-style class naming makes almost always
+  // true in practice.
+  //
+  // `exemptRules` widens the “is this rule part of the merge” exclusion
+  // beyond this one group’s own members to every rule in its entangled
+  // cluster (see `mergeCluster()`): A fellow cluster member isn’t a real
+  // intervening threat, since it’s being absorbed into the same coordinated
+  // merge rather than staying behind.
+  function findBlockingRule(scope, distinctRules, exemptRules, firstIndex, lastIndex, propNormalized) {
+    const groupSelectors = distinctRules.flatMap(rule => splitSelectors(rule.selector));
+    for (const [index, rule] of scope.rules.entries()) {
+      if (index <= firstIndex || index >= lastIndex || exemptRules.has(rule)) continue;
+      const conflict = rule.nodes.find(node => node.type === 'decl' && propertiesOverlap(propOf(node.prop), propNormalized));
+      if (!conflict) continue;
+
+      const candidateSelectors = splitSelectors(rule.selector);
+      // The (memoized, cheap) heuristic goes first: In aggressive mode it
+      // clears most pairs, saving the exclusivity proof’s full selector parse
+      const disjoint = candidateSelectors.every(candidateSelector => (
+        groupSelectors.every(groupSelector => (
+          (aggressive && selectorsLikelyDisjoint(candidateSelector, groupSelector))
+          || selectorsAreMutuallyExclusive(candidateSelector, groupSelector)
+        ))
+      ));
+      if (disjoint) continue;
+
+      return { rule, prop: propOf(conflict.prop) };
+    }
+    return null;
   }
 
   // Folds rules repeating the same selector (list) within one scope into
@@ -503,7 +562,7 @@ export function dedupRoot(root, options = {}) {
         const exempt = new Set([rule, target]);
         let blocking = null;
         for (const decl of rule.nodes) {
-          blocking = findBlockingRule(scope, [rule, target], exempt, ruleIndex, targetIndex, normalizeProp(decl.prop, aggressive), aggressive);
+          blocking = findBlockingRule(scope, [rule, target], exempt, ruleIndex, targetIndex, propOf(decl.prop));
           if (blocking) break;
         }
         if (blocking) {
@@ -533,7 +592,7 @@ export function dedupRoot(root, options = {}) {
       }
 
       if (merged) {
-        applied.push(...removeRedundantDuplicates(target, scope.label, splitSelectors(target.selector), aggressive));
+        applied.push(...removeRedundantDuplicates(target, scope.label, splitSelectors(target.selector)));
       }
     }
   }
@@ -564,13 +623,13 @@ export function dedupRoot(root, options = {}) {
       const sharedIndex = rule.nodes.indexOf(sharedDecl);
 
       if (rule === target) {
-        const isExtra = node => node.type === 'decl' && declarationKey(node.prop, node.value, node.important, aggressive) !== key;
+        const isExtra = node => node.type === 'decl' && keyOf(node) !== key;
         const afterExtras = rule.nodes.filter((node, index) => index > sharedIndex && isExtra(node));
         const beforeExtras = rule.nodes.filter((node, index) => index < sharedIndex && isExtra(node));
         if (afterExtras.length) afterExtrasByRule.set(rule, afterExtras);
         if (beforeExtras.length) beforeExtrasByRule.set(rule, beforeExtras);
       } else {
-        const afterExtras = rule.nodes.filter((node, index) => index > sharedIndex && isOverlappingExtra(node, propNormalized, key, aggressive));
+        const afterExtras = rule.nodes.filter((node, index) => index > sharedIndex && isOverlappingExtra(node, propNormalized, key));
         if (afterExtras.length) afterExtrasByRule.set(rule, afterExtras);
       }
     }
@@ -600,7 +659,7 @@ export function dedupRoot(root, options = {}) {
     for (const rule of distinctRules) {
       if (rule === target) continue;
       for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
-        if (declarationKey(decl.prop, decl.value, decl.important, aggressive) === key) decl.remove();
+        if (keyOf(decl) === key) decl.remove();
       }
     }
 
@@ -671,7 +730,7 @@ export function dedupRoot(root, options = {}) {
     for (let i = 1; i < distinctRules.length; i++) {
       const previousIndex = scope.rules.indexOf(distinctRules[i - 1]);
       const nextIndex = scope.rules.indexOf(distinctRules[i]);
-      if (findBlockingRule(scope, distinctRules, exempt, previousIndex, nextIndex, propNormalized, aggressive)) {
+      if (findBlockingRule(scope, distinctRules, exempt, previousIndex, nextIndex, propNormalized)) {
         runs.push([]);
       }
       runs.at(-1).push(distinctRules[i]);
@@ -716,13 +775,13 @@ export function dedupRoot(root, options = {}) {
 
     for (const rule of rules) {
       const allShared = rule.nodes.every(node => (
-        node.type === 'decl' && clusterKeys.has(declarationKey(node.prop, node.value, node.important, aggressive))
+        node.type === 'decl' && clusterKeys.has(keyOf(node))
       ));
       if (!allShared) return false;
     }
 
     const sequences = rules.map(rule => (
-      rule.nodes.map(node => declarationKey(node.prop, node.value, node.important, aggressive)).join('\n')
+      rule.nodes.map(node => keyOf(node)).join('\n')
     ));
     const sameOrder = sequences.every(sequence => sequence === sequences[0]);
     if (!sameOrder) {
@@ -743,7 +802,7 @@ export function dedupRoot(root, options = {}) {
     target.selector = joinSelectors(mergedSelectors, target, multilineSelectors);
 
     for (const decl of target.nodes) {
-      const key = declarationKey(decl.prop, decl.value, decl.important, aggressive);
+      const key = keyOf(decl);
       const group = cluster.find(candidate => candidate.key === key);
       const shortestValue = group.occurrences.reduce((shortest, occ) => (
         occ.decl.value.length < shortest.length ? occ.decl.value : shortest
@@ -785,7 +844,7 @@ export function dedupRoot(root, options = {}) {
     const viable = rule => {
       const declIndex = rule.nodes.indexOf(occurrences.find(occ => occ.rule === rule).decl);
       return !rule.nodes.some((node, index) => (
-        index > declIndex && node.type === 'decl' && propertiesOverlap(normalizeProp(node.prop, aggressive), propNormalized)
+        index > declIndex && node.type === 'decl' && propertiesOverlap(propOf(node.prop), propNormalized)
       ));
     };
 
@@ -799,7 +858,7 @@ export function dedupRoot(root, options = {}) {
       if (run.length) {
         const previousIndex = scope.rules.indexOf(run.at(-1));
         const nextIndex = scope.rules.indexOf(rule);
-        if (findBlockingRule(scope, distinctRules, new Set(), previousIndex, nextIndex, propNormalized, aggressive)) {
+        if (findBlockingRule(scope, distinctRules, new Set(), previousIndex, nextIndex, propNormalized)) {
           runs.push([rule]);
           continue;
         }
@@ -987,10 +1046,10 @@ export function dedupRoot(root, options = {}) {
         const memberIsAfterHub = scope.rules.indexOf(rule) > hubIndex;
 
         if (memberIsAfterHub) {
-          const beforeShared = rule.nodes.filter((node, index) => index < memberSharedIndex && isOverlappingExtra(node, propNormalized, key, aggressive));
+          const beforeShared = rule.nodes.filter((node, index) => index < memberSharedIndex && isOverlappingExtra(node, propNormalized, key));
           beforeExtras.push(...beforeShared);
         } else {
-          const afterShared = rule.nodes.filter((node, index) => index > memberSharedIndex && isOverlappingExtra(node, propNormalized, key, aggressive));
+          const afterShared = rule.nodes.filter((node, index) => index > memberSharedIndex && isOverlappingExtra(node, propNormalized, key));
           afterExtras.push(...afterShared);
         }
 
@@ -1028,7 +1087,7 @@ export function dedupRoot(root, options = {}) {
 
     for (const rule of rules) {
       for (const decl of rule.nodes.filter(node => node.type === 'decl')) {
-        const key = declarationKey(decl.prop, decl.value, decl.important, aggressive);
+        const key = keyOf(decl);
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key).push({ rule, decl });
       }
@@ -1039,7 +1098,7 @@ export function dedupRoot(root, options = {}) {
     for (const [key, occurrences] of byKey) {
       const distinctRules = [...new Set(occurrences.map(occ => occ.rule))];
       if (distinctRules.length < 2) continue;
-      groups.push({ key, occurrences, distinctRules, propNormalized: normalizeProp(occurrences[0].decl.prop, aggressive) });
+      groups.push({ key, occurrences, distinctRules, propNormalized: propOf(occurrences[0].decl.prop) });
     }
 
     // Cluster the candidate groups by shared rule membership (union-find):
@@ -1096,7 +1155,7 @@ export function dedupRoot(root, options = {}) {
       for (const group of cluster) {
         const firstIndex = scope.rules.indexOf(group.distinctRules[0]);
         const lastIndex = scope.rules.indexOf(group.distinctRules.at(-1));
-        const blocking = findBlockingRule(scope, group.distinctRules, clusterRules, firstIndex, lastIndex, group.propNormalized, aggressive);
+        const blocking = findBlockingRule(scope, group.distinctRules, clusterRules, firstIndex, lastIndex, group.propNormalized);
         if (blocking) { outsideBlocker = { group, blocking }; break; }
       }
 
@@ -1144,11 +1203,11 @@ export function dedupRoot(root, options = {}) {
     const scopes = aggressive ? collectMergedScopes(root) : collectScopes(root);
     for (const scope of scopes) {
       for (const rule of eligibleRules(scope, ignorePatterns)) {
-        applied.push(...removeRedundantDuplicates(rule, scope.label, splitSelectors(rule.selector), aggressive));
+        applied.push(...removeRedundantDuplicates(rule, scope.label, splitSelectors(rule.selector)));
       }
     }
     for (const atrule of collectDeclOnlyContainers(root)) {
-      applied.push(...removeRedundantDuplicates(atrule, describeScope(atrule), [atRuleLabel(atrule)], aggressive));
+      applied.push(...removeRedundantDuplicates(atrule, describeScope(atrule), [atRuleLabel(atrule)]));
     }
     for (const scope of scopes) foldSameSelectorRules(scope);
     for (const scope of scopes) mergeDuplicateGroups(scope);
@@ -1162,6 +1221,6 @@ export function dedupRoot(root, options = {}) {
 
 export function dedup(css, options = {}) {
   const root = postcss.parse(css, { from: options.from });
-  const { applied, skipped, bytes } = dedupRoot(root, options);
-  return { css: root.toString(), applied, skipped, bytes };
+  const result = dedupRoot(root, options);
+  return { css: root.toString(), ...result };
 }

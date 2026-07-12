@@ -104,7 +104,7 @@ export default {
 };
 ```
 
-CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `savingsOnly` is a write policy, so it only takes effect on `--fix` runs (plain reports are unaffected); the programmatic `dedup()` doesn’t take it, either—it always returns the consolidated CSS, and callers can apply the same policy by checking `bytes.saved` themselves.
+CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `savingsOnly` is a consolidation policy, so on plain report runs it only adjusts the payoff line (a report never writes anyway); on `--fix` runs it decides whether the file is written.
 
 ### Programmatic Use
 
@@ -125,6 +125,7 @@ Both functions accept an options object:
   ignoreSelectors: [/^\.legacy-/],  // additional selector patterns to exclude
   ignoreSelectorsDefaults: true,    // set to `false` to disable the built-in hack list
   aggressive: false,                // set to `true` to also allow probably-safe merges
+  savingsOnly: false,               // set to `true` to withhold a consolidation that would grow the stylesheet (`dedup()` only)
 }
 ```
 
@@ -141,7 +142,7 @@ Both functions accept an options object:
 }
 ```
 
-`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten stylesheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the stylesheet before and after, since that’s what changes over the wire, not the character count, covering everything `--fix` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
+`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten stylesheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the stylesheet before and after, since that’s what changes over the wire, not the character count, covering everything `--fix` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. With `savingsOnly: true`, a consolidation whose net `saved` would be negative is withheld: `css` comes back untouched, `applied` is empty, `bytes` reports no change (that’s what actually happened), and the declined outcome arrives as `withheld: { count, bytes }`—the number of merges and the byte counts the consolidation would have had (`withheld` is absent whenever nothing was withheld). `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
 
 ### PostCSS Plugin Use
 
@@ -160,7 +161,7 @@ const fixed = await postcss([cssdedup({ fix: true })]).process(css, { from: 'def
 console.log(fixed.css);
 ```
 
-The plugin takes the same options as `analyze()`/`dedup()`, plus `fix: true` to switch it into consolidation mode. Since CSS Dedup is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may duplicate work those tools do.
+The plugin takes the same options as `analyze()`/`dedup()`, plus `fix: true` to switch it into consolidation mode (`aggressive: true` and `savingsOnly: true` work here, too—a withheld consolidation leaves the root untouched and surfaces as a warning). Since CSS Dedup is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may duplicate work those tools do.
 
 ## How It Works
 

@@ -12,6 +12,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.join(__dirname, 'css-dedup.js');
 const fixturesDir = path.join(__dirname, '..', 'test', 'fixtures');
 
+// A consolidation that grows the file: the long selector list costs more
+// than the removed `color` declaration saves
+const cssGrowing = '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n';
+
+// Only mergeable in aggressive mode (the intervening rule blocks the default
+// pass), and the merge grows the file—both rules keep another declaration,
+// so the merge adds the long selector list without removing a rule
+const cssGrowingAggressive = [
+  '.module-header-navigation-primary-link { color: red; font-size: 14px; }',
+  '.unrelated-widget:hover { color: blue; }',
+  '.module-footer-navigation-secondary-link { color: red; letter-spacing: 1px; }',
+  '',
+].join('\n');
+
 function run(args, spawnOptions = {}) {
   const result = spawnSync('node', [scriptPath, ...args], { encoding: 'utf-8', timeout: 30_000, ...spawnOptions });
   return {
@@ -1071,6 +1085,84 @@ describe('Aggressive mode', () => {
     const { applied } = dedup(css, { aggressive: true });
     assert.strictEqual(applied.length, 0);
   });
+
+  test('Does not merge same-selector nesting hosts under different ancestors', () => {
+    // A `.card` host at the root and one inside `@media print` are different
+    // DRY boundaries—only the bare selector matches, not the context
+    const f1 = dedup('.card { .title { color: red; } }\n@media print { .card { .title { color: red; } } }', { aggressive: true });
+    assert.strictEqual(f1.applied.length, 0);
+    assert.ok(f1.css.includes('.card { .title { color: red; } }\n@media print'));
+
+    const f2 = dedup('#a { .card { color: red; } }\n#b { .card { color: red; } }', { aggressive: true });
+    assert.strictEqual(f2.applied.length, 0);
+  });
+
+  test('Never merges across anonymous `@layer` blocks (each is its own layer)', () => {
+    const css = '@layer { .a { color: red; } }\n@layer { .c { color: blue; } }\n@layer { .a2 { color: red; } }';
+    assert.strictEqual(dedup(css, { aggressive: true }).applied.length, 0);
+    // Named layers with the same name are one layer, so those still merge
+    const named = dedup('@layer x { .a { color: red; } }\n@layer x { .b { color: red; } }', { aggressive: true });
+    assert.strictEqual(named.applied.length, 1);
+  });
+
+  test('A namespaced type or attribute selector never counts as likely disjoint', () => {
+    assert.strictEqual(selectorsLikelyDisjoint('rect', 'svg|rect'), false);
+    assert.strictEqual(selectorsLikelyDisjoint('.card', '[xlink|href="a.zzz"]'), false);
+
+    // And so the intervening rules keep blocking the merge
+    const attribute = dedup('.card { color: red; }\n[xlink|href="a.zzz"] { color: green; }\n.other { color: red; }', { aggressive: true });
+    assert.strictEqual(attribute.applied.length, 0);
+    const type = dedup('rect { fill: red; }\nsvg|rect { fill: blue; }\n.r2 { fill: red; }', { aggressive: true });
+    assert.strictEqual(type.applied.length, 0);
+  });
+
+  test('Does not treat invalid legacy color syntax as equivalent to a valid color', () => {
+    // Legacy comma syntax requires percentage saturation/lightness and
+    // homogeneous rgb channel types—browsers drop these spellings, so a
+    // merge could otherwise keep the broken spelling as the survivor
+    assert.strictEqual(analyze('.a { color: rgb(64 191 64); } .b { color: hsl(120,50,50); }', { aggressive: true }).findings.length, 0);
+    assert.strictEqual(analyze('.a { color: rgb(128 100 20); } .b { color: rgb(50%, 100, 20); }', { aggressive: true }).findings.length, 0);
+    // The modern space syntax allows bare numbers, so that stays equivalent
+    assert.strictEqual(analyze('.a { color: rgb(64 191 64); } .b { color: hsl(120 50 50); }', { aggressive: true }).findings.length, 1);
+  });
+
+  test('Clamps out-of-range `rgb()` channels consistently (`300` like `1000`)', () => {
+    assert.strictEqual(analyze('.a { color: rgb(300 0 0); } .b { color: #f00; }', { aggressive: true }).findings.length, 1);
+    assert.strictEqual(analyze('.a { color: rgb(1000 0 0); } .b { color: #f00; }', { aggressive: true }).findings.length, 1);
+    // Safe mode still leaves out-of-range channels alone
+    assert.strictEqual(analyze('.a { color: rgb(300 0 0); } .b { color: #f00; }').findings.length, 0);
+  });
+});
+
+describe('savingsOnly', () => {
+  test('Withholds a growing consolidation, returning the stylesheet untouched', () => {
+    const css = cssGrowing;
+    const { css: output, applied, skipped, bytes, withheld } = dedup(css, { savingsOnly: true });
+    assert.strictEqual(output, css);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(bytes.saved, 0);
+    assert.strictEqual(bytes.after, bytes.before);
+    assert.strictEqual(withheld.count, 1);
+    assert.ok(withheld.bytes.saved < 0);
+  });
+
+  test('Applies a shrinking consolidation identically to an ungated run', () => {
+    const css = '.a { color: red; }\n.b { color: red; }\n';
+    const gated = dedup(css, { savingsOnly: true });
+    const ungated = dedup(css);
+    assert.strictEqual(gated.css, ungated.css);
+    assert.strictEqual(gated.withheld, undefined);
+    assert.strictEqual(gated.applied.length, ungated.applied.length);
+    assert.deepStrictEqual(gated.bytes, ungated.bytes);
+  });
+
+  test('Composes with aggressive mode (a growing aggressive result is withheld)', () => {
+    const css = cssGrowingAggressive;
+    const { css: output, withheld } = dedup(css, { aggressive: true, savingsOnly: true });
+    assert.strictEqual(output, css);
+    assert.strictEqual(withheld.count, 1);
+  });
 });
 
 describe('Fixtures', () => {
@@ -1270,7 +1362,7 @@ describe('CLI', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_growth_report');
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'grow.css');
-    fs.writeFileSync(file, '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n');
+    fs.writeFileSync(file, cssGrowing);
 
     try {
       const { stdout } = run([file]);
@@ -1284,7 +1376,7 @@ describe('CLI', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_growth_dedup');
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'grow.css');
-    fs.writeFileSync(file, '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n');
+    fs.writeFileSync(file, cssGrowing);
 
     try {
       const { stdout } = run(['--fix', file]);
@@ -1306,7 +1398,7 @@ describe('CLI', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_savings_only');
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'grow.css');
-    const source = '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n';
+    const source = cssGrowing;
     fs.writeFileSync(file, source);
 
     try {
@@ -1341,14 +1433,7 @@ describe('CLI', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_savings_only_aggressive');
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'grow.css');
-    // Only mergeable in aggressive mode (the intervening rule blocks the
-    // default pass), and the merge grows the file—so `-s` must withhold it
-    const source = [
-      '.module-header-navigation-primary-link { color: red; font-size: 14px; }',
-      '.unrelated-widget:hover { color: blue; }',
-      '.module-footer-navigation-secondary-link { color: red; letter-spacing: 1px; }',
-      '',
-    ].join('\n');
+    const source = cssGrowingAggressive;
     fs.writeFileSync(file, source);
 
     try {
@@ -1364,7 +1449,7 @@ describe('CLI', () => {
   });
 
   test('`--fix --savings-only -` still writes the untouched stylesheet to stdout when withholding', () => {
-    const source = '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n';
+    const source = cssGrowing;
     const { stdout, stderr, status } = run(['--fix', '-s', '-'], { input: source });
     assert.strictEqual(status, 1);
     assert.strictEqual(stdout, source);
@@ -1376,7 +1461,7 @@ describe('CLI', () => {
     fs.mkdirSync(dirTemp, { recursive: true });
     fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { savingsOnly: true };\n');
     const file = path.join(dirTemp, 'grow.css');
-    const source = '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n';
+    const source = cssGrowing;
     fs.writeFileSync(file, source);
 
     try {
@@ -1388,19 +1473,80 @@ describe('CLI', () => {
     }
   });
 
+  test('Still warns to test when an aggressive cross-block fold nets fewer applied entries than the default pass would', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_aggressive_fewer_entries');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'cross.css');
+    // Aggressive merges all four selectors in ONE entry where the default
+    // pass would do TWO per-block merges—entry counts can't tell the modes
+    // apart here, only the outputs can
+    fs.writeFileSync(file, '@media (min-width: 40em) { .a { color: red; } .b { color: red; } }\n@media (min-width: 40em) { .c { color: red; } .d { color: red; } }\n');
+
+    try {
+      const { stdout } = run(['-f', '-a', file]);
+      assert.match(stdout, /Some of these merges are aggressive-only—probably, but not provably, safe\./);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Still previews `--aggressive` when it would restructure merges into fewer entries', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_aggressive_preview_fewer');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'cross.css');
+    fs.writeFileSync(file, '@media (min-width: 40em) { .a { color: red; } .b { color: red; } }\n@media (min-width: 40em) { .c { color: red; } .d { color: red; } }\n');
+
+    try {
+      const report = run([file]);
+      assert.match(report.stdout, /With `--fix --aggressive`: further consolidation, saving \d+ bytes \(\d+\.\d%\) in total\./);
+
+      const fix = run(['--fix', file]);
+      assert.match(fix.stdout, /\(Re-running with `--aggressive` would consolidate further, saving another \d+ bytes\.\)/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Does not hint “may merge with `--aggressive`” when the aggressive pass skips the group too', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_no_false_hint');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'hint.css');
+    // The blocker `.a.x` shares a class with the group in both modes; only
+    // the key’s spelling differs between them (hsl vs. canonicalized hex)
+    fs.writeFileSync(file, '.a { color: hsl(120, 50%, 50%); }\n.a.x { color: blue; }\n.c { color: hsl(120, 50%, 50%); }\n');
+
+    try {
+      const { stdout } = run([file]);
+      assert.match(stdout, /intervening `color` declaration in `\.a\.x`/);
+      assert.ok(!stdout.includes('may merge with `--aggressive`'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Suppresses the `--aggressive` re-run hint on a withheld run when aggressive would grow the file too', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_withheld_no_hint');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(file, cssGrowing);
+
+    try {
+      const { stdout } = run(['-f', '-s', file]);
+      assert.match(stdout, /1 withheld/);
+      // A `--fix --aggressive --savings-only` re-run would withhold as
+      // well, so promising it anything—let alone “savings” measured against
+      // the never-written output—would be false
+      assert.ok(!stdout.includes('Re-running with `--aggressive`'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
   test('Notes when the `--aggressive` extras would grow the file rather than shrink it', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_growth_aggressive');
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'grow.css');
-    // Only aggressive mode merges this (the intervening `.unrelated:hover`
-    // blocks the default pass), and both rules keep another declaration, so
-    // the merge adds the long selector list without removing a rule
-    fs.writeFileSync(file, [
-      '.module-header-navigation-primary-link { color: red; font-size: 14px; }',
-      '.unrelated-widget:hover { color: blue; }',
-      '.module-footer-navigation-secondary-link { color: red; letter-spacing: 1px; }',
-      '',
-    ].join('\n'));
+    fs.writeFileSync(file, cssGrowingAggressive);
 
     try {
       const report = run([file]);

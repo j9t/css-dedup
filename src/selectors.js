@@ -188,7 +188,11 @@ function computeSubjectIdentity(selector) {
   const lastRun = scan.combinatorRuns.at(-1);
   const compound = selector.slice(lastRun ? lastRun.end : 0);
 
-  if (compound.includes('\\') || compound.includes('(')) return null;
+  // `|` marks a namespace (`svg|rect`, `[xlink|href=…]`)—neither the type
+  // regex nor the attribute-selector regex understands those, so reading on
+  // would fabricate identity (`svg|rect` as type `svg`, an attribute value’s
+  // `.zzz` as a class); like escapes and parens, that’s a “can’t tell”
+  if (compound.includes('\\') || compound.includes('(') || compound.includes('|')) return null;
 
   // Attribute selectors go first—their values can contain `.`/`#` characters
   // that would otherwise read as classes/IDs
@@ -200,8 +204,14 @@ function computeSubjectIdentity(selector) {
   return { type, classes, ids };
 }
 
+// No allocation—this runs per selector pair on the aggressive merge-safety
+// hot path; iterating the smaller set keeps the lookups on the cheap side
 function setsDisjoint(a, b) {
-  return ![...a].some(member => b.has(member));
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  for (const member of small) {
+    if (large.has(member)) return false;
+  }
+  return true;
 }
 
 // “True” if the two selectors’ subject compounds carry conflicting identity:

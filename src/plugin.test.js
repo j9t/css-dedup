@@ -39,4 +39,22 @@ describe('Plugin: Dedup', () => {
     assert.strictEqual(result.warnings().length, 1);
     assert.match(result.warnings()[0].text, /left unmerged/);
   });
+
+  test('`savingsOnly: true` leaves the CSS untouched when consolidation would grow it, and warns', async () => {
+    const input = '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n';
+    const result = await postcss([cssdedup({ fix: true, savingsOnly: true })]).process(input, { from: undefined });
+    assert.strictEqual(result.css, input);
+    assert.ok(result.warnings().some(warning => /Consolidation withheld \(`savingsOnly`\): 1 merge would make the stylesheet \d+ bytes bigger/.test(warning.text)));
+  });
+
+  test('`savingsOnly: true` still applies a shrinking consolidation', async () => {
+    const result = await postcss([cssdedup({ fix: true, savingsOnly: true })]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
+    assert.match(result.css, /\.a,\s*\.b\s*{\s*color: red;\s*}/);
+    assert.strictEqual(result.warnings().length, 0);
+  });
+
+  test('Applies aggressive merges with `aggressive: true`', async () => {
+    const result = await postcss([cssdedup({ fix: true, aggressive: true })]).process('.a { color: hsl(0 0% 100%); }\n.b { color: #fff; }\n', { from: undefined });
+    assert.match(result.css, /\.a,\s*\.b\s*{\s*color: #fff;\s*}/);
+  });
 });

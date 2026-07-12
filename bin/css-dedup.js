@@ -274,19 +274,27 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       await writeFile(label, output);
     }
 
+    // Detail (what was skipped, and why) prints before the counts—so a long
+    // skipped list can't push the outcome off-screen and out of scrollback,
+    // the same order report mode already uses for its own skipped list
+    if (skipped.length) {
+      log(styleText('yellow', `${skipped.length} duplicate group${skipped.length !== 1 ? 's' : ''} considered unsafe to auto-merge:`));
+      for (const item of skipped) {
+        log(formatSkippedLine(item, skippedAggressive));
+      }
+      log('');
+    }
+
     const skippedNote = skipped.length ? ' (considered unsafe to auto-merge)' : '';
     if (withheld) {
       log(`${styleText('green', '0 consolidated')}, ${styleText('yellow', `${withheld.count} withheld`)} (consolidating would make the file ${formatBytesShare(withheld.bytes)} bigger—\`--savings-only\`), ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
     } else {
       log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
     }
-    for (const item of skipped) {
-      log(formatSkippedLine(item, skippedAggressive));
-    }
     if (applied.length) {
       log(`\n${formatBytesSummary(bytes)}`);
       if (bytes.saved < 0) {
-        log(styleText('yellow', `Note: this consolidation makes the file ${formatBytesShare(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--fix\` here if you care more about transfer size.`));
+        log(styleText('yellow', `Note: This consolidation makes the file ${formatBytesShare(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--fix\` here if you care more about transfer size.`));
       }
       if (!isStdin) log(`Wrote ${label}`);
     }

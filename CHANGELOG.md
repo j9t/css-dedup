@@ -4,6 +4,12 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-07-12
+
+### Fixed
+
+* `--fix` now prints the skipped-group detail before the consolidated/withheld/skipped counts summary, so the summary always closes a file's report
+
 ## [1.2.0] - 2026-07-12
 
 ### Added

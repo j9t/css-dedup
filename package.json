@@ -45,6 +45,7 @@
     "refactoring",
     "udjo"
   ],
+  "license": "MIT",
   "name": "css-dedup",
   "repository": {
     "type": "git",
@@ -60,5 +61,5 @@
   },
   "type": "module",
   "types": "src/index.d.ts",
-  "version": "1.2.1"
+  "version": "1.2.2"
 }

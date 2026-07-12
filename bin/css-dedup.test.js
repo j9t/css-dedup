@@ -1296,6 +1296,98 @@ describe('CLI', () => {
     }
   });
 
+  test('Rejects `--savings-only` without `--fix`', () => {
+    const { stderr, status } = run(['--savings-only', path.join(fixturesDir, 'basic.css')]);
+    assert.strictEqual(status, 1);
+    assert.ok(stderr.includes('`--savings-only` only applies together with `--fix`'));
+  });
+
+  test('`--fix --savings-only` leaves a file untouched when consolidation would grow it', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_savings_only');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'grow.css');
+    const source = '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n';
+    fs.writeFileSync(file, source);
+
+    try {
+      const { stdout, status } = run(['--fix', '--savings-only', file]);
+      assert.strictEqual(status, 1);
+      assert.match(stdout, /0 consolidated, 1 withheld \(consolidating would make the file \d+ bytes \(\d+\.\d%\) bigger—`--savings-only`\), 0 skipped/);
+      assert.ok(!stdout.includes('Wrote'));
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), source);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--fix --savings-only` still writes a file whose consolidation shrinks it', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_savings_only_shrink');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'shrink.css');
+    fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n');
+
+    try {
+      const { stdout, status } = run(['-f', '-s', file]);
+      assert.strictEqual(status, 0);
+      assert.ok(stdout.includes('1 consolidated, 0 skipped'));
+      assert.ok(stdout.includes('Wrote'));
+      assert.ok(fs.readFileSync(file, 'utf8').includes('.a, .b'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--fix --aggressive --savings-only` withholds a growing aggressive merge', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_savings_only_aggressive');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'grow.css');
+    // Only mergeable in aggressive mode (the intervening rule blocks the
+    // default pass), and the merge grows the file—so `-s` must withhold it
+    const source = [
+      '.module-header-navigation-primary-link { color: red; font-size: 14px; }',
+      '.unrelated-widget:hover { color: blue; }',
+      '.module-footer-navigation-secondary-link { color: red; letter-spacing: 1px; }',
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, source);
+
+    try {
+      const { stdout, status } = run(['-f', '-a', '-s', file]);
+      assert.strictEqual(status, 1);
+      assert.match(stdout, /1 withheld/);
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), source);
+      // Nothing was written, so the test-your-pages advice must not appear
+      assert.ok(!stdout.includes('aggressive-only'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--fix --savings-only -` still writes the untouched stylesheet to stdout when withholding', () => {
+    const source = '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n';
+    const { stdout, stderr, status } = run(['--fix', '-s', '-'], { input: source });
+    assert.strictEqual(status, 1);
+    assert.strictEqual(stdout, source);
+    assert.match(stderr, /1 withheld/);
+  });
+
+  test('Loads `savingsOnly: true` from the config file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_config_savings_only');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { savingsOnly: true };\n');
+    const file = path.join(dirTemp, 'grow.css');
+    const source = '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n';
+    fs.writeFileSync(file, source);
+
+    try {
+      const { stdout } = run(['--fix', file], { cwd: dirTemp });
+      assert.match(stdout, /1 withheld/);
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), source);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
   test('Notes when the `--aggressive` extras would grow the file rather than shrink it', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_growth_aggressive');
     fs.mkdirSync(dirTemp, { recursive: true });

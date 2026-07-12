@@ -14,6 +14,7 @@ const { values, positionals } = parseArgs({
   options: {
     fix: { type: 'boolean', short: 'f', default: false },
     aggressive: { type: 'boolean', short: 'a', default: false },
+    'savings-only': { type: 'boolean', short: 's', default: false },
     'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
     'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
     config: { type: 'string', short: 'c' },
@@ -34,6 +35,7 @@ Arguments:
 Options:
   -f, --fix                        Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)
   -a, --aggressive                 Also allow merges that are probably—but not provably—safe; on its own this widens the report, with \`--fix\` it applies the merges (test afterwards)
+  -s, --savings-only               With \`--fix\`: Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file)
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -n, --no-ignore-selectors-defaults  Disable the built-in selector-hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
   -c, --config <path>              Path to a config file (defaults to \`css-dedup.config.js\` in the working directory, if present)
@@ -43,6 +45,13 @@ Options:
 
 if (positionals.includes('-') && positionals.length > 1) {
   console.error('Cannot combine stdin (`-`) with other file arguments.');
+  process.exit(1);
+}
+
+// A write policy needs a write mode: Report mode never touches a file, so a
+// bare `--savings-only` could only sit inert and mislead
+if (values['savings-only'] && !values.fix) {
+  console.error('`--savings-only` only applies together with `--fix` (report mode never writes).');
   process.exit(1);
 }
 
@@ -213,30 +222,40 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     const { css: output, applied, skipped, bytes } = dedup(css, targetOptions);
     const log = isStdin ? console.error : console.log;
 
+    // The `--savings-only` gate, checked per file: Consolidation that would
+    // grow this file is computed but not written—the maintainability win is
+    // declined in favor of transfer size. A net-zero result still writes
+    // (deduplicated at no cost).
+    const withheld = targetOptions.savingsOnly && applied.length > 0 && bytes.saved < 0;
+
     // The aggressive-only share of an aggressive run’s merges—measured
     // against a discarded default-mode pass, so the test-your-pages advice
     // below only appears when something actually rode on the flag
     let aggressiveOnly = 0;
-    if (targetOptions.aggressive && applied.length) {
+    if (targetOptions.aggressive && applied.length && !withheld) {
       const baseline = dedup(css, { ...targetOptions, aggressive: false });
       aggressiveOnly = applied.length - baseline.applied.length;
     }
 
     // STDOUT must always carry the complete stylesheet for STDIN input—
-    // even with nothing consolidated, a pipeline consuming it would
-    // otherwise receive nothing and lose the CSS entirely
+    // even with nothing consolidated (or everything withheld), a pipeline
+    // consuming it would otherwise receive nothing and lose the CSS entirely
     if (isStdin) {
-      process.stdout.write(output);
-    } else if (applied.length) {
+      process.stdout.write(withheld ? css : output);
+    } else if (applied.length && !withheld) {
       await writeFile(label, output);
     }
 
     const skippedNote = skipped.length ? ' (considered unsafe to auto-merge)' : '';
-    log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
+    if (withheld) {
+      log(`${styleText('green', '0 consolidated')}, ${styleText('yellow', `${applied.length} withheld`)} (consolidating would make the file ${formatGrowth(bytes)} bigger—\`--savings-only\`), ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
+    } else {
+      log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
+    }
     for (const item of skipped) {
       log(`  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}${aggressiveHint(item, potential)}`);
     }
-    if (applied.length) {
+    if (applied.length && !withheld) {
       log(`\n${formatBytesSummary(bytes)}`);
       if (bytes.saved < 0) {
         log(styleText('yellow', `Note: this consolidation makes the file ${formatGrowth(bytes)} bigger, not smaller—the merged selector list costs more than the removed declaration(s) save. Still worth doing for maintainability (using each declaration just once); skip \`--fix\` here if you care more about transfer size.`));
@@ -254,7 +273,7 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       log(styleText('yellow', `${aggressiveOnly} of these merges ${aggressiveOnly !== 1 ? 'are' : 'is'} aggressive-only—probably, but not provably, safe. Review the diff and test the affected pages.`));
     }
 
-    return skipped.length > 0;
+    return skipped.length > 0 || withheld;
   }
 
   const { findings } = analyze(css, targetOptions);
@@ -318,6 +337,7 @@ async function main() {
     ],
     ignoreSelectorsDefaults: values['no-ignore-selectors-defaults'] ? false : (config.ignoreSelectorsDefaults ?? true),
     aggressive: values.aggressive || (config.aggressive ?? false),
+    savingsOnly: values['savings-only'] || (config.savingsOnly ?? false),
   };
 
   const files = await expandTargets(positionals);

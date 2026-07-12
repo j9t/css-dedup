@@ -60,7 +60,7 @@ Wrote default.css
 
 Since duplicate declarations cost bytes wherever they live—in the stylesheet itself, and (uncompressed) over the wire—the byte counts reflect two payoffs at once: less to maintain, and less to transfer.
 
-The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. CSS Dedup’s two modes call this out, so it’s a call you can make consciously—it may be worth it if you value using declarations just once (maintainability), not if you’re optimizing purely for transfer size.
+The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. CSS Dedup’s two modes call this out, so it’s a call you can make consciously—it may be worth it if you value using declarations just once (maintainability), not if you’re optimizing purely for transfer size. (`--fix --savings-only` automates that call: A file whose consolidation would grow it is left untouched.)
 
 ## Usage
 
@@ -76,6 +76,7 @@ Pass one or more files—each is analyzed (and, with `--fix`, rewritten) indepen
 | --- | --- |
 | `--fix`, `-f` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
 | `--aggressive`, `-a` | Also allow merges that are probably—but not provably—safe (see [aggressive mode](#aggressive-mode)); on its own this widens the report, with `--fix` it applies the merges |
+| `--savings-only`, `-s` | Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file); only valid together with `--fix`, since report mode never writes |
 | `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
 | `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector-hack ignore list |
 | `--config <path>`, `-c <path>` | Path to a config file (defaults to `css-dedup.config.js` in the working directory, if present) |
@@ -83,7 +84,7 @@ Pass one or more files—each is analyzed (and, with `--fix`, rewritten) indepen
 
 `--ignore-selector` is singular because it’s a repeatable flag—each occurrence (`-i pattern1 -i pattern2`) adds one pattern. The corresponding programmatic option, `ignoreSelectors`, takes an array.
 
-Without `--fix`, CSS Dedup only reports. Report mode still runs the same safety checks `--fix` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--fix`, anything skipped as unsafe) in any of the given files.
+Without `--fix`, CSS Dedup only reports. Report mode still runs the same safety checks `--fix` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--fix`, anything skipped as unsafe or withheld by `--savings-only`) in any of the given files.
 
 A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported and CSS Dedup moves on to the rest.
 
@@ -98,11 +99,12 @@ These are the supported options, shown with their defaults (each can be omitted)
 export default {
   ignoreSelectors: [],            // additional selector patterns to exclude, e.g., [/^\.legacy-/]
   ignoreSelectorsDefaults: true,  // set to `false` to disable the built-in hack list
-  aggressive: false               // set to `true` to also allow probably-safe merges
+  aggressive: false,              // set to `true` to also allow probably-safe merges
+  savingsOnly: false              // set to `true` to skip files whose consolidation would grow them (`--fix` runs only)
 };
 ```
 
-CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config.
+CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `savingsOnly` is a write policy, so it only takes effect on `--fix` runs (plain reports are unaffected); the programmatic `dedup()` doesn’t take it, either—it always returns the consolidated CSS, and callers can apply the same policy by checking `bytes.saved` themselves.
 
 ### Programmatic Use
 

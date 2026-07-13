@@ -28,9 +28,9 @@
   },
   "files": [
     "bin/css-dedup.js",
-    "src/",
-    "!src/plugin.test.js",
-    "!src/index.test.ts"
+    "src",
+    "!src/index.test.ts",
+    "!src/plugin.test.js"
   ],
   "funding": "https://github.com/j9t/css-dedup?sponsor=1",
   "homepage": "https://github.com/j9t/css-dedup",

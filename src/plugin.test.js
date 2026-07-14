@@ -61,3 +61,32 @@ describe('Plugin: Dedup', () => {
     assert.match(result.css, /\.a,\s*\.b\s*{\s*color: #fff;\s*}/);
   });
 });
+
+describe('Plugin: PostCSS integration', () => {
+  test('Exposes the `postcss: true` marker PostCSS requires to accept the plugin', () => {
+    assert.strictEqual(cssdedup.postcss, true);
+  });
+
+  test('A later plugin in the same pipeline sees the deduped output', async () => {
+    let ruleCountSeen;
+    const collector = () => ({
+      postcssPlugin: 'collector',
+      OnceExit(root) {
+        ruleCountSeen = root.nodes.length;
+      },
+    });
+    collector.postcss = true;
+
+    const result = await postcss([cssdedup({ fix: true }), collector()]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
+    assert.strictEqual(ruleCountSeen, 1);
+    assert.match(result.css, RE_MERGED_AB);
+  });
+
+  test('Fix mode is idempotent: A second pass over its own output finds nothing to warn about', async () => {
+    const input = '.a { color: red; }\n.b { color: red; }\n';
+    const first = await postcss([cssdedup({ fix: true })]).process(input, { from: undefined });
+    const second = await postcss([cssdedup()]).process(first.css, { from: undefined });
+    assert.strictEqual(second.warnings().length, 0);
+    assert.strictEqual(second.css, first.css);
+  });
+});

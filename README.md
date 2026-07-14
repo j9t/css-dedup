@@ -17,10 +17,6 @@ Given:
 }
 
 .b {
-  margin: 0;
-}
-
-.c {
   color: red;
 }
 ```
@@ -30,24 +26,20 @@ $ npx css-dedup default.css
 (root)
   duplicate   color: red
     .a (line 2)
-    .c (line 11)
+    .b (line 7)
 
 Summary: 1 finding
-Run with `--fix` to save 10 bytes (11.8%).
+Run with `--fix` to save 10 bytes (15.9%).
 ```
 
-Running with `--fix` folds `.a` and `.c` into a single rule for the shared declaration, and leaves everything else untouched:
+Running with `--fix` folds `.a` and `.b` into a single rule for the shared declaration:
 
 ```css
 .a {
   font-weight: bold;
 }
 
-.b {
-  margin: 0;
-}
-
-.a, .c {
+.a, .b {
   color: red;
 }
 ```
@@ -56,13 +48,13 @@ Running with `--fix` folds `.a` and `.c` into a single rule for the shared decla
 $ npx css-dedup --fix default.css
 1 consolidated, 0 skipped
 
-85 → 75 bytes (-10 B, -11.8%)
+63 → 53 bytes (-10 B, -15.9%)
 Wrote default.css
 ```
 
 Since duplicate declarations cost bytes wherever they live—in the style sheet itself, and (uncompressed) over the wire—the byte counts reflect two payoffs at once: less to maintain, and less to transfer.
 
-The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. CSS Dedup’s two modes call this out, so it’s a call you can make consciously—it may be worth it if you value using declarations just once (maintainability), not if you’re optimizing purely for transfer size. (`--fix --savings-only` automates that call: A file whose consolidation would grow it is left untouched.)
+The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. CSS Dedup’s two modes call this out, so it’s a decision you can make consciously—it’s worth it if you value using declarations once for maintainability, yet not if you’re optimizing purely for transfer size. (`--fix --savings-only` automates that call: A file whose consolidation would grow it is left untouched.)
 
 ## Usage
 
@@ -72,20 +64,20 @@ The two aren’t always aligned, though: Folding a declaration into a shared sel
 npx css-dedup [options] <file…>
 ```
 
-Pass one or more files—each is analyzed (and, with `--fix`, rewritten) independently; with more than one file, output is grouped under a header per file. A directory is searched recursively for .css files (skipping node_modules and dotfolders); the result is unrolled into that same per-file list, so mixing files and directories works too. Pass `-` instead of a file to read CSS from STDIN (can’t be combined with other file arguments); in `--fix` mode this prints the consolidated CSS to STDOUT, rather than writing a file, so it composes in a pipeline—status/summary output moves to STDERR in that case, keeping STDOUT pure CSS.
+Pass one or more files—each is analyzed (and, with `--fix`, rewritten) independently. A directory is searched recursively for .css files (skipping node_modules and dotfolders); the result is unrolled into that same per-file list, so mixing files and directories works, too. Pass `-` instead of a file to read CSS from STDIN (can’t be combined with other file arguments); in `--fix` mode this prints the consolidated CSS to STDOUT, rather than writing a file, so it composes in a pipeline (status/summary output moves to STDERR in that case, keeping STDOUT pure CSS).
 
 | Option | Description |
 | --- | --- |
 | `--fix`, `-f` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
 | `--aggressive`, `-a` | Also allow merges that are probably—but not provably—safe (see [aggressive mode](#aggressive-mode)); on its own this widens the report, with `--fix` it applies the merges |
-| `--savings-only`, `-s` | Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file); only valid together with `--fix`, since report mode never writes |
+| `--savings-only`, `-s` | Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file); only valid together with `--fix`, since report mode doesn’t write |
 | `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
-| `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector-hack ignore list |
+| `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector hack ignore list |
 | `--ignore-path <pattern>`, `-p` | Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable) |
 | `--config <path>`, `-c <path>` | Path to a config file (defaults to `css-dedup.config.js` in the working directory, if present) |
 | `--help`, `-h` | Show usage information |
 
-`--ignore-selector` and `--ignore-path` are singular because they’re repeatable flags—each occurrence (`-i pattern1 -i pattern2`) adds one pattern. The corresponding config-file options, `ignoreSelectors` and `ignorePaths`, take an array. `--ignore-path` excludes whole files by path rather than by selector content, matched against each file’s path relative to the working directory—useful for keeping a directory scan out of a build output folder (`node_modules` and dotfolders are always skipped; nothing else is, by default).
+`--ignore-selector` and `--ignore-path` are singular because they’re repeatable flags—each occurrence (`-i pattern1 -i pattern2`) adds one pattern. The corresponding config-file options, `ignoreSelectors` and `ignorePaths`, take an array. `--ignore-path` excludes whole files by path rather than by selector content, matched against each file’s path relative to the working directory—useful for keeping a directory scan out of a build output folder (`node_modules` and dotfolders are always skipped; nothing else is otherwise).
 
 Without `--fix`, CSS Dedup only reports. Report mode still runs the same safety checks `--fix` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--fix`, anything skipped as unsafe or withheld by `--savings-only`) in any of the given files.
 
@@ -97,7 +89,7 @@ Note: `--fix` rewrites CSS text only—it doesn’t regenerate a source map. If 
 
 For settings that should apply on every run—typically a project’s own `ignoreSelectors`—drop a `css-dedup.config.js` in the working directory (or point `--config` at one elsewhere, under any name).
 
-These are the supported options, shown with their defaults (each can be omitted):
+These are the supported options with their defaults (each can be omitted):
 
 ```javascript
 // css-dedup.config.js
@@ -110,7 +102,7 @@ export default {
 };
 ```
 
-CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, `--ignore-path` patterns are added to `ignorePaths`, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `savingsOnly` is a consolidation policy, so on plain report runs it only adjusts the payoff line (a report never writes anyway); on `--fix` runs it decides whether the file is written.
+CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, `--ignore-path` patterns are added to `ignorePaths`, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `savingsOnly` is a consolidation policy, so on plain report runs it only adjusts the payoff line (a report doesn’t write anyway); on `--fix` runs it decides whether the file is written.
 
 ### Programmatic Use
 
@@ -150,9 +142,11 @@ Both functions accept an options object:
 }
 ```
 
-`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten style sheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the style sheet before and after, since that’s what changes over the wire, not the character count, covering everything `--fix` did as one net figure. `saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. With `savingsOnly: true`, a consolidation whose net `saved` would be negative is withheld: `css` comes back untouched, `applied` is empty, `bytes` reports no change (that’s what actually happened), and the declined outcome arrives as `withheld: { count, bytes }`—the number of merges and the byte counts the consolidation would have had (`withheld` is absent whenever nothing was withheld). `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
+`dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten style sheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the style sheet before and after, since that’s what changes over the wire, not the character count, covering everything `--fix` did as one net figure.
 
-### PostCSS Plugin Use
+`saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. With `savingsOnly: true`, a consolidation whose net `saved` would be negative is withheld: `css` comes back untouched, `applied` is empty, `bytes` reports no change (that’s what actually happened), and the declined outcome arrives as `withheld: { count, bytes }`—the number of merges and the byte counts the consolidation would have had (`withheld` is absent whenever nothing was withheld). `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
+
+### PostCSS Plugin
 
 For dropping CSS Dedup into an existing PostCSS pipeline (alongside Autoprefixer, cssnano, etc.) instead of running it as a separate file-based pass, import the plugin from `css-dedup/plugin`:
 
@@ -169,7 +163,7 @@ const fixed = await postcss([cssdedup({ fix: true })]).process(css, { from: 'def
 console.log(fixed.css);
 ```
 
-The plugin takes the same options as `analyze()`/`dedup()`, plus `fix: true` to switch it into consolidation mode (`aggressive: true` and `savingsOnly: true` work here, too—a withheld consolidation leaves the root untouched and surfaces as a warning). Since CSS Dedup is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may duplicate work those tools do.
+The plugin takes the same options as `analyze()`/`dedup()`, plus `fix: true` to switch it into consolidation mode (`aggressive: true` and `savingsOnly: true` work here, too—a withheld consolidation leaves the root untouched and surfaces as a warning). Since CSS Dedup is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it belongs early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may overlap with work those tools do.
 
 ## How It Works
 
@@ -187,8 +181,8 @@ CSS Dedup:
 
 4. …**normalizes** each remaining declaration for comparison.
    - Skips the contents of quoted strings, `url()`, and custom property _names_ throughout—those are case-sensitive, so `var(--Foo)`/`var(--foo)` and `--Foo`/`--foo` are never treated as equal. Everything around such a protected segment still normalizes, though: `VAR( --brand )` matches `var(--brand)`, and `var(--m, 0px)` matches `var(--m,0)`.
-   - Compares custom property *values* verbatim (`--brand: #FFF` and `--brand: #fff` don’t match)—they’re substituted as-is wherever `var()` references them—possibly somewhere case-sensitive—and scripts can read them back via `getPropertyValue()`, so no two spellings are provably interchangeable (even `--x: 0px` and `--x: 0` differ—only one is a valid `z-index: var(--x)`).
-   - Collapses whitespace, including just inside parentheses and around commas (`rgb( 255, 0, 0 )` matches `rgb(255,0,0)`), and folds value case—except for properties whose value is (or can contain) an author-defined custom ident (`animation-name`, `counter-reset`, `container-name`, and similar), since those are case-*sensitive* per CSS, unlike the predefined keywords everywhere else; `animation-name: Foo` and `animation-name: foo` can name two different `@keyframes` blocks, so folding them would risk a false duplicate.
+   - Compares custom property _values_ verbatim (`--brand: #FFF` and `--brand: #fff` don’t match)—they’re substituted as-is wherever `var()` references them—possibly somewhere case-sensitive—and scripts can read them back via `getPropertyValue()`, so no two spellings are provably interchangeable (even `--x: 0px` and `--x: 0` differ—only one is a valid `z-index: var(--x)`).
+   - Collapses whitespace, including just inside parentheses and around commas (`rgb( 255, 0, 0 )` matches `rgb(255,0,0)`), and folds value case—except for properties whose value is (or can contain) an author-defined custom ident (`animation-name`, `counter-reset`, `container-name`, and similar), since those are case-_sensitive_ per CSS, unlike the predefined keywords everywhere else; `animation-name: Foo` and `animation-name: foo` can name two different `@keyframes` blocks, so folding them would risk a false duplicate.
    - Collapses zero-value length units (`0px`/`0svh`/`0cqw` → `0`)—angle/time/frequency/resolution units like `0deg`/`0s` are left alone, since unitless zero isn’t valid there. Zero percentages (`0%`) are collapsed to `0`, too, except for a short list of properties where a percentage can resolve against an indefinite reference size.
    - Collapses redundant decimal zeros (`.5`/`0.5`/`0.50` → `.5`, `1.0` → `1`), drops a redundant leading `+` sign (`+2px` → `2px`), and ignores whitespace around `/` separators (`12px/1.5` matches `12px / 1.5`).
    - Canonicalizes equivalent color spellings: `white`, `#fff`, `#ffffff`, `#ffffffff`, `rgb(255, 255, 255)`, and `rgb(255 255 255)` all compare equal, as do `transparent` and `rgba(0, 0, 0, 0)`. Only lossless textual equivalences count—`hsl()` and percentage channels involve rounding, so they’re left alone (except in [aggressive mode](#aggressive-mode), which accepts the rounding).
@@ -209,7 +203,7 @@ CSS Dedup:
    - Then, a duplicate group spread across separate rules is merged by folding its selectors into the last occurrence—one line per selector if that’s already how the file writes multi-selector rules, comma-separated on one line otherwise.
    - Keeps whichever of the group’s equivalent raw spellings is shortest (e.g. `.5` over `0.50`)—CSS Dedup only picks among spellings already present in the source, so it doesn’t synthesize a shorter one, which would be a minifier’s job.
    - Removes the declaration from the other occurrences—but only if no other rule between the first and last occurrence also sets that property or a shorthand/longhand overlapping it (`margin` and `margin-left`, `border-color` and `border-top-color`, etc.), for any selector.
-   - One narrow exception to “any other rule”: If that rule’s selector is provably mutually exclusive with the group’s—right now, that only covers an exact-match attribute value on the same attribute, on what is provably the same element (`html[lang="da"] a` vs. `html[lang="de"] a`, since an attribute can only ever hold one value and `html` is unique per document)—it can’t actually match the same element, so it’s not a threat to this particular merge and doesn’t block it. ([Aggressive mode](#aggressive-mode) widens this exception to selectors that are merely *likely* disjoint.) “Provably the same element” means the differing attribute sits on the selector’s subject, is connected to it purely through `>`/`+` combinators, or sits on `html`/`:root`; across a descendant or `~` combinator, `.x[data-v="1"] p` and `.x[data-v="2"] p` can match the very same `p` (nested `.x` wrappers), so those don’t count as exclusive.
+   - One narrow exception to “any other rule”: If that rule’s selector is provably mutually exclusive with the group’s—right now, that only covers an exact-match attribute value on the same attribute, on what is provably the same element (`html[lang="da"] a` vs. `html[lang="de"] a`, since an attribute can only ever hold one value and `html` is unique per document)—it can’t actually match the same element, so it’s not a threat to this particular merge and doesn’t block it. ([Aggressive mode](#aggressive-mode) widens this exception to selectors that are merely _likely_ disjoint.) “Provably the same element” means the differing attribute sits on the selector’s subject, is connected to it purely through `>`/`+` combinators, or sits on `html`/`:root`; across a descendant or `~` combinator, `.x[data-v="1"] p` and `.x[data-v="2"] p` can match the very same `p` (nested `.x` wrappers), so those don’t count as exclusive.
    - If a merged rule (including the last occurrence itself) also carries a declaration for an overlapping property, that declaration is split out into its own small rule—keeping that occurrence’s own, original selector—placed right after the merged rule, rather than blocking the merge outright: Folding every selector onto one shared declaration block would otherwise hand that overlapping extra to selectors that never had it. Exception: If that extra is itself duplicated elsewhere in the same scope, it’s left alone and the whole merge is skipped instead, since splitting it here would orphan that other duplicate’s own merge.
    - If something does block it, the merge is skipped and reported rather than risking a cascade change. A blocker fences, though—it doesn’t forbid: Occurrences on the same side of it still consolidate among themselves (their own spans are clean, so the same safety argument applies), and the group is reported as skipped either way, since the duplicate keeps existing across the blocker.
    - Consolidation runs to a fixed point: One merge can unblock or create another (a fresh merged rule may repeat an existing rule’s selector list, an emptied rule stops fencing a span), so the passes repeat until nothing changes.
@@ -236,7 +230,7 @@ What aggressive mode deliberately does _not_ do: drop same-rule overrides with d
 
 The byte economics don’t change with the flag—aggressive mode just unlocks more merges, each carrying the same trade-off between the declaration removed and the selector-list bytes added. Cross-block merges usually save, since they remove whole rules or blocks; declaration-only merges between rules with long selectors can grow the file, so `--aggressive` can also tip a style sheet further into growth. Either way, the usual growth notes call it out—including in the parenthetical previews shown when the flag is off.
 
-`--aggressive` deliberately doesn’t imply `--fix`: The two flags are orthogonal—`--aggressive` sets how much risk to accept, `--fix` whether to write. On its own, `--aggressive` widens report mode (aggressive equivalences surface as findings, the savings estimate includes the aggressive merges), which is exactly the preview you want for the merges that carry risk; add `--fix` to apply them. Since these merges are not provable, review the diff and test the affected pages after an aggressive `--fix`—the CLI reminds you, counting how many of the merges actually rode on the flag. Conversely, without the flag, reports and `--fix` runs note in parentheses what `--aggressive` would add.
+`--aggressive` deliberately doesn’t imply `--fix`: The two flags are orthogonal—`--aggressive` sets how much risk to accept, `--fix` whether to write. On its own, `--aggressive` widens report mode (aggressive equivalences surface as findings, the savings estimate includes the aggressive merges), which provides the preview needed for merges that carry risk (add `--fix` to apply them). Since these merges are not provable, review the diff and test the affected pages after an aggressive `--fix`—the CLI reminds you, counting how many of the merges actually rode on the flag. Conversely, without the flag, reports and `--fix` runs note in parentheses what `--aggressive` would add.
 
 ***
 

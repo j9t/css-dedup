@@ -521,7 +521,7 @@ describe('Analysis', () => {
     assert.strictEqual(findings[0].redundant, true);
   });
 
-  test('Ignores selector-hack rules by default', () => {
+  test('Ignores selector hack rules by default', () => {
     const { findings } = analyze('.a { color: red; } * html .b { color: red; }');
     assert.strictEqual(findings.length, 0);
   });
@@ -741,7 +741,7 @@ describe('Deduplication', () => {
     assert.strictEqual(css, input);
   });
 
-  test('Never merges selector-hack rules', () => {
+  test('Never merges selector hack rules', () => {
     const { applied, css } = dedup('.a { color: red; }\n* html .b { color: red; }\n');
     assert.strictEqual(applied.length, 0);
     assert.match(css, /\*\s*html \.b/);
@@ -1065,7 +1065,7 @@ describe('Deduplication', () => {
     assert.strictEqual(applied.length, 1);
   });
 
-  test('Never touches a same-rule duplicate on a selector-hack rule', () => {
+  test('Never touches a same-rule duplicate on a selector hack rule', () => {
     const input = '* html .a { color: red; color: red; }\n';
     const { css, applied } = dedup(input);
     assert.strictEqual(css, input);

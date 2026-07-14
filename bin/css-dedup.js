@@ -61,7 +61,7 @@ Options:
   -s, --savings-only               With \`--fix\`: Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file)
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -p, --ignore-path <pattern>      Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable)
-  -n, --no-ignore-selectors-defaults  Disable the built-in selector-hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
+  -n, --no-ignore-selectors-defaults  Disable the built-in selector hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
   -c, --config <path>              Path to a config file (defaults to \`css-dedup.config.js\` in the working directory, if present)
   -h, --help                       Show this help`);
   process.exit(values.help ? 0 : 1);
@@ -75,7 +75,7 @@ if (positionals.includes('-') && positionals.length > 1) {
 // A write policy needs a write mode: Report mode never touches a file, so a
 // bare `--savings-only` could only sit inert and mislead
 if (values['savings-only'] && !values.fix) {
-  console.error('`--savings-only` only applies together with `--fix` (report mode never writes).');
+  console.error('`--savings-only` only applies together with `--fix` (report mode doesn’t write).');
   process.exit(1);
 }
 

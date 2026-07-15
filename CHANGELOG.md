@@ -4,6 +4,12 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-07-16
+
+### Fixed
+
+* Fixed a merged rule inserted directly after a comment-adjacent (or otherwise tightly-spaced) source rule inheriting that rule’s spacing
+
 ## [1.3.1] - 2026-07-14
 
 ### Changed

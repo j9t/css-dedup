@@ -323,6 +323,26 @@ const RE_TRAILING_INDENT = /[ \t]*$/;
 // the source. A merged selector list follows whichever style is prevalent,
 // defaulting to one-line when the file has no existing multi-selector rules
 // to go by (or is tied).
+//
+// The separator most sibling nodes in `container` carry is that container’s
+// prevailing “normal” gap between rules—majority vote, not just whichever
+// neighbor happens to be handy, since that neighbor can itself be the
+// anomaly (e.g., a comment sitting flush above a rule, in a file that
+// otherwise separates its rules with a blank line).
+function typicalSeparator(container) {
+  const counts = new Map();
+  for (const node of container.nodes.slice(1)) {
+    const before = node.raws.before ?? '\n';
+    counts.set(before, (counts.get(before) ?? 0) + 1);
+  }
+  let best = '\n';
+  let bestCount = 0;
+  for (const [before, count] of counts) {
+    if (count > bestCount) { best = before; bestCount = count; }
+  }
+  return best;
+}
+
 function usesMultilineSelectors(root) {
   let multiline = 0;
   let inline = 0;
@@ -616,6 +636,19 @@ function consolidateRoot(root, options = {}) {
     const { key, occurrences, distinctRules, propNormalized } = group;
     const target = distinctRules.at(-1);
 
+    // A residual clones `target`, inheriting whatever separated target from
+    // whatever preceded it in the source—correct only for a residual taking
+    // over target’s own original slot (`beforeResidual`, below). One
+    // inserted after target instead needs the file’s normal between-rules
+    // separator, not target’s own (which can be anomalous, e.g. a comment
+    // sitting flush above it).
+    const interPieceSeparator = typicalSeparator(target.parent);
+    // Also has to be reapplied after `.after()` runs, not just before it:
+    // For a rule sitting directly in the root (not inside an @-rule/nested
+    // rule), `Root#normalize()` overwrites a freshly inserted node’s
+    // `raws.before` with its insertion anchor’s own, discarding whatever the
+    // node already carried.
+
     const beforeExtrasByRule = new Map();
     const afterExtrasByRule = new Map();
     for (const rule of distinctRules) {
@@ -688,6 +721,7 @@ function consolidateRoot(root, options = {}) {
 
       const residual = makeResidual(rule === target ? targetOriginalSelector : rule.selector, extras);
       insertPoint.after(residual);
+      residual.raws.before = interPieceSeparator;
       insertPoint = residual;
       afterResiduals.push(residual);
     }
@@ -891,6 +925,17 @@ function consolidateRoot(root, options = {}) {
       lastRule.after(mergedRule);
       scope.rules.splice(scope.rules.indexOf(lastRule) + 1, 0, mergedRule);
 
+      // `mergedRule` clones `lastRule`, inheriting whatever separated
+      // `lastRule` from whatever preceded it in the source—right if
+      // `lastRule` ends up empty and removed below (`mergedRule` then takes
+      // over its old slot), wrong otherwise (`mergedRule` is then a fresh
+      // insertion after a `lastRule` that keeps standing, and needs the
+      // file’s normal between-rules separator instead). Reassigning after
+      // `.after()` runs, not before, since `Root#normalize()` would
+      // otherwise overwrite an earlier assignment with the insertion
+      // anchor’s own `raws.before` for a rule sitting directly in the root.
+      if (lastRule.nodes.length > 0) mergedRule.raws.before = typicalSeparator(lastRule.parent);
+
       for (const rule of runRules) {
         if (rule === lastRule) continue;
         runOccurrences.find(occ => occ.rule === rule).decl.remove();
@@ -972,9 +1017,14 @@ function consolidateRoot(root, options = {}) {
     // which is whatever separated the hub from whatever preceded IT (often
     // nothing, if the hub was the first rule in its container)—appropriate
     // for the first piece only. Later pieces need the file’s normal
-    // between-rules separator instead, sampled from the hub’s next sibling
-    // where available.
-    const interPieceSeparator = hub.next()?.raws.before || hub.raws.before || '\n';
+    // between-rules separator instead, not the hub’s own (which can be
+    // anomalous, e.g. a comment sitting flush above it). Also has to be
+    // reapplied *after* `.after()` runs, not just before it: for a rule
+    // sitting directly in the root (not inside an @-rule/nested rule),
+    // `Root#normalize()` overwrites a freshly inserted node’s `raws.before`
+    // with its insertion anchor’s own, discarding whatever the node already
+    // carried.
+    const interPieceSeparator = typicalSeparator(hub.parent);
 
     // Snapshot each cluster key’s shared declaration and its position
     // within the hub, before any mutation, then order the keys by that
@@ -1066,10 +1116,11 @@ function consolidateRoot(root, options = {}) {
     const trailingGap = gapDecls(anchors.at(-1).index, hubOriginalNodes.length);
     if (trailingGap.length) finalRules.push(makeResidual(hubOriginalSelector, trailingGap));
 
-    for (let i = 1; i < finalRules.length; i++) finalRules[i].raws.before = interPieceSeparator;
-
     hub.before(finalRules[0]);
-    for (let i = 1; i < finalRules.length; i++) finalRules[i - 1].after(finalRules[i]);
+    for (let i = 1; i < finalRules.length; i++) {
+      finalRules[i - 1].after(finalRules[i]);
+      finalRules[i].raws.before = interPieceSeparator;
+    }
     hub.remove();
 
     for (const group of cluster) {

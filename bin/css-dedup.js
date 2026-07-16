@@ -68,7 +68,7 @@ Options:
 }
 
 if (positionals.includes('-') && positionals.length > 1) {
-  console.error('Cannot combine stdin (`-`) with other file arguments.');
+  console.error('Cannot combine STDIN (`-`) with other file arguments.');
   process.exit(1);
 }
 

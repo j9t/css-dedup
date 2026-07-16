@@ -1671,7 +1671,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix --savings-only -` still writes the untouched style sheet to stdout when withholding', () => {
+  test('`--fix --savings-only -` still writes the untouched style sheet to STDOUT when withholding', () => {
     const source = cssGrowing;
     const { stdout, stderr, status } = run(['--fix', '-s', '-'], { input: source });
     assert.strictEqual(status, 1);
@@ -1892,18 +1892,18 @@ describe('CLI', () => {
     }
   });
 
-  test('Reads from stdin with `-` in report mode', () => {
+  test('Reads from STDIN with `-` in report mode', () => {
     const { stdout } = run(['-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
     assert.ok(stdout.includes('1 finding'));
   });
 
-  test('`--fix -` writes the consolidated CSS to stdout, and status to stderr', () => {
+  test('`--fix -` writes the consolidated CSS to stdout, and status to STDERR', () => {
     const { stdout, stderr } = run(['--fix', '-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
     assert.match(stdout, /^\.a, \.b \{\s*color: red;\s*\}\s*$/);
     assert.ok(stderr.includes('1 consolidated'));
   });
 
-  test('`--fix -` still writes the full style sheet to stdout when nothing is consolidated', () => {
+  test('`--fix -` still writes the full style sheet to STDOUT when nothing is consolidated', () => {
     const input = '.a { color: red; }\n.b { color: blue; }\n';
     const { stdout, stderr } = run(['--fix', '-'], { input });
     assert.strictEqual(stdout, input);
@@ -1918,7 +1918,7 @@ describe('CLI', () => {
 
     try {
       const { stderr, status } = run([file, '-']);
-      assert.ok(stderr.includes('Cannot combine stdin'));
+      assert.ok(stderr.includes('Cannot combine STDIN'));
       assert.strictEqual(status, 1);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });

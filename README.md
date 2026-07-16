@@ -91,7 +91,7 @@ For settings that should apply on every run—typically a project’s own `ignor
 
 These are the supported options with their defaults (each can be omitted):
 
-```javascript
+```js
 // css-dedup.config.js
 export default {
   aggressive: false,              // set to `true` to also allow probably-safe merges
@@ -108,7 +108,7 @@ CLI flags layer on top of the config file rather than replacing it: `--ignore-se
 
 Install CSS Dedup in your project, e.g., via `npm i -D css-dedup`, then import and use what you need:
 
-```javascript
+```js
 import { analyze, dedup } from 'css-dedup';
 
 const { findings } = analyze(css);
@@ -119,7 +119,7 @@ const { css: output, applied, skipped } = dedup(css);
 
 Both functions accept an options object:
 
-```javascript
+```js
 {
   from: 'path/to/file.css',         // forwarded to PostCSS; names the file in syntax-error messages
   aggressive: false,                // set to `true` to also allow probably-safe merges
@@ -131,7 +131,7 @@ Both functions accept an options object:
 
 `analyze()` returns `{ findings }`, an array of objects:
 
-```javascript
+```js
 {
   scope,        // `root`, or the at-rule chain the rules live in, e.g., `@media (min-width: 768px)`
   key,          // normalized `prop: value` (plus ` !important` if set)
@@ -150,7 +150,7 @@ Both functions accept an options object:
 
 For dropping CSS Dedup into an existing PostCSS pipeline (alongside Autoprefixer, cssnano, etc.) instead of running it as a separate file-based pass, import the plugin from `css-dedup/plugin`:
 
-```javascript
+```js
 import postcss from 'postcss';
 import cssdedup from 'css-dedup/plugin';
 

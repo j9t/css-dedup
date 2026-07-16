@@ -369,7 +369,6 @@ function usesSpacedCommas(root) {
   let spaced = 0;
   let tight = 0;
   root.walkRules(rule => {
-    if (splitSelectors(rule.selector).length < 2) return;
     if (RE_MULTILINE_SELECTOR_SEPARATOR.test(rule.selector)) return;
     const spacedComma = hasSpacedTopLevelComma(rule.selector);
     if (spacedComma === null) return;

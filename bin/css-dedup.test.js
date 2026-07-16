@@ -1180,6 +1180,11 @@ describe('Minified style sheets', () => {
     const { css } = dedup(input);
     assert.strictEqual(css, 'body,header,details p:first-of-type,header :is(h1,ul),footer :is(p,ul){margin:0}\n');
   });
+
+  test('Preserves the spaced-comma convention when the source already writes selector lists that way', () => {
+    const { css } = dedup('.a, .b { color: red; }\n.c { color: red; }\n');
+    assert.strictEqual(css, '.a, .b, .c { color: red; }\n');
+  });
 });
 
 describe('Aggressive mode', () => {

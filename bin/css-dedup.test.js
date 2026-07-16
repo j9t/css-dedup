@@ -861,6 +861,19 @@ describe('Deduplication', () => {
     assert.strictEqual(css, '.hub, .a { color: red; }\n.hub { padding: 1px; }\n.hub, .b { background: blue; }\n');
   });
 
+  test('Keeps the file’s blank-line convention for a hub’s split-off piece, even when the hub itself sits last with an anomalous gap', () => {
+    // `.hub` is both the last rule in the file (so there’s no next sibling
+    // to sample a separator from) and directly preceded by a comment with
+    // no blank line (unlike every other gap here, which uses one). The
+    // `top` piece split off from the hub must still pick up the file’s
+    // normal blank-line separator, not `.hub`’s own anomalous one.
+    const input = '.z {\n\tcolor: blue;\n}\n\n.a {\n\tposition: absolute;\n}\n\n.b {\n\ttop: .5rem;\n}\n\n/* comment */\n.hub {\n\tposition: absolute;\n\ttop: .5rem;\n}\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 2);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '.z {\n\tcolor: blue;\n}\n\n/* comment */\n.a, .hub {\n\tposition: absolute;\n}\n\n.b, .hub {\n\ttop: .5rem;\n}\n');
+  });
+
   test('Folds identical twin rules into one rule with the combined selector list', () => {
     const { css, applied, skipped } = dedup('.a { margin: 0; color: red; }\n.b { margin: 0; color: red; }\n');
     assert.strictEqual(applied.length, 2);
@@ -905,6 +918,21 @@ describe('Deduplication', () => {
     assert.strictEqual(skipped.length, 1);
     assert.match(skipped[0].reason, /same selector written again/);
     assert.strictEqual(css, '.a, .b { margin: 0; }\n.a { margin-left: 1px; }\n.a, .b { color: red; }\n');
+  });
+
+  test('Keeps the file’s blank-line convention for a per-group merged rule created after a blocked cluster falls back to sub-run merges', () => {
+    // `.blocker`’s own `top` sits between the `top` group’s two occurrences,
+    // blocking that group—which downgrades the whole `position`/`top`
+    // cluster to independent per-group merges (`mergeClusterGroupRuns`).
+    // `.b` (last in the `position` run) is directly preceded by a comment
+    // with no blank line, unlike every other gap in this file; the merged
+    // rule inserted after `.b` must still use the file’s normal separator.
+    const input = '.z {\n\tcolor: blue;\n}\n\n.a {\n\tposition: absolute;\n}\n\n/* comment */\n.b {\n\tposition: absolute;\n\ttop: .5rem;\n}\n\n.blocker {\n\ttop: 1px;\n}\n\n.c {\n\ttop: .5rem;\n}\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 1);
+    assert.match(skipped[0].reason, /intervening `top` declaration in `\.blocker`/);
+    assert.strictEqual(css, '.z {\n\tcolor: blue;\n}\n\n/* comment */\n.b {\n\ttop: .5rem;\n}\n\n.a, .b {\n\tposition: absolute;\n}\n\n.blocker {\n\ttop: 1px;\n}\n\n.c {\n\ttop: .5rem;\n}\n');
   });
 
   test('Skips a cluster with two candidate hubs (two rules holding every group’s shared declaration)', () => {
@@ -953,6 +981,65 @@ describe('Deduplication', () => {
     assert.strictEqual(applied.length, 1);
     assert.strictEqual(skipped.length, 0);
     assert.strictEqual(css, '.a { margin: 0; }\n.a, .b { margin-left: 5px; }\n');
+  });
+
+  test('Keeps the file’s blank-line convention before a target’s post-shared extra residual', () => {
+    // `.b` (the target) is directly preceded by a comment, with no blank
+    // line between them—unlike every other rule gap in this file, which
+    // uses one. The residual holding `.b`’s own `extra` declaration is a
+    // new rule inserted after the merged one, and must pick up the file’s
+    // normal blank-line separator, not `.b`’s own original (tight, comment-
+    // adjacent) leading whitespace just because it was cloned from `.b`
+    const input = '.a {\n\tposition: absolute;\n}\n\n/* comment */\n.b {\n\tposition: absolute;\n\textra: 1;\n}\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '/* comment */\n.a, .b {\n\tposition: absolute;\n}\n\n.b {\n\textra: 1;\n}\n');
+  });
+
+  test('Keeps the file’s blank-line convention before the merged rule, when a target’s pre-shared extra shifts it down into a residual’s old slot', () => {
+    // `.b` (the target) is directly preceded by a comment, with no blank
+    // line between them—unlike every other rule gap in this file, which
+    // uses one. `.b`’s own `extra` declaration sits before the shared one,
+    // so it’s split into a residual that takes over `.b`’s original slot
+    // (and its tight, comment-adjacent spacing); `.b` itself shifts down to
+    // sit after that residual instead, and must pick up the file’s normal
+    // blank-line separator there, not the anomalous one it originally had.
+    const input = '.a {\n\tposition: absolute;\n}\n\n/* comment */\n.b {\n\textra: 1;\n\tposition: absolute;\n}\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '/* comment */\n.b {\n\textra: 1;\n}\n\n.a, .b {\n\tposition: absolute;\n}\n');
+  });
+
+  test('Ignores comment-to-rule gaps when voting on the file’s normal separator, even when several outnumber it', () => {
+    // Three rules are each preceded by their own tight (no-blank-line)
+    // comment, and one further rule sits tight against its own neighbor—
+    // five tight gaps in total, versus four blank-line gaps between
+    // genuine content. A naive majority vote over every gap, comments
+    // included, would call “tight” the file’s normal separator; it should
+    // instead recognize a comment-to-rule gap as attachment spacing (not a
+    // real rule separator) and skip it, correctly landing on blank-line as
+    // the file’s actual convention
+    const input = [
+      '.a {', '\tposition: absolute;', '}', '',
+      '/* c1 */', '.p1 {', '\tcolor: red;', '}', '',
+      '/* c2 */', '.p2 {', '\tcolor: green;', '}', '',
+      '/* c3 */', '.p3 {', '\tcolor: blue;', '}',
+      '.p4 {', '\tcolor: yellow;', '}', '',
+      '/* VG WORT */', '.b {', '\textra: 1;', '\tposition: absolute;', '}', '',
+    ].join('\n');
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, [
+      '/* c1 */', '.p1 {', '\tcolor: red;', '}', '',
+      '/* c2 */', '.p2 {', '\tcolor: green;', '}', '',
+      '/* c3 */', '.p3 {', '\tcolor: blue;', '}',
+      '.p4 {', '\tcolor: yellow;', '}', '',
+      '/* VG WORT */', '.b {', '\textra: 1;', '}', '',
+      '.a, .b {', '\tposition: absolute;', '}', '',
+    ].join('\n'));
   });
 
   test('Joins merged selectors on one line by default', () => {

@@ -4,6 +4,12 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-07-16
+
+### Fixed
+
+* `--fix` no longer de-minifies an already-minified style sheet: A merged selector list now follows the source’s comma-spacing convention (`.a,.b` vs. `.a, .b`) instead of inserting a space
+
 ## [1.3.2] - 2026-07-16
 
 ### Fixed

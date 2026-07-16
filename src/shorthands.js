@@ -1,5 +1,5 @@
 // Maps each shorthand property to the longhands it sets—physical and
-// logical alike, but not physical ↔ logical pairs (e.g. `margin-left` vs
+// logical alike, but not physical ↔ logical pairs (e.g., `margin-left` vs
 // `margin-inline-start`): which physical side a logical longhand resolves to
 // depends on the element’s writing mode/direction, which isn’t knowable from
 // static CSS, so that pairing is deliberately left unmapped. Not exhaustive—

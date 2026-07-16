@@ -542,7 +542,7 @@ function consolidateRoot(root, options = {}) {
 
   // Refuse to merge if any other rule sitting between the group’s first and
   // last occurrence also touches this property, or a shorthand/longhand
-  // overlapping it (e.g. `margin-left` overlaps `margin`)—for any selector.
+  // overlapping it (e.g., `margin-left` overlaps `margin`)—for any selector.
   // Moving the declaration past such a rule could change which value wins for
   // whatever that rule matches. Over-cautious by design: It leaves some
   // genuinely safe merges for manual review rather than risk breaking the
@@ -550,7 +550,7 @@ function consolidateRoot(root, options = {}) {
   //
   // One exception: If every one of the intervening rule’s selectors is
   // provably mutually exclusive with every one of the group’s own selectors
-  // (see `selectorsAreMutuallyExclusive()`—e.g. `html[lang="da"] a` vs.
+  // (see `selectorsAreMutuallyExclusive()`—e.g., `html[lang="da"] a` vs.
   // `html[lang="de"] a`), it can never match an element the group’s rules do,
   // so scanning continues past it for a real blocker. Aggressive mode widens
   // this to selectors that are merely likely disjoint (see
@@ -680,7 +680,7 @@ function consolidateRoot(root, options = {}) {
     // whatever preceded it in the source—correct only for a residual taking
     // over target’s own original slot (`beforeResidual`, below). One
     // inserted after target instead needs the file’s normal between-rules
-    // separator, not target’s own (which can be anomalous, e.g. a comment
+    // separator, not target’s own (which can be anomalous, e.g., a comment
     // sitting flush above it).
     const interPieceSeparator = typicalSeparator(target.parent);
     // Also has to be reapplied after `.after()` runs, not just before it:
@@ -1059,7 +1059,7 @@ function consolidateRoot(root, options = {}) {
     // nothing, if the hub was the first rule in its container)—appropriate
     // for the first piece only. Later pieces need the file’s normal
     // between-rules separator instead, not the hub’s own (which can be
-    // anomalous, e.g. a comment sitting flush above it). Also has to be
+    // anomalous, e.g., a comment sitting flush above it). Also has to be
     // reapplied *after* `.after()` runs, not just before it: for a rule
     // sitting directly in the root (not inside an @-rule/nested rule),
     // `Root#normalize()` overwrites a freshly inserted node’s `raws.before`

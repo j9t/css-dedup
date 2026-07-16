@@ -1,7 +1,7 @@
 import { analyzeRoot, dedupRoot } from './index.js';
 
 // A thin PostCSS plugin wrapper around `analyzeRoot`/`dedupRoot`, for
-// dropping CSS Dedup into an existing `postcss([…])` pipeline (e.g. alongside
+// dropping CSS Dedup into an existing `postcss([…])` pipeline (e.g., alongside
 // Autoprefixer, cssnano) instead of running it as a separate file-based pass.
 // By default it only reports, via `result.warn()`—pass `fix: true` to
 // rewrite the root in place, same as the CLI’s `--fix`.

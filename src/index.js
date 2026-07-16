@@ -331,8 +331,8 @@ const RE_TRAILING_INDENT = /[ \t]*$/;
 // otherwise separates its rules with a blank line).
 function typicalSeparator(container) {
   const counts = new Map();
-  for (const node of container.nodes.slice(1)) {
-    const before = node.raws.before ?? '\n';
+  for (let i = 1; i < container.nodes.length; i++) {
+    const before = container.nodes[i].raws.before ?? '\n';
     counts.set(before, (counts.get(before) ?? 0) + 1);
   }
   let best = '\n';

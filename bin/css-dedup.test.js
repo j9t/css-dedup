@@ -997,6 +997,21 @@ describe('Deduplication', () => {
     assert.strictEqual(css, '/* comment */\n.a, .b {\n\tposition: absolute;\n}\n\n.b {\n\textra: 1;\n}\n');
   });
 
+  test('Keeps the file’s blank-line convention before the merged rule, when a target’s pre-shared extra shifts it down into a residual’s old slot', () => {
+    // `.b` (the target) is directly preceded by a comment, with no blank
+    // line between them—unlike every other rule gap in this file, which
+    // uses one. `.b`’s own `extra` declaration sits before the shared one,
+    // so it’s split into a residual that takes over `.b`’s original slot
+    // (and its tight, comment-adjacent spacing); `.b` itself shifts down to
+    // sit after that residual instead, and must pick up the file’s normal
+    // blank-line separator there, not the anomalous one it originally had.
+    const input = '.a {\n\tposition: absolute;\n}\n\n/* comment */\n.b {\n\textra: 1;\n\tposition: absolute;\n}\n';
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, '/* comment */\n.b {\n\textra: 1;\n}\n\n.a, .b {\n\tposition: absolute;\n}\n');
+  });
+
   test('Joins merged selectors on one line by default', () => {
     const { css } = dedup('.a { color: red; }\n.b { color: red; }\n');
     assert.match(css, /\.a, \.b \{/);

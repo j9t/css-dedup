@@ -711,6 +711,7 @@ function consolidateRoot(root, options = {}) {
     if (targetBeforeExtras) {
       beforeResidual = makeResidual(targetOriginalSelector, targetBeforeExtras);
       target.before(beforeResidual);
+      target.raws.before = interPieceSeparator;
     }
 
     const afterResiduals = [];

@@ -53,6 +53,34 @@ export function splitSelectors(selectorList) {
   return selectors;
 }
 
+// Whether a selector list’s top-level commas are followed by whitespace
+// (`.a, .b`) or not (`.a,.b`, as a minifier writes it)—checked against the
+// first top-level comma only, on the assumption that one selector list
+// doesn’t mix conventions. “null” when there’s no top-level comma to judge
+// by. Reuses the same depth/quote/escape-aware scan as `splitSelectors()`
+// above, so a comma nested inside `:is(a,b)`/`[attr="a,b"]` is never
+// mistaken for the list’s own separator.
+export function hasSpacedTopLevelComma(selectorList) {
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+
+  for (let i = 0; i < selectorList.length; i++) {
+    const char = selectorList[i];
+
+    if (escaped) { escaped = false; continue; }
+    if (char === '\\') { escaped = true; continue; }
+    if (quote) { if (char === quote) quote = null; continue; }
+    if (char === '"' || char === '\'') { quote = char; continue; }
+    if (char === '(' || char === '[') depth++;
+    if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
+
+    if (char === ',' && depth === 0) return /\s/.test(selectorList[i + 1] ?? '');
+  }
+
+  return null;
+}
+
 // Matches one `[attr]`, `[attr=value]`, `[attr~=value]`, `[attr|=value]`,
 // `[attr^=value]`, `[attr$=value]`, or `[attr*=value]`, quoted or not, with
 // an optional `i`/`s` case-sensitivity flag—used to find every

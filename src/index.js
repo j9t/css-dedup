@@ -1,7 +1,7 @@
 import postcss from 'postcss';
 import { normalizeProp, declarationKey } from './normalization.js';
 import { isIgnoredSelector, resolveIgnorePatterns } from './hacks.js';
-import { splitSelectors, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint, resetSubjectIdentities } from './selectors.js';
+import { splitSelectors, hasSpacedTopLevelComma, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint, resetSubjectIdentities } from './selectors.js';
 import { propertiesOverlap } from './shorthands.js';
 
 function normalizeScopeSegment(text) {
@@ -359,8 +359,42 @@ function usesMultilineSelectors(root) {
   return multiline > inline;
 }
 
-function joinSelectors(selectors, rule, multiline) {
-  if (!multiline) return selectors.join(', ');
+// Detects whether this style sheet’s existing multi-selector rules put a
+// space after the (inline) comma (`.a, .b {}`) or not (`.a,.b{}`, as a
+// minifier writes it)—by majority vote among their first top-level commas,
+// same “majority vote” approach as `typicalSeparator()` above. Only rules
+// already written inline count—a rule using the multiline convention says
+// nothing about inline comma spacing.
+function usesSpacedCommas(root) {
+  let spaced = 0;
+  let tight = 0;
+  root.walkRules(rule => {
+    if (RE_MULTILINE_SELECTOR_SEPARATOR.test(rule.selector)) return;
+    const spacedComma = hasSpacedTopLevelComma(rule.selector);
+    if (spacedComma === null) return;
+    if (spacedComma) spaced++; else tight++;
+  });
+  if (spaced || tight) return spaced >= tight;
+
+  // No existing multi-selector rule to learn the comma convention from
+  // (the merge about to run may be creating the file’s first one)—fall back
+  // to whether rules already omit the space before their opening brace
+  // (`.a{}` vs `.a {}`), which a minifier strips just as consistently as
+  // the space after a comma
+  return usesSpacedBraces(root);
+}
+
+function usesSpacedBraces(root) {
+  let spaced = 0;
+  let tight = 0;
+  root.walkRules(rule => {
+    if ((rule.raws.between ?? ' ') === '') tight++; else spaced++;
+  });
+  return spaced >= tight;
+}
+
+function joinSelectors(selectors, rule, multiline, spacedCommas) {
+  if (!multiline) return selectors.join(spacedCommas ? ', ' : ',');
   const indent = (rule.raws.before ?? '').match(RE_TRAILING_INDENT)[0];
   return selectors.join(`,\n${indent}`);
 }
@@ -434,6 +468,7 @@ function consolidateRoot(root, options = {}) {
   const ignorePatterns = resolveIgnorePatterns(options);
   const aggressive = options.aggressive ?? false;
   const multilineSelectors = usesMultilineSelectors(root);
+  const spacedCommas = usesSpacedCommas(root);
   const applied = [];
   const skipped = [];
 
@@ -680,7 +715,7 @@ function consolidateRoot(root, options = {}) {
     }
 
     const targetOriginalSelector = target.selector;
-    target.selector = joinSelectors(mergedSelectors, target, multilineSelectors);
+    target.selector = joinSelectors(mergedSelectors, target, multilineSelectors, spacedCommas);
 
     // All occurrences share a normalized key, so they’re equivalent by our
     // own equivalence rules—pick whichever raw spelling is shortest rather
@@ -839,7 +874,7 @@ function consolidateRoot(root, options = {}) {
         if (!mergedSelectors.includes(selector)) mergedSelectors.push(selector);
       }
     }
-    target.selector = joinSelectors(mergedSelectors, target, multilineSelectors);
+    target.selector = joinSelectors(mergedSelectors, target, multilineSelectors, spacedCommas);
 
     for (const decl of target.nodes) {
       const key = keyOf(decl);
@@ -923,7 +958,7 @@ function consolidateRoot(root, options = {}) {
       ), runOccurrences[0].decl.value);
 
       const mergedRule = lastRule.clone({ nodes: [] });
-      mergedRule.selector = joinSelectors(mergedSelectors, lastRule, multilineSelectors);
+      mergedRule.selector = joinSelectors(mergedSelectors, lastRule, multilineSelectors, spacedCommas);
       const lastDecl = runOccurrences.find(occ => occ.rule === lastRule).decl;
       lastDecl.remove();
       if (lastDecl.value !== shortestValue) lastDecl.value = shortestValue;
@@ -1084,7 +1119,7 @@ function consolidateRoot(root, options = {}) {
       if (sharedDecl.value !== shortestValue) sharedDecl.value = shortestValue;
 
       const anchorRule = hub.clone({ nodes: [] });
-      anchorRule.selector = joinSelectors(mergedSelectors, hub, multilineSelectors);
+      anchorRule.selector = joinSelectors(mergedSelectors, hub, multilineSelectors, spacedCommas);
       sharedDecl.remove();
       anchorRule.append(sharedDecl);
 

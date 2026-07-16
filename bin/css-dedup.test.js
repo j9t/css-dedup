@@ -1168,6 +1168,30 @@ describe('Deduplication', () => {
   });
 });
 
+// https://github.com/j9t/css-dedup/issues/11
+describe('Minified style sheets', () => {
+  test('Does not introduce a space after the comma when joining selectors in an otherwise minified rule', () => {
+    const { css } = dedup('.a{color:red}.b{color:red}\n');
+    assert.strictEqual(css, '.a,.b{color:red}\n');
+  });
+
+  test('Does not introduce spaces', () => {
+    const input = 'body{margin:0}header{margin:0}details p:first-of-type{margin:0}header :is(h1,ul){margin:0}footer :is(p,ul){margin:0}\n';
+    const { css } = dedup(input);
+    assert.strictEqual(css, 'body,header,details p:first-of-type,header :is(h1,ul),footer :is(p,ul){margin:0}\n');
+  });
+
+  test('Preserves the spaced-comma convention when the source already writes selector lists that way', () => {
+    const { css } = dedup('.a, .b { color: red; }\n.c { color: red; }\n');
+    assert.strictEqual(css, '.a, .b, .c { color: red; }\n');
+  });
+
+  test('Falls back to spaced commas for singleton-selector rules that already space their braces', () => {
+    const { css } = dedup('.a { color: red; }\n.b { color: red; }\n');
+    assert.strictEqual(css, '.a, .b { color: red; }\n');
+  });
+});
+
 describe('Aggressive mode', () => {
   test('Treats `hsl()` and hex as equivalent (rounding-based)', () => {
     const css = '.a { color: hsl(0 0% 100%); } .b { color: #fff; }';

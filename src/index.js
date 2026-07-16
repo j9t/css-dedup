@@ -328,10 +328,15 @@ const RE_TRAILING_INDENT = /[ \t]*$/;
 // prevailing “normal” gap between rules—majority vote, not just whichever
 // neighbor happens to be handy, since that neighbor can itself be the
 // anomaly (e.g., a comment sitting flush above a rule, in a file that
-// otherwise separates its rules with a blank line).
+// otherwise separates its rules with a blank line). A gap straight after a
+// comment is skipped entirely rather than voted on: It’s comment-to-rule
+// attachment spacing, near-always tight regardless of the file’s actual
+// rule-to-rule convention, and counting it lets a handful of commented
+// rules outvote that convention.
 function typicalSeparator(container) {
   const counts = new Map();
   for (let i = 1; i < container.nodes.length; i++) {
+    if (container.nodes[i - 1].type === 'comment') continue;
     const before = container.nodes[i].raws.before ?? '\n';
     counts.set(before, (counts.get(before) ?? 0) + 1);
   }

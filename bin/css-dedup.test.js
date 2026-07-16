@@ -1012,6 +1012,36 @@ describe('Deduplication', () => {
     assert.strictEqual(css, '/* comment */\n.b {\n\textra: 1;\n}\n\n.a, .b {\n\tposition: absolute;\n}\n');
   });
 
+  test('Ignores comment-to-rule gaps when voting on the file’s normal separator, even when several outnumber it', () => {
+    // Three rules are each preceded by their own tight (no-blank-line)
+    // comment, and one further rule sits tight against its own neighbor—
+    // five tight gaps in total, versus four blank-line gaps between
+    // genuine content. A naive majority vote over every gap, comments
+    // included, would call “tight” the file’s normal separator; it should
+    // instead recognize a comment-to-rule gap as attachment spacing (not a
+    // real rule separator) and skip it, correctly landing on blank-line as
+    // the file’s actual convention
+    const input = [
+      '.a {', '\tposition: absolute;', '}', '',
+      '/* c1 */', '.p1 {', '\tcolor: red;', '}', '',
+      '/* c2 */', '.p2 {', '\tcolor: green;', '}', '',
+      '/* c3 */', '.p3 {', '\tcolor: blue;', '}',
+      '.p4 {', '\tcolor: yellow;', '}', '',
+      '/* VG WORT */', '.b {', '\textra: 1;', '\tposition: absolute;', '}', '',
+    ].join('\n');
+    const { applied, skipped, css } = dedup(input);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(css, [
+      '/* c1 */', '.p1 {', '\tcolor: red;', '}', '',
+      '/* c2 */', '.p2 {', '\tcolor: green;', '}', '',
+      '/* c3 */', '.p3 {', '\tcolor: blue;', '}',
+      '.p4 {', '\tcolor: yellow;', '}', '',
+      '/* VG WORT */', '.b {', '\textra: 1;', '}', '',
+      '.a, .b {', '\tposition: absolute;', '}', '',
+    ].join('\n'));
+  });
+
   test('Joins merged selectors on one line by default', () => {
     const { css } = dedup('.a { color: red; }\n.b { color: red; }\n');
     assert.match(css, /\.a, \.b \{/);

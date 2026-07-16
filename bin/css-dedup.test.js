@@ -1185,6 +1185,11 @@ describe('Minified style sheets', () => {
     const { css } = dedup('.a, .b { color: red; }\n.c { color: red; }\n');
     assert.strictEqual(css, '.a, .b, .c { color: red; }\n');
   });
+
+  test('Falls back to spaced commas for singleton-selector rules that already space their braces', () => {
+    const { css } = dedup('.a { color: red; }\n.b { color: red; }\n');
+    assert.strictEqual(css, '.a, .b { color: red; }\n');
+  });
 });
 
 describe('Aggressive mode', () => {

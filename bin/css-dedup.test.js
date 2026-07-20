@@ -27,6 +27,12 @@ const cssGrowingAggressive = [
   '',
 ].join('\n');
 
+// Only mergeable in aggressive mode (canonicalizing the `<angle>` values is
+// aggressive-only), and—unlike `cssGrowingAggressive`—the merge shrinks the
+// file: Each rule holds only the one shared declaration, so folding them
+// removes a whole rule instead of just adding to a selector list
+const cssShrinkingAggressive = '.a { transform: rotate(90deg); }\n.b { transform: rotate(100grad); }\n';
+
 // Assertion patterns shared across several tests
 const RE_WITHHELD_ONE = /1 withheld/;
 const RE_MERGED_AB = /\.a,\s*\.b\s*{\s*color: red;\s*}/;
@@ -1918,17 +1924,20 @@ describe('CLI', () => {
     }
   });
 
-  test('Rolls up the `--aggressive` hint across files in the overall summary', () => {
+  test('Rolls up the `--aggressive` hint across files in the overall summary, netting mixed-sign per-file byte deltas', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_aggressive');
     fs.mkdirSync(dirTemp, { recursive: true });
-    const fileA = path.join(dirTemp, 'a.css');
-    const fileB = path.join(dirTemp, 'b.css');
-    fs.writeFileSync(fileA, cssGrowingAggressive);
-    fs.writeFileSync(fileB, cssGrowingAggressive);
+    const fileShrink = path.join(dirTemp, 'shrink.css');
+    const fileGrow = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(fileShrink, cssShrinkingAggressive);
+    fs.writeFileSync(fileGrow, cssGrowingAggressive);
 
     try {
-      const { stdout } = run([fileA, fileB]);
-      assert.match(stdout, /With `--fix --aggressive`: \d+ more consolidations? across 2 files/);
+      const { stdout } = run([fileShrink, fileGrow]);
+      // One file’s aggressive-only merge would save bytes, the other’s would
+      // cost more than it saves—so the aggregate must sum, not just count,
+      // both files’ deltas to land on the net direction
+      assert.match(stdout, /With `--fix --aggressive`: 2 more consolidations across 2 files, though growing files by \d+ bytes \(\d+\.\d% overall\) in total\./);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

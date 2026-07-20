@@ -1795,8 +1795,8 @@ describe('CLI', () => {
       assert.ok(stdout.includes(fileA));
       assert.ok(stdout.includes(fileB));
       assert.ok(stdout.includes('No duplicate declarations found.'));
-      // Two blank lines separate one file’s report from the next header
-      assert.ok(stdout.includes(`\n\n\n${fileB}`));
+      assert.ok(stdout.includes(`\n\n${fileB}`));
+      assert.ok(!stdout.includes(`\n\n\n${fileB}`));
       assert.strictEqual(status, 1);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -1817,6 +1817,118 @@ describe('CLI', () => {
       assert.ok(stdout.includes(fileB));
       assert.match(fs.readFileSync(fileA, 'utf8'), RE_MERGED_AB);
       assert.match(fs.readFileSync(fileB, 'utf8'), /\.c,\s*\.d\s*{\s*margin: 0;\s*}/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Labels each file’s own summary with its path, and closes with an overall summary, in report mode', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_report');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileA = path.join(dirTemp, 'a.css');
+    const fileB = path.join(dirTemp, 'b.css');
+    fs.writeFileSync(fileA, '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(fileB, '.c { margin: 0; }\n.d { margin: 0; }\n');
+
+    try {
+      const { stdout } = run([fileA, fileB]);
+      assert.ok(stdout.includes(`Summary for ${fileA}: 1 finding`));
+      assert.ok(stdout.includes(`Summary for ${fileB}: 1 finding`));
+      assert.ok(stdout.includes('Summary for all files: 2 findings'));
+      assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d% overall\) across 2 files\./);
+      // A single file’s own summary stays unlabeled—no ambiguity to resolve
+      const { stdout: single } = run([fileA]);
+      assert.ok(single.includes('Summary: 1 finding'));
+      assert.ok(!single.includes('Summary for'));
+      assert.ok(!single.includes('Summary for all files'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Separates shrinking and growing files in the overall summary, and points at `--savings-only`', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_mixed');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileShrink = path.join(dirTemp, 'shrink.css');
+    const fileGrow = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(fileShrink, '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(fileGrow, cssGrowing);
+
+    try {
+      const { stdout } = run([fileShrink, fileGrow]);
+      assert.match(stdout, /1 of 2 files would shrink by \d+ bytes \(\d+\.\d% overall\) combined with `--fix`; 1 file would grow by \d+ bytes \(\d+\.\d% overall\) instead—rerun with `--fix --savings-only` to skip it\./);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Excludes an unreadable/unparseable file from the overall summary, but counts it', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_error');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileGood = path.join(dirTemp, 'good.css');
+    const fileBad = path.join(dirTemp, 'bad.css');
+    fs.writeFileSync(fileGood, '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(fileBad, '.broken { color XP_WIN, }\n');
+
+    try {
+      const { stdout, stderr, status } = run([fileGood, fileBad]);
+      assert.match(stderr, RE_SYNTAX_ERROR);
+      assert.ok(stdout.includes('Summary for all files: 1 finding (1 file could not be processed; see errors above)'));
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Labels each file’s own summary and closes with an overall summary, in `--fix` mode', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_fix');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileShrink = path.join(dirTemp, 'shrink.css');
+    const fileGrow = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(fileShrink, '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(fileGrow, cssGrowing);
+
+    try {
+      const { stdout } = run(['--fix', fileShrink, fileGrow]);
+      assert.ok(stdout.includes(`Summary for ${fileShrink}: 1 consolidated, 0 skipped`));
+      assert.ok(stdout.includes(`Summary for ${fileGrow}: 1 consolidated, 0 skipped`));
+      assert.ok(stdout.includes('Summary for all files: 2 consolidated, 0 skipped'));
+      assert.match(stdout, /Saved \d+ bytes \(\d+\.\d% overall\) across 1 file\./);
+      assert.match(stdout, /1 file grew by \d+ bytes \(\d+\.\d% overall\) instead, not smaller—rerun with `--savings-only` to skip it\./);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--fix --savings-only` reports withheld files in the overall summary', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_withheld');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileShrink = path.join(dirTemp, 'shrink.css');
+    const fileGrow = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(fileShrink, '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(fileGrow, cssGrowing);
+
+    try {
+      const { stdout } = run(['--fix', '--savings-only', fileShrink, fileGrow]);
+      assert.match(stdout, /Saved \d+ bytes \(\d+\.\d% overall\) across 1 file\./);
+      assert.match(stdout, /1 file left untouched by `--savings-only`—consolidating would have made it \d+ bytes \(\d+\.\d% overall\) bigger in total\./);
+      assert.ok(fs.readFileSync(fileGrow, 'utf8') === cssGrowing);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Rolls up the `--aggressive` hint across files in the overall summary', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_aggressive');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileA = path.join(dirTemp, 'a.css');
+    const fileB = path.join(dirTemp, 'b.css');
+    fs.writeFileSync(fileA, cssGrowingAggressive);
+    fs.writeFileSync(fileB, cssGrowingAggressive);
+
+    try {
+      const { stdout } = run([fileA, fileB]);
+      assert.match(stdout, /With `--fix --aggressive`: \d+ more consolidations? across 2 files/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

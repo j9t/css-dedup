@@ -234,9 +234,17 @@ function printFindings(findings) {
   }
 }
 
-// Processes one target (a file path, or `-` for STDIN) and returns whether
-// it should count against the process’s exit code. In `--fix` mode, STDIN
-// is a special case: There is no file to rewrite in place, so the
+// A file that never made it into `stats` (read/parse failure): excluded
+// from the overall-summary totals, but counted so the totals can note how
+// many files that summary doesn’t speak for
+const RESULT_ERRORED = { exitFailure: true, errored: true, stats: null };
+
+// Processes one target (a file path, or `-` for STDIN) and returns
+// `{ exitFailure, errored, stats }`: `exitFailure` is whether it should
+// count against the process’s exit code, `errored` whether it never
+// produced stats (read/parse failure), and `stats` the per-file numbers the
+// overall summary aggregates across a multi-file run. In `--fix` mode,
+// STDIN is a special case: There is no file to rewrite in place, so the
 // consolidated CSS is printed to STDOUT instead—and, so that stream stays
 // pipeable, the usual status/summary lines go to STDERR rather than STDOUT.
 async function processTarget(file, options, { multi }, preread) {
@@ -249,7 +257,7 @@ async function processTarget(file, options, { multi }, preread) {
   if (preread) {
     if (preread.err) {
       console.error(styleText('red', `Could not read ${label}: ${preread.err.message}`));
-      return true;
+      return RESULT_ERRORED;
     }
     css = preread.css;
   } else {
@@ -257,7 +265,7 @@ async function processTarget(file, options, { multi }, preread) {
       css = isStdin ? await readStdin() : await readFile(label, 'utf8');
     } catch (err) {
       console.error(styleText('red', `Could not read ${label}: ${err.message}`));
-      return true;
+      return RESULT_ERRORED;
     }
   }
 
@@ -266,7 +274,7 @@ async function processTarget(file, options, { multi }, preread) {
   // A file that fails to parse (invalid CSS, or a non-standard dialect
   // PostCSS doesn’t accept) shouldn’t take the rest of the run down with it
   try {
-    return await processCss(css, targetOptions, { isStdin, label });
+    return await processCss(css, targetOptions, { isStdin, label, multi });
   } catch (err) {
     if (err.name === 'CssSyntaxError') {
       console.error(styleText('red', err.message));
@@ -274,7 +282,7 @@ async function processTarget(file, options, { multi }, preread) {
     } else {
       console.error(styleText('red', `Error processing ${label}: ${err.message}`));
     }
-    return true;
+    return RESULT_ERRORED;
   }
 }
 
@@ -319,7 +327,7 @@ function formatSkippedLine(item, skippedAggressive) {
   return `  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}${hint}`;
 }
 
-async function processCss(css, targetOptions, { isStdin, label }) {
+async function processCss(css, targetOptions, { isStdin, label, multi }) {
   const potential = targetOptions.aggressive ? null : oppositePass(css, targetOptions);
   const skippedAggressive = skippedWithAggressive(potential);
 
@@ -329,6 +337,10 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     // the declined outcome under `withheld`
     const { css: output, applied, skipped, bytes, withheld } = dedup(css, targetOptions);
     const log = isStdin ? console.error : console.log;
+    // A multi-file run’s overall summary needs each file’s label restated on
+    // its own summary line—by the time the run ends, the header this file
+    // printed at the top of its report may already be out of scrollback
+    const summaryLabel = multi ? `Summary for ${label}: ` : '';
 
     // Whether anything actually rode on the flag—measured by comparing
     // output against a discarded default-mode pass, never by entry counts:
@@ -366,9 +378,11 @@ async function processCss(css, targetOptions, { isStdin, label }) {
 
     const skippedNote = skipped.length ? ' (considered unsafe to auto-merge)' : '';
     if (withheld) {
-      log(`${styleText('green', '0 consolidated')}, ${styleText('yellow', `${withheld.count} withheld`)} (consolidating would make the file ${formatBytesShare(withheld.bytes)} bigger—\`--savings-only\`), ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
+      const line = `${summaryLabel}${styleText('green', '0 consolidated')}, ${styleText('yellow', `${withheld.count} withheld`)} (consolidating would make the file ${formatBytesShare(withheld.bytes)} bigger—\`--savings-only\`), ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`;
+      log(multi ? styleText('bold', line) : line);
     } else {
-      log(`${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`);
+      const line = `${summaryLabel}${styleText('green', `${applied.length} consolidated`)}, ${styleText('yellow', `${skipped.length} skipped`)}${skippedNote}`;
+      log(multi ? styleText('bold', line) : line);
     }
     if (applied.length) {
       log(`\n${formatBytesSummary(bytes)}`);
@@ -385,12 +399,15 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     // `savingsOnly` gate as this run, so an aggressive result the re-run
     // would withhold compares equal to the untouched style sheet and earns
     // no hint
-    if (potential && potential.css !== output) {
-      const extra = potential.applied.length - applied.length;
-      const extraSaved = bytes.after - potential.bytes.after;
-      const savings = extraSaved > 0 ? `, saving another ${extraSaved.toLocaleString()} bytes`
-        : extraSaved < 0 ? `, though growing the file by ${Math.abs(extraSaved).toLocaleString()} bytes` : '';
-      log(`(Re-running with \`--aggressive\` would consolidate ${extra > 0 ? `${extra} more` : 'further'}${savings}.)`);
+    let aggExtra = 0;
+    let aggExtraSaved = 0;
+    const aggDiffers = Boolean(potential && potential.css !== output);
+    if (aggDiffers) {
+      aggExtra = potential.applied.length - applied.length;
+      aggExtraSaved = bytes.after - potential.bytes.after;
+      const savings = aggExtraSaved > 0 ? `, saving another ${aggExtraSaved.toLocaleString()} bytes`
+        : aggExtraSaved < 0 ? `, though growing the file by ${Math.abs(aggExtraSaved).toLocaleString()} bytes` : '';
+      log(`(Re-running with \`--aggressive\` would consolidate ${aggExtra > 0 ? `${aggExtra} more` : 'further'}${savings}.)`);
     }
     if (aggressiveDiffers) {
       const share = aggressiveOnly > 0
@@ -399,7 +416,22 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       log(styleText('yellow', `${share} aggressive-only—probably, but not provably, safe. Review the diff and test the affected pages.`));
     }
 
-    return skipped.length > 0 || Boolean(withheld);
+    return {
+      exitFailure: skipped.length > 0 || Boolean(withheld),
+      errored: false,
+      stats: {
+        findings: null,
+        applied: applied.length,
+        skipped: skipped.length,
+        bytesBefore: bytes.before,
+        bytesSaved: bytes.saved,
+        withheldCount: withheld ? withheld.count : 0,
+        withheldGrowth: withheld ? Math.abs(withheld.bytes.saved) : 0,
+        aggExtra,
+        aggExtraSaved,
+        aggDiffers,
+      },
+    };
   }
 
   const { findings } = analyze(css, targetOptions);
@@ -409,7 +441,22 @@ async function processCss(css, targetOptions, { isStdin, label }) {
       ? ` With \`--aggressive\`: ${potential.applied.length} consolidation${potential.applied.length !== 1 ? 's' : ''} possible.`
       : '';
     console.log(`No duplicate declarations found.${note}`);
-    return false;
+    return {
+      exitFailure: false,
+      errored: false,
+      stats: {
+        findings: 0,
+        applied: 0,
+        skipped: 0,
+        bytesBefore: Buffer.byteLength(css, 'utf8'),
+        bytesSaved: 0,
+        withheldCount: 0,
+        withheldGrowth: 0,
+        aggExtra: potential?.applied.length ?? 0,
+        aggExtraSaved: potential?.bytes.saved ?? 0,
+        aggDiffers: Boolean(potential?.applied.length),
+      },
+    };
   }
 
   printFindings(findings);
@@ -430,9 +477,11 @@ async function processCss(css, targetOptions, { isStdin, label }) {
     console.log('');
   }
 
-  // Summary and `--fix` payoff close each style sheet’s report, so with
-  // several files it’s unambiguous which file they refer to
-  console.log(`${styleText('bold', 'Summary:')} ${findings.length} finding${findings.length !== 1 ? 's' : ''}`);
+  // Summary and `--fix` payoff close each style sheet’s report. With a
+  // single file that’s unambiguous on its own; with several, the filename
+  // is restated here, too—by the time a long multi-file run ends, the
+  // per-file header above may already be out of scrollback.
+  console.log(styleText('bold', `${multi ? `Summary for ${label}:` : 'Summary:'} ${findings.length} finding${findings.length !== 1 ? 's' : ''}`));
   if (withheld) {
     // The dry run went through the engine’s `savingsOnly` gate (set via the
     // config file—the CLI flag itself requires `--fix`), so `--fix` here
@@ -449,17 +498,129 @@ async function processCss(css, targetOptions, { isStdin, label }) {
   // cross-block or alias fold can absorb what the default pass would have
   // done in more, separate merges, so a count delta can be zero or negative
   // on exactly the files where `--aggressive` changes (and saves) the most
-  if (potential && potential.css !== cssDryRun) {
-    const extra = potential.applied.length - applied.length;
-    const totals = potential.bytes.saved > 0
+  let aggExtra = 0;
+  let aggExtraSaved = 0;
+  const aggDiffers = Boolean(potential && potential.css !== cssDryRun);
+  if (aggDiffers) {
+    aggExtra = potential.applied.length - applied.length;
+    aggExtraSaved = potential.bytes.saved;
+    const totals = aggExtraSaved > 0
       ? `, saving ${formatBytesShare(potential.bytes)} in total`
-      : potential.bytes.saved < 0
+      : aggExtraSaved < 0
         ? `, though growing the file by ${formatBytesShare(potential.bytes)} in total`
         : '';
-    console.log(`With \`--fix --aggressive\`: ${extra > 0 ? `${extra} more consolidation${extra !== 1 ? 's' : ''}` : 'further consolidation'}${totals}.`);
+    console.log(`With \`--fix --aggressive\`: ${aggExtra > 0 ? `${aggExtra} more consolidation${aggExtra !== 1 ? 's' : ''}` : 'further consolidation'}${totals}.`);
   }
 
-  return true;
+  return {
+    exitFailure: true,
+    errored: false,
+    stats: {
+      findings: findings.length,
+      applied: applied.length,
+      skipped: skipped.length,
+      bytesBefore: bytes.before,
+      bytesSaved: bytes.saved,
+      withheldCount: withheld ? withheld.count : 0,
+      withheldGrowth: withheld ? Math.abs(withheld.bytes.saved) : 0,
+      aggExtra,
+      aggExtraSaved,
+      aggDiffers,
+    },
+  };
+}
+
+function sumBy(list, fn) {
+  return list.reduce((total, item) => total + fn(item), 0);
+}
+
+// Like `formatBytesShare()`, but against the overall summary’s own total
+// original size rather than one file’s—there’s no single “this file” to
+// express a percentage of once several files’ byte deltas are combined. The
+// explicit “overall” avoids a mismatch reading as an error: A file’s own
+// summary a few lines up already showed this same byte count against a
+// different (smaller) denominator—its own size, not the whole run’s.
+function formatBytesShareOfTotal(bytesAbs, totalBefore) {
+  const percent = totalBefore ? (bytesAbs / totalBefore) * 100 : 0;
+  return `${bytesAbs.toLocaleString()} bytes (${percent.toFixed(1)}% overall)`;
+}
+
+// Rolls up every file’s `stats` into one closing report, so a terminal that
+// only shows the last N lines of a multi-file run doesn’t leave the final
+// file’s own summary looking like it spoke for the whole run
+function printOverallSummary(results, { fix }) {
+  const ok = results.filter(result => result.stats);
+  const errored = results.length - ok.length;
+  const erroredNote = errored ? ` (${errored} file${errored !== 1 ? 's' : ''} could not be processed; see errors above)` : '';
+
+  console.log('');
+
+  // Every percentage below is against this—the combined original size of
+  // every successfully processed file—since there’s no single file left to
+  // relate a byte count to once the run’s totals are combined
+  const totalBeforeAll = sumBy(ok, result => result.stats.bytesBefore);
+
+  const filesShrink = ok.filter(result => result.stats.bytesSaved > 0);
+  const filesGrow = ok.filter(result => result.stats.bytesSaved < 0);
+  const shrinkTotal = sumBy(filesShrink, result => result.stats.bytesSaved);
+  const growTotal = Math.abs(sumBy(filesGrow, result => result.stats.bytesSaved));
+  const withheldFiles = ok.filter(result => result.stats.withheldCount > 0);
+  const withheldGrowthTotal = sumBy(withheldFiles, result => result.stats.withheldGrowth);
+  const aggFiles = ok.filter(result => result.stats.aggDiffers);
+
+  if (fix) {
+    const totalApplied = sumBy(ok, result => result.stats.applied);
+    const totalSkipped = sumBy(ok, result => result.stats.skipped);
+    console.log(styleText('bold', `Summary for all files: ${totalApplied} consolidated, ${totalSkipped} skipped${erroredNote}`));
+
+    if (filesShrink.length) {
+      console.log(`Saved ${formatBytesShareOfTotal(shrinkTotal, totalBeforeAll)} across ${filesShrink.length} file${filesShrink.length !== 1 ? 's' : ''}.`);
+    }
+    if (filesGrow.length) {
+      // `filesGrow` and `savingsOnly` can’t both be true—the engine’s gate
+      // (see `dedupRoot()`) withholds a growing result under `savingsOnly`
+      // instead of applying it, which is why that file shows up in
+      // `withheldFiles` below rather than here
+      console.log(styleText('yellow', `${filesGrow.length} file${filesGrow.length !== 1 ? 's' : ''} grew by ${formatBytesShareOfTotal(growTotal, totalBeforeAll)} instead, not smaller—rerun with \`--savings-only\` to skip ${filesGrow.length !== 1 ? 'them' : 'it'}.`));
+    }
+    if (withheldFiles.length) {
+      console.log(styleText('yellow', `${withheldFiles.length} file${withheldFiles.length !== 1 ? 's' : ''} left untouched by \`--savings-only\`—consolidating would have made ${withheldFiles.length !== 1 ? 'them' : 'it'} ${formatBytesShareOfTotal(withheldGrowthTotal, totalBeforeAll)} bigger in total.`));
+    }
+    if (aggFiles.length) {
+      const extra = sumBy(aggFiles, result => result.stats.aggExtra);
+      const extraSaved = sumBy(aggFiles, result => result.stats.aggExtraSaved);
+      const savings = extraSaved > 0 ? `, saving another ${formatBytesShareOfTotal(extraSaved, totalBeforeAll)}`
+        : extraSaved < 0 ? `, though growing files by ${formatBytesShareOfTotal(Math.abs(extraSaved), totalBeforeAll)}` : '';
+      console.log(`(Re-running with \`--aggressive\` would consolidate ${extra > 0 ? `${extra} more` : 'further'} across ${aggFiles.length} file${aggFiles.length !== 1 ? 's' : ''}${savings}.)`);
+    }
+    return;
+  }
+
+  const totalFindings = sumBy(ok, result => result.stats.findings);
+  console.log(styleText('bold', `Summary for all files: ${totalFindings} finding${totalFindings !== 1 ? 's' : ''}${erroredNote}`));
+
+  if (withheldFiles.length) {
+    console.log(styleText('yellow', `\`--fix\` would leave ${withheldFiles.length} file${withheldFiles.length !== 1 ? 's' : ''} untouched—\`savingsOnly\` is set, and consolidating would make ${withheldFiles.length !== 1 ? 'them' : 'it'} ${formatBytesShareOfTotal(withheldGrowthTotal, totalBeforeAll)} bigger.`));
+  }
+  if (filesShrink.length && !filesGrow.length) {
+    console.log(`Run with \`--fix\` to save ${formatBytesShareOfTotal(shrinkTotal, totalBeforeAll)} across ${filesShrink.length} file${filesShrink.length !== 1 ? 's' : ''}.`);
+  } else if (filesShrink.length && filesGrow.length) {
+    // A per-file, single-flag `--savings-only` hint would be more accurate
+    // than the two-flag form here—but the CLI flag only takes effect
+    // together with `--fix` (see the option’s own guard above), so a reader
+    // copying the hint straight from this line needs both spelled out
+    console.log(styleText('yellow', `${filesShrink.length} of ${ok.length} files would shrink by ${formatBytesShareOfTotal(shrinkTotal, totalBeforeAll)} combined with \`--fix\`; ${filesGrow.length} file${filesGrow.length !== 1 ? 's' : ''} would grow by ${formatBytesShareOfTotal(growTotal, totalBeforeAll)} instead—rerun with \`--fix --savings-only\` to skip ${filesGrow.length !== 1 ? 'them' : 'it'}.`));
+  } else if (filesGrow.length) {
+    console.log(styleText('yellow', `Running \`--fix\` here would make ${filesGrow.length} file${filesGrow.length !== 1 ? 's' : ''} ${formatBytesShareOfTotal(growTotal, totalBeforeAll)} bigger in total, not smaller—rerun with \`--fix --savings-only\` to skip ${filesGrow.length !== 1 ? 'them' : 'it'} (or without \`--savings-only\` if that growth is worth it for maintainability).`));
+  }
+
+  if (aggFiles.length) {
+    const extra = sumBy(aggFiles, result => result.stats.aggExtra);
+    const extraSaved = sumBy(aggFiles, result => result.stats.aggExtraSaved);
+    const totals = extraSaved > 0 ? `, saving ${formatBytesShareOfTotal(extraSaved, totalBeforeAll)} in total`
+      : extraSaved < 0 ? `, though growing files by ${formatBytesShareOfTotal(Math.abs(extraSaved), totalBeforeAll)} in total` : '';
+    console.log(`With \`--fix --aggressive\`: ${extra > 0 ? `${extra} more consolidation${extra !== 1 ? 's' : ''}` : 'further consolidation'} across ${aggFiles.length} file${aggFiles.length !== 1 ? 's' : ''}${totals}.`);
+  }
 }
 
 async function main() {
@@ -491,13 +652,18 @@ async function main() {
   const multi = files.length > 1;
   const prefetched = await prefetchContents(files);
   let failed = false;
+  const results = [];
 
   for (const [index, file] of files.entries()) {
-    // Two blank lines between per-file reports, so each file’s closing
-    // summary is visually separated from the next file’s header
-    if (multi && index > 0) console.log('\n');
-    if (await processTarget(file, options, { multi }, prefetched[index])) failed = true;
+    // A blank line between per-file reports, so each file’s closing summary
+    // is visually separated from the next file’s header
+    if (multi && index > 0) console.log('');
+    const result = await processTarget(file, options, { multi }, prefetched[index]);
+    if (result.exitFailure) failed = true;
+    results.push(result);
   }
+
+  if (multi) printOverallSummary(results, { fix: values.fix });
 
   if (failed) process.exitCode = 1;
 }

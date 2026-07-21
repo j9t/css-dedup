@@ -37,7 +37,7 @@ const cssShrinkingAggressive = '.a { transform: rotate(90deg); }\n.b { transform
 const RE_WITHHELD_ONE = /1 withheld/;
 const RE_MERGED_AB = /\.a,\s*\.b\s*{\s*color: red;\s*}/;
 const RE_MERGED_AC = /\.a,\s*\.c\s*{\s*color: red;\s*}/;
-const RE_PAYOFF_FIX = /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\./;
+const RE_PAYOFF_FIX = /\* \d+ findings?: Reduce duplication and save \d+ bytes \(-\d+\.\d%\) with `--fix`/;
 const RE_SYNTAX_ERROR = /Unknown word/;
 
 function run(args, spawnOptions = {}) {
@@ -1424,7 +1424,7 @@ describe('Fixtures', () => {
     const summaryIndex = stdout.indexOf('Summary:');
     assert.ok(unsafeIndex !== -1 && summaryIndex !== -1);
     assert.ok(unsafeIndex < summaryIndex);
-    assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d%\)\.\nWith `--fix --aggressive`: \d+ more consolidations?, saving \d+ bytes \(\d+\.\d%\) in total\.\s*$/);
+    assert.match(stdout, /\* \d+ findings?: Reduce duplication and save \d+ bytes \(-\d+\.\d%\) with `--fix`\n\* \d+ more findings? in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`\s*$/);
   });
 
   test('merge-safety.css --fix consolidates the safe pair and skips the unsafe one', () => {
@@ -1435,10 +1435,9 @@ describe('Fixtures', () => {
 
     try {
       const { stdout } = run(['--fix', file]);
-      assert.ok(stdout.includes('1 consolidated'));
-      assert.ok(stdout.includes('1 skipped'));
-      assert.ok(stdout.includes('1 skipped (considered unsafe to auto-merge)'));
-      assert.match(stdout, /\d+ → \d+ bytes \(-\d+ B, -\d+\.\d%\)/);
+      assert.ok(stdout.includes('1 declaration consolidated'));
+      assert.ok(stdout.includes('1 finding skipped (considered unsafe to auto-merge)'));
+      assert.match(stdout, /\d+ → \d+ bytes, -\d+\.\d%/);
 
       const output = fs.readFileSync(file, 'utf8');
       assert.match(output, RE_MERGED_AC);
@@ -1457,8 +1456,9 @@ describe('Fixtures', () => {
 
     try {
       const { stdout } = run(['--fix', file]);
-      assert.ok(stdout.includes('1 consolidated, 0 skipped'));
+      assert.ok(stdout.includes('* 1 declaration consolidated: Reduced duplication and saved'));
       assert.ok(!stdout.includes('unsafe to auto-merge'));
+      assert.ok(!/\d+ skipped/.test(stdout));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1479,7 +1479,7 @@ describe('Fixtures', () => {
     const { stdout, status } = run(['--aggressive', path.join(fixturesDir, 'aggressive.css')]);
     assert.strictEqual(status, 1);
     assert.ok(stdout.includes('duplicate   color: hsl(0 0% 100%)'));
-    assert.match(stdout, /Run with `--fix` to save \d+ bytes/);
+    assert.match(stdout, RE_PAYOFF_FIX);
   });
 
   test('aggressive.css --fix --aggressive merges across the blocks, drops the emptied one, and suggests testing', () => {
@@ -1490,7 +1490,7 @@ describe('Fixtures', () => {
 
     try {
       const { stdout } = run(['--fix', '--aggressive', file]);
-      assert.ok(stdout.includes('1 consolidated, 0 skipped'));
+      assert.ok(stdout.includes('* 1 declaration consolidated: Reduced duplication and saved'));
       assert.match(stdout, /1 of these merges is aggressive-only—probably, but not provably, safe\. Review the diff and test the affected pages\./);
 
       const output = fs.readFileSync(file, 'utf8');
@@ -1510,7 +1510,7 @@ describe('Fixtures', () => {
     try {
       const { stdout } = run(['--fix', file]);
       assert.match(stdout, /intervening `background` declaration in `\.y`.*\(may merge with `--aggressive`\)/);
-      assert.match(stdout, /\(Re-running with `--aggressive` would consolidate 1 more, saving another \d+ bytes\.\)/);
+      assert.match(stdout, /\* 1 more finding in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1524,7 +1524,7 @@ describe('Fixtures', () => {
 
     try {
       const { stdout } = run(['-f', file]);
-      assert.ok(stdout.includes('1 consolidated'));
+      assert.ok(stdout.includes('1 declaration consolidated'));
 
       const output = fs.readFileSync(file, 'utf8');
       assert.match(output, RE_MERGED_AC);
@@ -1569,7 +1569,7 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run([file]);
-      assert.match(stdout, /Running `--fix` here would make the file \d+ bytes \(\d+\.\d%\) bigger, not smaller/);
+      assert.match(stdout, /\* 1 finding: Reduce duplication but grow by \d+ bytes \(\+\d+\.\d%\) with `--fix`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1583,8 +1583,8 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run(['--fix', file]);
-      assert.match(stdout, /\+\d+ B, \+\d+\.\d%/);
-      assert.match(stdout, /Note: This consolidation makes the file \d+ bytes \(\d+\.\d%\) bigger, not smaller/);
+      assert.match(stdout, /\* 1 declaration consolidated: Reduced duplication and grew by \d+ bytes \(\d+ → \d+ bytes, \+\d+\.\d%\)/);
+      assert.match(stdout, /\* Worth it for maintainability \(each declaration used once\); skip `--fix` here if you care more about transfer size\./);
       assert.ok(fs.readFileSync(file, 'utf8').includes('.very-long-selector-name-one, .b'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -1607,7 +1607,7 @@ describe('CLI', () => {
     try {
       const { stdout, status } = run(['--fix', '--savings-only', file]);
       assert.strictEqual(status, 1);
-      assert.match(stdout, /0 consolidated, 1 withheld \(consolidating would make the file \d+ bytes \(\d+\.\d%\) bigger—`--savings-only`\), 0 skipped/);
+      assert.match(stdout, /\* 0 declarations consolidated, 1 withheld: `savingsOnly` left this file untouched—consolidating would grow by \d+ bytes \(\+\d+\.\d%\)/);
       assert.ok(!stdout.includes('Wrote'));
       assert.strictEqual(fs.readFileSync(file, 'utf8'), source);
     } finally {
@@ -1624,7 +1624,7 @@ describe('CLI', () => {
     try {
       const { stdout, status } = run(['-f', '-s', file]);
       assert.strictEqual(status, 0);
-      assert.ok(stdout.includes('1 consolidated, 0 skipped'));
+      assert.ok(stdout.includes('* 1 declaration consolidated: Reduced duplication and saved'));
       assert.ok(stdout.includes('Wrote'));
       assert.ok(fs.readFileSync(file, 'utf8').includes('.a, .b'));
     } finally {
@@ -1665,13 +1665,13 @@ describe('CLI', () => {
     try {
       const { stdout } = run(['--fix', '--savings-only', file]);
       const detailIndex = stdout.indexOf('duplicate group considered unsafe to auto-merge:');
-      const countsIndex = stdout.indexOf('0 consolidated, 1 withheld');
+      const countsIndex = stdout.indexOf('0 declarations consolidated, 1 withheld');
       assert.ok(detailIndex !== -1 && countsIndex !== -1);
       assert.ok(detailIndex < countsIndex);
       // The counts line—the run's conclusion—must be among the last things
       // printed, not stranded above the skipped-group detail
-      assert.ok(stdout.includes('(Re-running with `--aggressive`'));
-      assert.match(stdout, /1 skipped \(considered unsafe to auto-merge\)\n\(Re-running with `--aggressive`/);
+      assert.ok(stdout.includes('more findings in aggressive mode'));
+      assert.match(stdout, /\* 0 declarations consolidated, 1 withheld:.*\n\* 1 finding skipped \(considered unsafe to auto-merge\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1727,10 +1727,10 @@ describe('CLI', () => {
 
     try {
       const report = run([file]);
-      assert.match(report.stdout, /With `--fix --aggressive`: further consolidation, saving \d+ bytes \(\d+\.\d%\) in total\./);
+      assert.match(report.stdout, /\* More in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
 
       const fix = run(['--fix', file]);
-      assert.match(fix.stdout, /\(Re-running with `--aggressive` would consolidate further, saving another \d+ bytes\.\)/);
+      assert.match(fix.stdout, /\* More in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1765,7 +1765,7 @@ describe('CLI', () => {
       // A `--fix --aggressive --savings-only` re-run would withhold as
       // well, so promising it anything—let alone “savings” measured against
       // the never-written output—would be false
-      assert.ok(!stdout.includes('Re-running with `--aggressive`'));
+      assert.ok(!stdout.includes('in aggressive mode'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1779,10 +1779,10 @@ describe('CLI', () => {
 
     try {
       const report = run([file]);
-      assert.match(report.stdout, /With `--fix --aggressive`: 1 more consolidation, though growing the file by \d+ bytes \(\d+\.\d%\) in total\./);
+      assert.match(report.stdout, /\* 1 more finding in aggressive mode: Reduce duplication but grow by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive`/);
 
       const fix = run(['--fix', file]);
-      assert.match(fix.stdout, /\(Re-running with `--aggressive` would consolidate 1 more, though growing the file by \d+ bytes\.\)/);
+      assert.match(fix.stdout, /\* 1 more finding in aggressive mode: Reduce duplication but grow by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1838,13 +1838,12 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run([fileA, fileB]);
-      assert.ok(stdout.includes(`Summary for ${fileA}: 1 finding`));
-      assert.ok(stdout.includes(`Summary for ${fileB}: 1 finding`));
-      assert.ok(stdout.includes('Summary for all files: 2 findings'));
-      assert.match(stdout, /Run with `--fix` to save \d+ bytes \(\d+\.\d% overall\) across 2 files\./);
+      assert.ok(stdout.includes(`Summary for ${fileA}:\n* 1 finding: Reduce duplication and save`));
+      assert.ok(stdout.includes(`Summary for ${fileB}:\n* 1 finding: Reduce duplication and save`));
+      assert.match(stdout, /Summary for all files:\n\* 2 findings: Reduce duplication and save \d+ bytes \(-\d+\.\d%\) with `--fix`/);
       // A single file’s own summary stays unlabeled—no ambiguity to resolve
       const { stdout: single } = run([fileA]);
-      assert.ok(single.includes('Summary: 1 finding'));
+      assert.ok(single.includes('Summary:\n* 1 finding: Reduce duplication and save'));
       assert.ok(!single.includes('Summary for'));
       assert.ok(!single.includes('Summary for all files'));
     } finally {
@@ -1865,7 +1864,7 @@ describe('CLI', () => {
       // The lone growing file (18 bytes) outweighs the shrinking file (15
       // bytes), so the net—the actual bottom line for plain `--fix`—comes
       // out growing, too, not shrinking
-      assert.match(stdout, /Combined, the 2 files would grow by \d+ bytes \(\d+\.\d% overall\) with `--fix`; `--fix --savings-only` would skip the 1 file that grows in size\./);
+      assert.match(stdout, /\* 2 findings: Reduce duplication and shrink 1 file by \d+ bytes \(-\d+\.\d%\) but grow 1 file by \d+ bytes \(\+\d+\.\d%\) with `--fix` \(for overall \+\d+ bytes \/ \+\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --savings-only`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1882,8 +1881,9 @@ describe('CLI', () => {
     try {
       const { stdout } = run([fileShrink, fileGrow]);
       // The shrinking file’s savings now outweigh the one growing file, so
-      // the net flips to “shrink” instead of the previous test’s “grow”
-      assert.match(stdout, /Combined, the 2 files would shrink by \d+ bytes \(\d+\.\d% overall\) with `--fix`; `--fix --savings-only` would skip the 1 file that grows in size\./);
+      // the net flips to “shrink” (a “-” sign) instead of the previous
+      // test’s “grow” (a “+” sign)
+      assert.match(stdout, /\* 2 findings: Reduce duplication and shrink 1 file by \d+ bytes \(-\d+\.\d%\) but grow 1 file by \d+ bytes \(\+\d+\.\d%\) with `--fix` \(for overall -\d+ bytes \/ -\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --savings-only`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1900,7 +1900,7 @@ describe('CLI', () => {
     try {
       const { stdout, stderr, status } = run([fileGood, fileBad]);
       assert.match(stderr, RE_SYNTAX_ERROR);
-      assert.ok(stdout.includes('Summary for all files: 1 finding (1 file could not be processed; see errors above)'));
+      assert.ok(stdout.includes('Summary for all files: (1 file could not be processed; see errors above)\n* 1 finding: Reduce duplication and save'));
       assert.strictEqual(status, 1);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -1917,12 +1917,12 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run(['--fix', fileShrink, fileGrow]);
-      assert.ok(stdout.includes(`Summary for ${fileShrink}: 1 consolidated, 0 skipped`));
-      assert.ok(stdout.includes(`Summary for ${fileGrow}: 1 consolidated, 0 skipped`));
-      assert.ok(stdout.includes('Summary for all files: 2 consolidated, 0 skipped'));
+      assert.ok(stdout.includes(`Summary for ${fileShrink}:\n* 1 declaration consolidated: Reduced duplication and saved`));
+      assert.ok(stdout.includes(`Summary for ${fileGrow}:\n* 1 declaration consolidated: Reduced duplication and grew`));
+      assert.ok(stdout.includes('Summary for all files:\n* 2 declarations consolidated:'));
       // The growing file (18 bytes) outweighs the shrinking file (15 bytes),
-      // so the mixed branch—not the shrink-only one—reports the net
-      assert.match(stdout, /Combined, the 2 files grew by \d+ bytes \(\d+\.\d% overall\), not smaller; `--savings-only` would have skipped the 1 file that grew in size\./);
+      // so the net (in parentheses) comes out positive—growing, not shrinking
+      assert.match(stdout, /\* 2 declarations consolidated: Reduced duplication, shrinking 1 file by \d+ bytes \(-\d+\.\d%\) and growing 1 file by \d+ bytes \(\+\d+\.\d%\) \(for overall \+\d+ bytes \/ \+\d+\.\d%\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1938,8 +1938,8 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run(['--fix', '--savings-only', fileShrink, fileGrow]);
-      assert.match(stdout, /Saved \d+ bytes \(\d+\.\d% overall\) across 1 file\./);
-      assert.match(stdout, /1 file left untouched by `--savings-only`—consolidating would have made it \d+ bytes \(\d+\.\d% overall\) bigger in total\./);
+      assert.match(stdout, /\* 1 declaration consolidated: Reduced duplication and saved \d+ bytes \(-\d+\.\d%\)/);
+      assert.match(stdout, /\* 1 file left untouched by `--savings-only`—consolidating would have made it \d+ bytes \(\d+\.\d% overall\) bigger in total/);
       assert.ok(fs.readFileSync(fileGrow, 'utf8') === cssGrowing);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -1959,7 +1959,26 @@ describe('CLI', () => {
       // One file’s aggressive-only merge would save bytes, the other’s would
       // cost more than it saves—so the aggregate must sum, not just count,
       // both files’ deltas to land on the net direction
-      assert.match(stdout, /With `--fix --aggressive`: 2 more consolidations across 2 files, though growing files by \d+ bytes \(\d+\.\d% overall\) in total\./);
+      assert.match(stdout, /\* 2 more findings in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(for overall \+\d+ bytes \/ \+\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Rolls up the `--aggressive` re-run hint (in `--fix` mode) with a `--savings-only` mention', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_aggressive_fix');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileShrink = path.join(dirTemp, 'shrink.css');
+    const fileGrow = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(fileShrink, cssShrinkingAggressive);
+    fs.writeFileSync(fileGrow, cssGrowingAggressive);
+
+    try {
+      const { stdout } = run(['--fix', fileShrink, fileGrow]);
+      // `--savings-only` gates the whole file’s output, not just the
+      // aggressive-only merges within it—so the re-run hint names the file
+      // that would grow, the same way the report-mode hint does
+      assert.match(stdout, /\* 2 more findings in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(for overall \+\d+ bytes \/ \+\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -2043,14 +2062,14 @@ describe('CLI', () => {
   test('`--fix -` writes the consolidated CSS to stdout, and status to STDERR', () => {
     const { stdout, stderr } = run(['--fix', '-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
     assert.match(stdout, /^\.a, \.b \{\s*color: red;\s*\}\s*$/);
-    assert.ok(stderr.includes('1 consolidated'));
+    assert.ok(stderr.includes('1 declaration consolidated'));
   });
 
   test('`--fix -` still writes the full style sheet to STDOUT when nothing is consolidated', () => {
     const input = '.a { color: red; }\n.b { color: blue; }\n';
     const { stdout, stderr } = run(['--fix', '-'], { input });
     assert.strictEqual(stdout, input);
-    assert.ok(stderr.includes('0 consolidated'));
+    assert.ok(stderr.includes('0 declarations consolidated'));
   });
 
   test('Rejects combining `-` with other file arguments', () => {

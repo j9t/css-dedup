@@ -1422,7 +1422,7 @@ describe('Fixtures', () => {
     const summaryIndex = stdout.indexOf('Summary:');
     assert.ok(unsafeIndex !== -1 && summaryIndex !== -1);
     assert.ok(unsafeIndex < summaryIndex);
-    assert.match(stdout, /\* \d+ findings?: Reduce duplication and save \d+ bytes \(-\d+\.\d%\) with `--fix`\n\* \d+ more findings? in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`\s*$/);
+    assert.match(stdout, /\* \d+ findings?: Reduce duplication and save \d+ bytes \(-\d+\.\d%\) with `--fix`\n\* \d+ more findings? in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive` \(total: -\d+ bytes \/ -\d+\.\d%\)\s*$/);
   });
 
   test('merge-safety.css --fix consolidates the safe pair and skips the unsafe one', () => {
@@ -1508,7 +1508,7 @@ describe('Fixtures', () => {
     try {
       const { stdout } = run(['--fix', file]);
       assert.match(stdout, /intervening `background` declaration in `\.y`.*\(may merge with `--aggressive`\)/);
-      assert.match(stdout, /\* 1 more finding in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
+      assert.match(stdout, /\* 1 more finding in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive` \(total: -\d+ bytes \/ -\d+\.\d%\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1862,7 +1862,7 @@ describe('CLI', () => {
       // The lone growing file (18 bytes) outweighs the shrinking file (15
       // bytes), so the net—the actual bottom line for plain `--fix`—comes
       // out growing, too, not shrinking
-      assert.match(stdout, /\* 2 findings: Reduce duplication and shrink 1 file by \d+ bytes \(-\d+\.\d%\) but grow 1 file by \d+ bytes \(\+\d+\.\d%\) with `--fix` \(for overall \+\d+ bytes \/ \+\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --savings-only`/);
+      assert.match(stdout, /\* 2 findings: Reduce duplication and shrink 1 file by \d+ bytes \(-\d+\.\d%\) but grow 1 file by \d+ bytes \(\+\d+\.\d%\) with `--fix` \(total: \+\d+ bytes \/ \+\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --savings-only`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1881,7 +1881,7 @@ describe('CLI', () => {
       // The shrinking file’s savings now outweigh the one growing file, so
       // the net flips to “shrink” (a “-” sign) instead of the previous
       // test’s “grow” (a “+” sign)
-      assert.match(stdout, /\* 2 findings: Reduce duplication and shrink 1 file by \d+ bytes \(-\d+\.\d%\) but grow 1 file by \d+ bytes \(\+\d+\.\d%\) with `--fix` \(for overall -\d+ bytes \/ -\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --savings-only`/);
+      assert.match(stdout, /\* 2 findings: Reduce duplication and shrink 1 file by \d+ bytes \(-\d+\.\d%\) but grow 1 file by \d+ bytes \(\+\d+\.\d%\) with `--fix` \(total: -\d+ bytes \/ -\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --savings-only`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1920,7 +1920,7 @@ describe('CLI', () => {
       assert.ok(stdout.includes('Summary for all files:\n* 2 declarations consolidated:'));
       // The growing file (18 bytes) outweighs the shrinking file (15 bytes),
       // so the net (in parentheses) comes out positive—growing, not shrinking
-      assert.match(stdout, /\* 2 declarations consolidated: Reduced duplication, shrinking 1 file by \d+ bytes \(-\d+\.\d%\) and growing 1 file by \d+ bytes \(\+\d+\.\d%\) \(for overall \+\d+ bytes \/ \+\d+\.\d%\)/);
+      assert.match(stdout, /\* 2 declarations consolidated: Reduced duplication, shrinking 1 file by \d+ bytes \(-\d+\.\d%\) and growing 1 file by \d+ bytes \(\+\d+\.\d%\) \(total: \+\d+ bytes \/ \+\d+\.\d%\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1959,7 +1959,7 @@ describe('CLI', () => {
     // the base run was report or `--fix` mode—`--savings-only` gates the
     // whole file, not just the aggressive-only merges within it, so the
     // hint names the growing file the same way in both.
-    const RE_AGGRESSIVE_ROLLUP = /\* 2 more findings in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(for overall \+\d+ bytes \/ \+\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
+    const RE_AGGRESSIVE_ROLLUP = /\* 2 more findings in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(total: [-+]\d+ bytes \/ [-+]\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
 
     try {
       assert.match(run([fileShrink, fileGrow]).stdout, RE_AGGRESSIVE_ROLLUP);

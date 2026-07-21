@@ -224,12 +224,19 @@ function formatAppliedReduceClause(bytes) {
 
 // The mixed-results net—shrinking files’ savings minus growing files’
 // growth—against the run’s combined original size, spelled out as the
-// literal “for overall ±N bytes / ±P%” the summary bullets quote in
+// literal “total: ±N bytes / ±P%” the summary bullets quote in
 // parentheses
 function formatOverallNet(net, totalBefore) {
   const percent = totalBefore ? (Math.abs(net) / totalBefore) * 100 : 0;
   const sign = net >= 0 ? '-' : '+';
-  return `for overall ${sign}${Math.abs(net).toLocaleString()} bytes / ${sign}${percent.toFixed(1)}%`;
+  return `total: ${sign}${Math.abs(net).toLocaleString()} bytes / ${sign}${percent.toFixed(1)}%`;
+}
+
+// Appended to an `--aggressive` bullet: what its own delta adds up to once
+// combined with the base bullet printed just above—without this, a reader
+// has to add the two bullets themselves to know where they’d land together
+function formatAggregateTotalNote(totalSaved, before) {
+  return ` (${formatOverallNet(totalSaved, before)})`;
 }
 
 // The one outcome bullet the all-files summary prints twice—once for the
@@ -242,30 +249,37 @@ function formatOverallNet(net, totalBefore) {
 // `--aggressive` preview (a recommendation, flag named, “but” contrasts the
 // still-open choice). `more` marks the `--aggressive` bullets, whose totals
 // are additional on top of the base bullet printed just above.
-function formatOutcomeBullet({ countLabel, tense, filesShrinkLen, shrinkTotal, filesGrowLen, growTotal, totalBefore, flag, skipFlag, more = false }) {
+// `aggregateNote`—passed by the `--aggressive` caller as a pre-formatted
+// `formatAggregateTotalNote()` string, against the whole run rather than
+// just the files aggressive affects—is appended to every shape, replacing
+// the mixed shape’s own “(total: …)” net (just its own two figures) rather
+// than sitting alongside it: Two differently-scoped nets both labeled
+// “total:” back to back would read as a contradiction.
+function formatOutcomeBullet({ countLabel, tense, filesShrinkLen, shrinkTotal, filesGrowLen, growTotal, totalBefore, flag, skipFlag, more = false, aggregateNote = '' }) {
   const s = n => n !== 1 ? 's' : '';
   const reduce = tense === 'done' ? 'Reduced' : 'Reduce';
   const flagClause = tense === 'done' ? '' : ` with \`${flag}\``;
 
   if (filesShrinkLen && !filesGrowLen) {
     const saved = tense === 'done' ? 'saved' : 'save';
-    return [`* ${countLabel}: ${reduce} duplication and ${saved} ${formatByteMagnitude(shrinkTotal, totalBefore, '-', { more })}${flagClause}`];
+    return [`* ${countLabel}: ${reduce} duplication and ${saved} ${formatByteMagnitude(shrinkTotal, totalBefore, '-', { more })}${flagClause}${aggregateNote}`];
   }
   if (!filesShrinkLen && filesGrowLen) {
     const grew = tense === 'done' ? 'grew' : 'grow';
     const conjunction = tense === 'done' ? 'and' : 'but';
-    return [`* ${countLabel}: ${reduce} duplication ${conjunction} ${grew} by ${formatByteMagnitude(growTotal, totalBefore, '+', { more })}${flagClause}`];
+    return [`* ${countLabel}: ${reduce} duplication ${conjunction} ${grew} by ${formatByteMagnitude(growTotal, totalBefore, '+', { more })}${flagClause}${aggregateNote}`];
   }
   if (filesShrinkLen && filesGrowLen) {
     const net = shrinkTotal - growTotal;
+    const netNote = aggregateNote || ` (${formatOverallNet(net, totalBefore)})`;
     if (tense === 'done') {
       // A gerund list, not “and shrink … but grow …”: `--fix` already
       // applied both changes in the same run, so there’s no contrast left
       // to draw—just what happened, itemized
-      const first = `* ${countLabel}: Reduced duplication, shrinking ${filesShrinkLen} file${s(filesShrinkLen)} by ${formatByteMagnitude(shrinkTotal, totalBefore, '-', { more })} and growing ${filesGrowLen} file${s(filesGrowLen)} by ${formatByteMagnitude(growTotal, totalBefore, '+', { more })} (${formatOverallNet(net, totalBefore)})`;
+      const first = `* ${countLabel}: Reduced duplication, shrinking ${filesShrinkLen} file${s(filesShrinkLen)} by ${formatByteMagnitude(shrinkTotal, totalBefore, '-', { more })} and growing ${filesGrowLen} file${s(filesGrowLen)} by ${formatByteMagnitude(growTotal, totalBefore, '+', { more })}${netNote}`;
       return [first];
     }
-    const first = `* ${countLabel}: Reduce duplication and shrink ${filesShrinkLen} file${s(filesShrinkLen)} by ${formatByteMagnitude(shrinkTotal, totalBefore, '-', { more })} but grow ${filesGrowLen} file${s(filesGrowLen)} by ${formatByteMagnitude(growTotal, totalBefore, '+', { more })}${flagClause} (${formatOverallNet(net, totalBefore)})`;
+    const first = `* ${countLabel}: Reduce duplication and shrink ${filesShrinkLen} file${s(filesShrinkLen)} by ${formatByteMagnitude(shrinkTotal, totalBefore, '-', { more })} but grow ${filesGrowLen} file${s(filesGrowLen)} by ${formatByteMagnitude(growTotal, totalBefore, '+', { more })}${flagClause}${netNote}`;
     const second = `  - Skip files that grow in size to save ${formatByteMagnitude(shrinkTotal, totalBefore, '-')} in total with \`${skipFlag}\``;
     return [first, second];
   }
@@ -288,9 +302,13 @@ function computeAggressivePreview(potential, resultCss, applied, bytes) {
 
 // The “in aggressive mode” preview bullet, shared by `--fix` and report
 // mode—always still-hypothetical, so always `formatReduceClause()`’s
-// present-tense phrasing even inside a `--fix` run
-function formatAggressivePreviewLine(aggExtra, aggExtraSaved, before) {
-  return `* ${aggExtra > 0 ? `${aggExtra} more finding${aggExtra !== 1 ? 's' : ''}` : 'Further consolidation'} in aggressive mode: ${formatReduceClause(aggExtraSaved, before, true)} with \`--fix --aggressive\``;
+// present-tense phrasing even inside a `--fix` run. `baseSaved` is the base
+// `--fix` bullet’s own outcome, needed only to spell out the combined total
+// in the trailing note—the bullet’s main clause still quotes `aggExtraSaved`
+// on its own.
+function formatAggressivePreviewLine(aggExtra, aggExtraSaved, before, baseSaved) {
+  const label = aggExtra > 0 ? `${aggExtra} more finding${aggExtra !== 1 ? 's' : ''}` : 'Further consolidation';
+  return `* ${label} in aggressive mode: ${formatReduceClause(aggExtraSaved, before, true)} with \`--fix --aggressive\`${formatAggregateTotalNote(baseSaved + aggExtraSaved, before)}`;
 }
 
 // The per-file stats object the overall summary aggregates across a
@@ -530,7 +548,7 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
     // would withhold compares equal to the untouched style sheet and earns
     // no hint
     const { aggExtra, aggExtraSaved, aggDiffers } = computeAggressivePreview(potential, output, applied, bytes);
-    if (aggDiffers) log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before));
+    if (aggDiffers) log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before, bytes.saved));
 
     return {
       exitFailure: skipped.length > 0 || Boolean(withheld),
@@ -595,7 +613,7 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
   // done in more, separate merges, so a count delta can be zero or negative
   // on exactly the files where `--aggressive` changes (and saves) the most
   const { aggExtra, aggExtraSaved, aggDiffers } = computeAggressivePreview(potential, cssDryRun, applied, bytes);
-  if (aggDiffers) console.log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before));
+  if (aggDiffers) console.log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before, bytes.saved));
 
   return {
     exitFailure: true,
@@ -645,6 +663,12 @@ function printOverallSummary(results, { fix }) {
   const aggFilesGrow = aggFiles.filter(result => result.stats.aggExtraSaved < 0);
   const aggShrinkTotal = sumBy(aggFilesShrink, result => result.stats.aggExtraSaved);
   const aggGrowTotal = Math.abs(sumBy(aggFilesGrow, result => result.stats.aggExtraSaved));
+  // What every file’s outcome adds up to if `--fix --aggressive` ran across
+  // the whole set, for the aggressive bullet’s trailing total note—the
+  // base run’s own net plus what aggressive adds on top, each already
+  // computed above (`aggExtraSaved` is 0 for a file aggressive doesn’t
+  // affect, so `aggShrinkTotal - aggGrowTotal` already nets to 0 there)
+  const aggNetAll = (shrinkTotal - growTotal) + (aggShrinkTotal - aggGrowTotal);
 
   console.log(styleText('bold', `Summary for all files:${erroredNote}`));
 
@@ -708,6 +732,7 @@ function printOverallSummary(results, { fix }) {
       flag: '--fix --aggressive',
       skipFlag: '--fix --aggressive --savings-only',
       more: true,
+      aggregateNote: formatAggregateTotalNote(aggNetAll, totalBeforeAll),
     });
     if (aggOutcome) {
       for (const line of aggOutcome) console.log(line);

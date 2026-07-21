@@ -573,10 +573,15 @@ function printOverallSummary(results, { fix }) {
     const totalSkipped = sumBy(ok, result => result.stats.skipped);
     console.log(styleText('bold', `Summary for all files: ${totalApplied} consolidated, ${totalSkipped} skipped${erroredNote}`));
 
-    if (filesShrink.length) {
+    if (filesShrink.length && !filesGrow.length) {
       console.log(`Saved ${formatBytesShareOfTotal(shrinkTotal, totalBeforeAll)} across ${filesShrink.length} file${filesShrink.length !== 1 ? 's' : ''}.`);
-    }
-    if (filesGrow.length) {
+    } else if (filesShrink.length && filesGrow.length) {
+      const net = shrinkTotal - growTotal;
+      const netClause = net === 0
+        ? `Combined, the ${ok.length} files netted out unchanged in size`
+        : `Combined, the ${ok.length} files ${net > 0 ? 'saved' : 'grew by'} ${formatBytesShareOfTotal(Math.abs(net), totalBeforeAll)}${net < 0 ? ', not smaller' : ''}`;
+      console.log(styleText('yellow', `${netClause}; \`--savings-only\` would have skipped the ${filesGrow.length} file${filesGrow.length !== 1 ? 's' : ''} that grew in size.`));
+    } else if (filesGrow.length) {
       // `filesGrow` and `savingsOnly` can’t both be true—the engine’s gate
       // (see `dedupRoot()`) withholds a growing result under `savingsOnly`
       // instead of applying it, which is why that file shows up in
@@ -605,11 +610,11 @@ function printOverallSummary(results, { fix }) {
   if (filesShrink.length && !filesGrow.length) {
     console.log(`Run with \`--fix\` to save ${formatBytesShareOfTotal(shrinkTotal, totalBeforeAll)} across ${filesShrink.length} file${filesShrink.length !== 1 ? 's' : ''}.`);
   } else if (filesShrink.length && filesGrow.length) {
-    // A per-file, single-flag `--savings-only` hint would be more accurate
-    // than the two-flag form here—but the CLI flag only takes effect
-    // together with `--fix` (see the option’s own guard above), so a reader
-    // copying the hint straight from this line needs both spelled out
-    console.log(styleText('yellow', `${filesShrink.length} of ${ok.length} files would shrink by ${formatBytesShareOfTotal(shrinkTotal, totalBeforeAll)} combined with \`--fix\`; ${filesGrow.length} file${filesGrow.length !== 1 ? 's' : ''} would grow by ${formatBytesShareOfTotal(growTotal, totalBeforeAll)} instead—rerun with \`--fix --savings-only\` to skip ${filesGrow.length !== 1 ? 'them' : 'it'}.`));
+    const net = shrinkTotal - growTotal;
+    const netClause = net === 0
+      ? `Combined, the ${ok.length} files would net out unchanged in size with \`--fix\``
+      : `Combined, the ${ok.length} files would ${net > 0 ? 'shrink' : 'grow'} by ${formatBytesShareOfTotal(Math.abs(net), totalBeforeAll)} with \`--fix\``;
+    console.log(styleText('yellow', `${netClause}; \`--fix --savings-only\` would skip the ${filesGrow.length} file${filesGrow.length !== 1 ? 's' : ''} that grow${filesGrow.length !== 1 ? '' : 's'} in size.`));
   } else if (filesGrow.length) {
     console.log(styleText('yellow', `Running \`--fix\` here would make ${filesGrow.length} file${filesGrow.length !== 1 ? 's' : ''} ${formatBytesShareOfTotal(growTotal, totalBeforeAll)} bigger in total, not smaller—rerun with \`--fix --savings-only\` to skip ${filesGrow.length !== 1 ? 'them' : 'it'} (or without \`--savings-only\` if that growth is worth it for maintainability).`));
   }

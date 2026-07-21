@@ -1862,7 +1862,28 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run([fileShrink, fileGrow]);
-      assert.match(stdout, /1 of 2 files would shrink by \d+ bytes \(\d+\.\d% overall\) combined with `--fix`; 1 file would grow by \d+ bytes \(\d+\.\d% overall\) instead—rerun with `--fix --savings-only` to skip it\./);
+      // The lone growing file (18 bytes) outweighs the shrinking file (15
+      // bytes), so the net—the actual bottom line for plain `--fix`—comes
+      // out growing, too, not shrinking
+      assert.match(stdout, /Combined, the 2 files would grow by \d+ bytes \(\d+\.\d% overall\) with `--fix`; `--fix --savings-only` would skip the 1 file that grows in size\./);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Reports a net shrink in the overall summary when a shrinking file outweighs a growing one', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_net_shrink');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileShrink = path.join(dirTemp, 'shrink.css');
+    const fileGrow = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(fileShrink, '.a { color: red; }\n.b { color: red; }\n.c { color: red; }\n.d { color: red; }\n');
+    fs.writeFileSync(fileGrow, cssGrowing);
+
+    try {
+      const { stdout } = run([fileShrink, fileGrow]);
+      // The shrinking file’s savings now outweigh the one growing file, so
+      // the net flips to “shrink” instead of the previous test’s “grow”
+      assert.match(stdout, /Combined, the 2 files would shrink by \d+ bytes \(\d+\.\d% overall\) with `--fix`; `--fix --savings-only` would skip the 1 file that grows in size\./);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1899,8 +1920,9 @@ describe('CLI', () => {
       assert.ok(stdout.includes(`Summary for ${fileShrink}: 1 consolidated, 0 skipped`));
       assert.ok(stdout.includes(`Summary for ${fileGrow}: 1 consolidated, 0 skipped`));
       assert.ok(stdout.includes('Summary for all files: 2 consolidated, 0 skipped'));
-      assert.match(stdout, /Saved \d+ bytes \(\d+\.\d% overall\) across 1 file\./);
-      assert.match(stdout, /1 file grew by \d+ bytes \(\d+\.\d% overall\) instead, not smaller—rerun with `--savings-only` to skip it\./);
+      // The growing file (18 bytes) outweighs the shrinking file (15 bytes),
+      // so the mixed branch—not the shrink-only one—reports the net
+      assert.match(stdout, /Combined, the 2 files grew by \d+ bytes \(\d+\.\d% overall\), not smaller; `--savings-only` would have skipped the 1 file that grew in size\./);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

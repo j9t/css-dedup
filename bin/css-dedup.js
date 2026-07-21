@@ -236,9 +236,7 @@ function formatOverallNet(net, totalBefore) {
 // combined with the base bullet printed just above—without this, a reader
 // has to add the two bullets themselves to know where they’d land together
 function formatAggregateTotalNote(totalSaved, before) {
-  const percent = before ? (Math.abs(totalSaved) / before) * 100 : 0;
-  const sign = totalSaved >= 0 ? '-' : '+';
-  return ` (total: ${sign}${Math.abs(totalSaved).toLocaleString()} bytes / ${sign}${percent.toFixed(1)}%)`;
+  return ` (${formatOverallNet(totalSaved, before)})`;
 }
 
 // The one outcome bullet the all-files summary prints twice—once for the
@@ -250,30 +248,30 @@ function formatAggregateTotalNote(totalSaved, before) {
 // shrinking … and growing …”) or `'todo'` for report mode or an
 // `--aggressive` preview (a recommendation, flag named, “but” contrasts the
 // still-open choice). `more` marks the `--aggressive` bullets, whose totals
-// are additional on top of the base bullet printed just above. `showNet`
-// suppresses the mixed shape’s own “(total: …)” net of just its two
-// figures—the `--aggressive` caller passes `false` there and appends its
-// own, more useful net (against the whole run, not just the files
-// aggressive affects) via `formatAggregateTotalNote()` instead; two
-// differently-scoped nets both labeled “total:” back to back would read as
-// a contradiction.
-function formatOutcomeBullet({ countLabel, tense, filesShrinkLen, shrinkTotal, filesGrowLen, growTotal, totalBefore, flag, skipFlag, more = false, showNet = true }) {
+// are additional on top of the base bullet printed just above.
+// `aggregateNote`—passed by the `--aggressive` caller as a pre-formatted
+// `formatAggregateTotalNote()` string, against the whole run rather than
+// just the files aggressive affects—is appended to every shape, replacing
+// the mixed shape’s own “(total: …)” net (just its own two figures) rather
+// than sitting alongside it: Two differently-scoped nets both labeled
+// “total:” back to back would read as a contradiction.
+function formatOutcomeBullet({ countLabel, tense, filesShrinkLen, shrinkTotal, filesGrowLen, growTotal, totalBefore, flag, skipFlag, more = false, aggregateNote = '' }) {
   const s = n => n !== 1 ? 's' : '';
   const reduce = tense === 'done' ? 'Reduced' : 'Reduce';
   const flagClause = tense === 'done' ? '' : ` with \`${flag}\``;
 
   if (filesShrinkLen && !filesGrowLen) {
     const saved = tense === 'done' ? 'saved' : 'save';
-    return [`* ${countLabel}: ${reduce} duplication and ${saved} ${formatByteMagnitude(shrinkTotal, totalBefore, '-', { more })}${flagClause}`];
+    return [`* ${countLabel}: ${reduce} duplication and ${saved} ${formatByteMagnitude(shrinkTotal, totalBefore, '-', { more })}${flagClause}${aggregateNote}`];
   }
   if (!filesShrinkLen && filesGrowLen) {
     const grew = tense === 'done' ? 'grew' : 'grow';
     const conjunction = tense === 'done' ? 'and' : 'but';
-    return [`* ${countLabel}: ${reduce} duplication ${conjunction} ${grew} by ${formatByteMagnitude(growTotal, totalBefore, '+', { more })}${flagClause}`];
+    return [`* ${countLabel}: ${reduce} duplication ${conjunction} ${grew} by ${formatByteMagnitude(growTotal, totalBefore, '+', { more })}${flagClause}${aggregateNote}`];
   }
   if (filesShrinkLen && filesGrowLen) {
     const net = shrinkTotal - growTotal;
-    const netNote = showNet ? ` (${formatOverallNet(net, totalBefore)})` : '';
+    const netNote = aggregateNote || ` (${formatOverallNet(net, totalBefore)})`;
     if (tense === 'done') {
       // A gerund list, not “and shrink … but grow …”: `--fix` already
       // applied both changes in the same run, so there’s no contrast left
@@ -666,11 +664,11 @@ function printOverallSummary(results, { fix }) {
   const aggShrinkTotal = sumBy(aggFilesShrink, result => result.stats.aggExtraSaved);
   const aggGrowTotal = Math.abs(sumBy(aggFilesGrow, result => result.stats.aggExtraSaved));
   // What every file’s outcome adds up to if `--fix --aggressive` ran across
-  // the whole set—unaffected files keep their base `bytesSaved`, since
-  // `aggExtraSaved` is 0 where aggressive doesn’t differ—for the aggressive
-  // bullet’s trailing total note, so a reader isn’t left to add it to the
-  // base bullet above themselves
-  const aggNetAll = sumBy(ok, result => result.stats.bytesSaved + result.stats.aggExtraSaved);
+  // the whole set, for the aggressive bullet’s trailing total note—the
+  // base run’s own net plus what aggressive adds on top, each already
+  // computed above (`aggExtraSaved` is 0 for a file aggressive doesn’t
+  // affect, so `aggShrinkTotal - aggGrowTotal` already nets to 0 there)
+  const aggNetAll = (shrinkTotal - growTotal) + (aggShrinkTotal - aggGrowTotal);
 
   console.log(styleText('bold', `Summary for all files:${erroredNote}`));
 
@@ -734,10 +732,9 @@ function printOverallSummary(results, { fix }) {
       flag: '--fix --aggressive',
       skipFlag: '--fix --aggressive --savings-only',
       more: true,
-      showNet: false,
+      aggregateNote: formatAggregateTotalNote(aggNetAll, totalBeforeAll),
     });
     if (aggOutcome) {
-      aggOutcome[0] += formatAggregateTotalNote(aggNetAll, totalBeforeAll);
       for (const line of aggOutcome) console.log(line);
     }
   }

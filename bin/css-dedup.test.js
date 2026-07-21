@@ -1411,15 +1411,13 @@ describe('Fixtures', () => {
     assert.ok(stdout.includes('1 finding'));
   });
 
-  test('merge-safety.css report mode explains the unsafe group alongside the safe one’s savings estimate', () => {
+  test('merge-safety.css report mode explains the unsafe group, then closes with the summary and `--fix` payoff', () => {
     const { stdout } = run([path.join(fixturesDir, 'merge-safety.css')]);
     assert.match(stdout, RE_PAYOFF_FIX);
     assert.ok(stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
     assert.match(stdout, /background: #ffffff — intervening `background` declaration in `\.y`/);
-  });
-
-  test('merge-safety.css report mode closes with the summary and `--fix` payoff, after the unsafe-group details', () => {
-    const { stdout } = run([path.join(fixturesDir, 'merge-safety.css')]);
+    // The unsafe-group detail must print before the summary, so a long
+    // skipped list can't push the outcome off-screen and out of scrollback
     const unsafeIndex = stdout.indexOf('unsafe to auto-merge');
     const summaryIndex = stdout.indexOf('Summary:');
     assert.ok(unsafeIndex !== -1 && summaryIndex !== -1);
@@ -1946,7 +1944,7 @@ describe('CLI', () => {
     }
   });
 
-  test('Rolls up the `--aggressive` hint across files in the overall summary, netting mixed-sign per-file byte deltas', () => {
+  test('Rolls up the `--aggressive` hint across files in the overall summary, identically under report and `--fix` mode', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_aggressive');
     fs.mkdirSync(dirTemp, { recursive: true });
     const fileShrink = path.join(dirTemp, 'shrink.css');
@@ -1954,31 +1952,18 @@ describe('CLI', () => {
     fs.writeFileSync(fileShrink, cssShrinkingAggressive);
     fs.writeFileSync(fileGrow, cssGrowingAggressive);
 
-    try {
-      const { stdout } = run([fileShrink, fileGrow]);
-      // One file’s aggressive-only merge would save bytes, the other’s would
-      // cost more than it saves—so the aggregate must sum, not just count,
-      // both files’ deltas to land on the net direction
-      assert.match(stdout, /\* 2 more findings in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(for overall \+\d+ bytes \/ \+\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/);
-    } finally {
-      fs.rmSync(dirTemp, { recursive: true, force: true });
-    }
-  });
-
-  test('Rolls up the `--aggressive` re-run hint (in `--fix` mode) with a `--savings-only` mention', () => {
-    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_aggressive_fix');
-    fs.mkdirSync(dirTemp, { recursive: true });
-    const fileShrink = path.join(dirTemp, 'shrink.css');
-    const fileGrow = path.join(dirTemp, 'grow.css');
-    fs.writeFileSync(fileShrink, cssShrinkingAggressive);
-    fs.writeFileSync(fileGrow, cssGrowingAggressive);
+    // One file’s aggressive-only merge would save bytes, the other’s would
+    // cost more than it saves—so the aggregate must sum, not just count,
+    // both files’ deltas to land on the net direction. The bullet itself is
+    // always a preview (never yet applied), so it reads identically whether
+    // the base run was report or `--fix` mode—`--savings-only` gates the
+    // whole file, not just the aggressive-only merges within it, so the
+    // hint names the growing file the same way in both.
+    const RE_AGGRESSIVE_ROLLUP = /\* 2 more findings in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(for overall \+\d+ bytes \/ \+\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
 
     try {
-      const { stdout } = run(['--fix', fileShrink, fileGrow]);
-      // `--savings-only` gates the whole file’s output, not just the
-      // aggressive-only merges within it—so the re-run hint names the file
-      // that would grow, the same way the report-mode hint does
-      assert.match(stdout, /\* 2 more findings in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(for overall \+\d+ bytes \/ \+\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/);
+      assert.match(run([fileShrink, fileGrow]).stdout, RE_AGGRESSIVE_ROLLUP);
+      assert.match(run(['--fix', fileShrink, fileGrow]).stdout, RE_AGGRESSIVE_ROLLUP);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

@@ -272,6 +272,45 @@ function formatOutcomeBullet({ countLabel, tense, filesShrinkLen, shrinkTotal, f
   return null;
 }
 
+// What `--aggressive` would add on top of this run’s real outcome, measured
+// against a discarded opposite-mode pass (`potential`)—shared by `--fix`
+// and report mode, which differ only in which CSS string and `bytes` they
+// compare it against (the written output vs. a discarded dry run)
+function computeAggressivePreview(potential, resultCss, applied, bytes) {
+  const aggDiffers = Boolean(potential && potential.css !== resultCss);
+  if (!aggDiffers) return { aggExtra: 0, aggExtraSaved: 0, aggDiffers: false };
+  return {
+    aggExtra: potential.applied.length - applied.length,
+    aggExtraSaved: potential.bytes.saved - bytes.saved,
+    aggDiffers: true,
+  };
+}
+
+// The “in aggressive mode” preview bullet, shared by `--fix` and report
+// mode—always still-hypothetical, so always `formatReduceClause()`’s
+// present-tense phrasing even inside a `--fix` run
+function formatAggressivePreviewLine(aggExtra, aggExtraSaved, before) {
+  return `* ${aggExtra > 0 ? `${aggExtra} more finding${aggExtra !== 1 ? 's' : ''}` : 'More'} in aggressive mode: ${formatReduceClause(aggExtraSaved, before, true)} with \`--fix --aggressive\``;
+}
+
+// The per-file stats object the overall summary aggregates across a
+// multi-file run—one shape shared by all three of `processCss()`’s return
+// sites (the zero-findings shortcut, `--fix` mode, and report mode)
+function buildStats({ findings, applied, skipped, bytes, withheld, aggExtra, aggExtraSaved, aggDiffers }) {
+  return {
+    findings,
+    applied: applied.length,
+    skipped: skipped.length,
+    bytesBefore: bytes.before,
+    bytesSaved: bytes.saved,
+    withheldCount: withheld ? withheld.count : 0,
+    withheldGrowth: withheld ? Math.abs(withheld.bytes.saved) : 0,
+    aggExtra,
+    aggExtraSaved,
+    aggDiffers,
+  };
+}
+
 function printFindings(findings) {
   const grouped = new Map();
   for (const finding of findings) {
@@ -401,6 +440,19 @@ function formatSkippedLine(item, skippedAggressive) {
   return `  ${styleText('dim', item.scope === 'root' ? '(root)' : item.scope)}  ${item.key} — ${item.reason}${hint}`;
 }
 
+// The skipped-group detail block, printed before the summary in both
+// `--fix` and report mode—`log` is `console.log` in report mode, and in
+// `--fix` mode either `console.log` or `console.error` depending on
+// whether STDOUT needs to stay clear for piped CSS output
+function logSkippedDetail(log, skipped, skippedAggressive) {
+  if (!skipped.length) return;
+  log(styleText('yellow', `${skipped.length} duplicate group${skipped.length !== 1 ? 's' : ''} considered unsafe to auto-merge:`));
+  for (const item of skipped) {
+    log(formatSkippedLine(item, skippedAggressive));
+  }
+  log('');
+}
+
 async function processCss(css, targetOptions, { isStdin, label, multi }) {
   const potential = targetOptions.aggressive ? null : oppositePass(css, targetOptions);
   const skippedAggressive = skippedWithAggressive(potential);
@@ -442,13 +494,7 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
     // Detail (what was skipped, and why) prints before the counts—so a long
     // skipped list can't push the outcome off-screen and out of scrollback,
     // the same order report mode already uses for its own skipped list
-    if (skipped.length) {
-      log(styleText('yellow', `${skipped.length} duplicate group${skipped.length !== 1 ? 's' : ''} considered unsafe to auto-merge:`));
-      for (const item of skipped) {
-        log(formatSkippedLine(item, skippedAggressive));
-      }
-      log('');
-    }
+    logSkippedDetail(log, skipped, skippedAggressive);
 
     log(multi ? styleText('bold', summaryLabel.trim()) : 'Summary:');
     // Every remaining line is its own bullet, in the order a reader wants
@@ -483,30 +529,13 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
     // `savingsOnly` gate as this run, so an aggressive result the re-run
     // would withhold compares equal to the untouched style sheet and earns
     // no hint
-    let aggExtra = 0;
-    let aggExtraSaved = 0;
-    const aggDiffers = Boolean(potential && potential.css !== output);
-    if (aggDiffers) {
-      aggExtra = potential.applied.length - applied.length;
-      aggExtraSaved = bytes.after - potential.bytes.after;
-      log(`* ${aggExtra > 0 ? `${aggExtra} more finding${aggExtra !== 1 ? 's' : ''}` : 'More'} in aggressive mode: ${formatReduceClause(aggExtraSaved, bytes.before, true)} with \`--fix --aggressive\``);
-    }
+    const { aggExtra, aggExtraSaved, aggDiffers } = computeAggressivePreview(potential, output, applied, bytes);
+    if (aggDiffers) log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before));
 
     return {
       exitFailure: skipped.length > 0 || Boolean(withheld),
       errored: false,
-      stats: {
-        findings: null,
-        applied: applied.length,
-        skipped: skipped.length,
-        bytesBefore: bytes.before,
-        bytesSaved: bytes.saved,
-        withheldCount: withheld ? withheld.count : 0,
-        withheldGrowth: withheld ? Math.abs(withheld.bytes.saved) : 0,
-        aggExtra,
-        aggExtraSaved,
-        aggDiffers,
-      },
+      stats: buildStats({ findings: null, applied, skipped, bytes, withheld, aggExtra, aggExtraSaved, aggDiffers }),
     };
   }
 
@@ -520,18 +549,16 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
     return {
       exitFailure: false,
       errored: false,
-      stats: {
+      stats: buildStats({
         findings: 0,
-        applied: 0,
-        skipped: 0,
-        bytesBefore: Buffer.byteLength(css, 'utf8'),
-        bytesSaved: 0,
-        withheldCount: 0,
-        withheldGrowth: 0,
+        applied: [],
+        skipped: [],
+        bytes: { before: Buffer.byteLength(css, 'utf8'), saved: 0 },
+        withheld: null,
         aggExtra: potential?.applied.length ?? 0,
         aggExtraSaved: potential?.bytes.saved ?? 0,
         aggDiffers: Boolean(potential?.applied.length),
-      },
+      }),
     };
   }
 
@@ -545,13 +572,7 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
   // duplicate group that `--fix` would just skip (see its own safety
   // checks) reads as if nothing follows from it at all, when there’s a
   // concrete, explainable reason it wasn't offered as a `--fix` win
-  if (skipped.length) {
-    console.log(styleText('yellow', `${skipped.length} duplicate group${skipped.length !== 1 ? 's' : ''} considered unsafe to auto-merge:`));
-    for (const item of skipped) {
-      console.log(formatSkippedLine(item, skippedAggressive));
-    }
-    console.log('');
-  }
+  logSkippedDetail(console.log, skipped, skippedAggressive);
 
   // Summary and `--fix` payoff close each style sheet’s report. With a
   // single file that’s unambiguous on its own; with several, the filename
@@ -573,33 +594,13 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
   // cross-block or alias fold can absorb what the default pass would have
   // done in more, separate merges, so a count delta can be zero or negative
   // on exactly the files where `--aggressive` changes (and saves) the most
-  let aggExtra = 0;
-  let aggExtraSaved = 0;
-  const aggDiffers = Boolean(potential && potential.css !== cssDryRun);
-  if (aggDiffers) {
-    aggExtra = potential.applied.length - applied.length;
-    // Incremental, not `potential.bytes.saved`: what `--aggressive` adds on
-    // top of what `--fix` alone already saves, matching how the multi-file
-    // rollup below sums this same field
-    aggExtraSaved = potential.bytes.saved - bytes.saved;
-    console.log(`* ${aggExtra > 0 ? `${aggExtra} more finding${aggExtra !== 1 ? 's' : ''}` : 'More'} in aggressive mode: ${formatReduceClause(aggExtraSaved, bytes.before, true)} with \`--fix --aggressive\``);
-  }
+  const { aggExtra, aggExtraSaved, aggDiffers } = computeAggressivePreview(potential, cssDryRun, applied, bytes);
+  if (aggDiffers) console.log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before));
 
   return {
     exitFailure: true,
     errored: false,
-    stats: {
-      findings: findings.length,
-      applied: applied.length,
-      skipped: skipped.length,
-      bytesBefore: bytes.before,
-      bytesSaved: bytes.saved,
-      withheldCount: withheld ? withheld.count : 0,
-      withheldGrowth: withheld ? Math.abs(withheld.bytes.saved) : 0,
-      aggExtra,
-      aggExtraSaved,
-      aggDiffers,
-    },
+    stats: buildStats({ findings: findings.length, applied, skipped, bytes, withheld, aggExtra, aggExtraSaved, aggDiffers }),
   };
 }
 
@@ -645,10 +646,11 @@ function printOverallSummary(results, { fix }) {
   const aggShrinkTotal = sumBy(aggFilesShrink, result => result.stats.aggExtraSaved);
   const aggGrowTotal = Math.abs(sumBy(aggFilesGrow, result => result.stats.aggExtraSaved));
 
+  console.log(styleText('bold', `Summary for all files:${erroredNote}`));
+
   if (fix) {
     const totalApplied = sumBy(ok, result => result.stats.applied);
     const totalSkipped = sumBy(ok, result => result.stats.skipped);
-    console.log(styleText('bold', `Summary for all files:${erroredNote}`));
 
     const outcome = formatOutcomeBullet({
       countLabel: `${totalApplied} declaration${totalApplied !== 1 ? 's' : ''} consolidated`,
@@ -669,48 +671,30 @@ function printOverallSummary(results, { fix }) {
     if (withheldFiles.length) {
       console.log(`* ${withheldFiles.length} file${withheldFiles.length !== 1 ? 's' : ''} left untouched by \`--savings-only\`—consolidating would have made ${withheldFiles.length !== 1 ? 'them' : 'it'} ${formatBytesShareOfTotal(withheldGrowthTotal, totalBeforeAll)} bigger in total`);
     }
-    if (aggFiles.length) {
-      const extra = sumBy(aggFiles, result => result.stats.aggExtra);
-      const aggOutcome = formatOutcomeBullet({
-        countLabel: `${extra > 0 ? `${extra} more` : 'More'} finding${extra !== 1 ? 's' : ''} in aggressive mode`,
-        tense: 'todo',
-        filesShrinkLen: aggFilesShrink.length,
-        shrinkTotal: aggShrinkTotal,
-        filesGrowLen: aggFilesGrow.length,
-        growTotal: aggGrowTotal,
-        totalBefore: totalBeforeAll,
-        flag: '--fix --aggressive',
-        skipFlag: '--fix --aggressive --savings-only',
-        more: true,
-      });
-      if (aggOutcome) {
-        for (const line of aggOutcome) console.log(line);
-      }
+  } else {
+    if (withheldFiles.length) {
+      console.log(`\`--fix\` would leave ${withheldFiles.length} file${withheldFiles.length !== 1 ? 's' : ''} untouched—\`savingsOnly\` is set, and consolidating would make ${withheldFiles.length !== 1 ? 'them' : 'it'} ${formatBytesShareOfTotal(withheldGrowthTotal, totalBeforeAll)} bigger.`);
     }
-    return;
+    const totalFindings = sumBy(ok, result => result.stats.findings);
+    const outcome = formatOutcomeBullet({
+      countLabel: `${totalFindings} finding${totalFindings !== 1 ? 's' : ''}`,
+      tense: 'todo',
+      filesShrinkLen: filesShrink.length,
+      shrinkTotal,
+      filesGrowLen: filesGrow.length,
+      growTotal,
+      totalBefore: totalBeforeAll,
+      flag: '--fix',
+      skipFlag: '--fix --savings-only',
+    });
+    if (outcome) {
+      for (const line of outcome) console.log(line);
+    }
   }
 
-  const totalFindings = sumBy(ok, result => result.stats.findings);
-  console.log(styleText('bold', `Summary for all files:${erroredNote}`));
-
-  if (withheldFiles.length) {
-    console.log(`\`--fix\` would leave ${withheldFiles.length} file${withheldFiles.length !== 1 ? 's' : ''} untouched—\`savingsOnly\` is set, and consolidating would make ${withheldFiles.length !== 1 ? 'them' : 'it'} ${formatBytesShareOfTotal(withheldGrowthTotal, totalBeforeAll)} bigger.`);
-  }
-  const outcome = formatOutcomeBullet({
-    countLabel: `${totalFindings} finding${totalFindings !== 1 ? 's' : ''}`,
-    tense: 'todo',
-    filesShrinkLen: filesShrink.length,
-    shrinkTotal,
-    filesGrowLen: filesGrow.length,
-    growTotal,
-    totalBefore: totalBeforeAll,
-    flag: '--fix',
-    skipFlag: '--fix --savings-only',
-  });
-  if (outcome) {
-    for (const line of outcome) console.log(line);
-  }
-
+  // Always a preview (never yet applied), regardless of whether the base
+  // run above was `--fix` or report mode—so this block, unlike the two
+  // above, doesn’t vary by `fix` and only needs to run once
   if (aggFiles.length) {
     const extra = sumBy(aggFiles, result => result.stats.aggExtra);
     const aggOutcome = formatOutcomeBullet({

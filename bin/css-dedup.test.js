@@ -1725,10 +1725,10 @@ describe('CLI', () => {
 
     try {
       const report = run([file]);
-      assert.match(report.stdout, /\* More in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
+      assert.match(report.stdout, /\* Further consolidation in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
 
       const fix = run(['--fix', file]);
-      assert.match(fix.stdout, /\* More in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
+      assert.match(fix.stdout, /\* Further consolidation in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

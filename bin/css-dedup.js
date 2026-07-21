@@ -290,7 +290,7 @@ function computeAggressivePreview(potential, resultCss, applied, bytes) {
 // mode—always still-hypothetical, so always `formatReduceClause()`’s
 // present-tense phrasing even inside a `--fix` run
 function formatAggressivePreviewLine(aggExtra, aggExtraSaved, before) {
-  return `* ${aggExtra > 0 ? `${aggExtra} more finding${aggExtra !== 1 ? 's' : ''}` : 'More'} in aggressive mode: ${formatReduceClause(aggExtraSaved, before, true)} with \`--fix --aggressive\``;
+  return `* ${aggExtra > 0 ? `${aggExtra} more finding${aggExtra !== 1 ? 's' : ''}` : 'Further consolidation'} in aggressive mode: ${formatReduceClause(aggExtraSaved, before, true)} with \`--fix --aggressive\``;
 }
 
 // The per-file stats object the overall summary aggregates across a
@@ -698,7 +698,7 @@ function printOverallSummary(results, { fix }) {
   if (aggFiles.length) {
     const extra = sumBy(aggFiles, result => result.stats.aggExtra);
     const aggOutcome = formatOutcomeBullet({
-      countLabel: `${extra > 0 ? `${extra} more` : 'More'} finding${extra !== 1 ? 's' : ''} in aggressive mode`,
+      countLabel: `${extra > 0 ? `${extra} more finding${extra !== 1 ? 's' : ''}` : 'Further consolidation'} in aggressive mode`,
       tense: 'todo',
       filesShrinkLen: aggFilesShrink.length,
       shrinkTotal: aggShrinkTotal,

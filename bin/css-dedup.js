@@ -79,7 +79,7 @@ if (positionals.includes('-') && positionals.length > 1) {
 // the `Findings -f (-a)` column and the four `Savings with:` columns)
 function requireFix(active, flag, reason) {
   if (!active || values.fix) return;
-  console.error(`\`${flag}\` only applies together with \`--fix\` (${reason}).`);
+  console.error(`\`${flag}\` only applies together with \`--fix\` (${reason})`);
   process.exit(1);
 }
 requireFix(values['savings-only'], '--savings-only', 'report mode doesn’t write');

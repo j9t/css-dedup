@@ -4,13 +4,13 @@
     "css-dedup": "bin/css-dedup.js"
   },
   "dependencies": {
-    "postcss": "^8.5.16"
+    "postcss": "^8.5.22"
   },
   "description": "CSS declaration deduplicator for maintainability and performance optimization",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.6.0",
-    "globals": "^17.6.0",
+    "eslint": "^10.7.0",
+    "globals": "^17.7.0",
     "typescript": "^7.0.2"
   },
   "engines": {
@@ -61,5 +61,5 @@
   },
   "type": "module",
   "types": "src/index.d.ts",
-  "version": "1.4.1"
+  "version": "1.5.0"
 }

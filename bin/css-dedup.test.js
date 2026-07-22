@@ -37,7 +37,15 @@ const cssShrinkingAggressive = '.a { transform: rotate(90deg); }\n.b { transform
 const RE_WITHHELD_ONE = /1 withheld/;
 const RE_MERGED_AB = /\.a,\s*\.b\s*{\s*color: red;\s*}/;
 const RE_MERGED_AC = /\.a,\s*\.c\s*{\s*color: red;\s*}/;
-const RE_PAYOFF_FIX = /\* \d+ findings?: Reduce duplication and save \d+ bytes \(-\d+\.\d%\) with `--fix`/;
+// The report table’s header row, followed by a data row whose `-f` column
+// (the second cell) shows a save (a leading `-`)—the report-mode analogue
+// of the old `* N findings: Reduce duplication and save …` bullet. Not
+// anchored to exact column spacing (that’s computed per run), just that a
+// `Findings -f (-a)` row saves something under plain `-f`.
+const RE_PAYOFF_FIX = /Findings -f \(-a\).*\n\d+ \(\d+\) {2,}-[\d.]+ (?:B|KB|MB) \(-\d+\.\d%\)/;
+// A report-table row whose Findings cell is `N (…)`, for asserting the
+// default-mode finding count without caring what the table’s other columns say
+const findingsRow = n => new RegExp(`\\n${n} \\(\\d+\\) `);
 const RE_SYNTAX_ERROR = /Unknown word/;
 
 function run(args, spawnOptions = {}) {
@@ -48,6 +56,19 @@ function run(args, spawnOptions = {}) {
     status: result.status,
   };
 }
+
+// `run()` strips color codes—`node:util`’s `styleText` skips them itself
+// once STDOUT isn’t a TTY, which `spawnSync` never gives it—so highlighting
+// tests force color on and read the raw (unstripped) output instead
+function runColor(args) {
+  const result = spawnSync('node', [scriptPath, ...args], { encoding: 'utf-8', timeout: 30_000, env: { ...process.env, FORCE_COLOR: '1' } });
+  return { stdout: result.stdout, status: result.status };
+}
+// Built from a computed character code, not a literal control character
+// (which `no-control-regex` flags even inside a `new RegExp()` string), to
+// match the bold/green/reset ANSI codes a highlighted cell is wrapped in
+const ESC = String.fromCharCode(27);
+const BEST_CELL = new RegExp(`${ESC}\\[1m${ESC}\\[32m([^${ESC}]*)${ESC}\\[39m${ESC}\\[22m`, 'g');
 
 describe('Selectors', () => {
   test('Splits top-level commas, ignoring ones nested in `:is()`/`[]`', () => {
@@ -1372,18 +1393,18 @@ describe('Fixtures', () => {
   test('basic.css reports the expected duplicate count', () => {
     const { stdout, status } = run([path.join(fixturesDir, 'basic.css')]);
     assert.strictEqual(status, 1);
-    assert.ok(stdout.includes('3 findings'));
+    assert.match(stdout, findingsRow(3));
   });
 
   test('media-queries.css only flags the duplicate inside the shared `@media` scope', () => {
     const { stdout } = run([path.join(fixturesDir, 'media-queries.css')]);
-    assert.ok(stdout.includes('1 finding'));
+    assert.match(stdout, findingsRow(1));
     assert.ok(stdout.includes('min-width: 768px'));
   });
 
   test('nesting.css flags the duplicate between nested rules, not against the parent’s own declaration', () => {
     const { stdout } = run([path.join(fixturesDir, 'nesting.css')]);
-    assert.ok(stdout.includes('1 finding'));
+    assert.match(stdout, findingsRow(1));
     assert.ok(stdout.includes('&:hover'));
     assert.ok(stdout.includes('&:focus'));
   });
@@ -1391,7 +1412,7 @@ describe('Fixtures', () => {
   test('layers.css flags the duplicate inside the shared `@layer` block and doesn’t crash on the statement form', () => {
     const { stdout, status } = run([path.join(fixturesDir, 'layers.css')]);
     assert.strictEqual(status, 1);
-    assert.ok(stdout.includes('1 finding'));
+    assert.match(stdout, findingsRow(1));
     assert.ok(stdout.includes('@layer reset'));
   });
 
@@ -1403,15 +1424,15 @@ describe('Fixtures', () => {
 
   test('hacks.css reports a finding with `--no-ignore-selectors-defaults`', () => {
     const { stdout } = run(['--no-ignore-selectors-defaults', path.join(fixturesDir, 'hacks.css')]);
-    assert.ok(stdout.includes('1 finding'));
+    assert.match(stdout, findingsRow(1));
   });
 
   test('hacks.css reports a finding with `-n`', () => {
     const { stdout } = run(['-n', path.join(fixturesDir, 'hacks.css')]);
-    assert.ok(stdout.includes('1 finding'));
+    assert.match(stdout, findingsRow(1));
   });
 
-  test('merge-safety.css report mode explains the unsafe group, then closes with the summary and `--fix` payoff', () => {
+  test('merge-safety.css report mode explains the unsafe group, then closes with the summary table', () => {
     const { stdout } = run([path.join(fixturesDir, 'merge-safety.css')]);
     assert.match(stdout, RE_PAYOFF_FIX);
     assert.ok(stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
@@ -1419,10 +1440,12 @@ describe('Fixtures', () => {
     // The unsafe-group detail must print before the summary, so a long
     // skipped list can't push the outcome off-screen and out of scrollback
     const unsafeIndex = stdout.indexOf('unsafe to auto-merge');
-    const summaryIndex = stdout.indexOf('Summary:');
+    const summaryIndex = stdout.indexOf('Summary for');
     assert.ok(unsafeIndex !== -1 && summaryIndex !== -1);
     assert.ok(unsafeIndex < summaryIndex);
-    assert.match(stdout, /\* \d+ findings?: Reduce duplication and save \d+ bytes \(-\d+\.\d%\) with `--fix`\n\* \d+ more findings? in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive` \(total: -\d+ bytes \/ -\d+\.\d%\)\s*$/);
+    // The default-mode column pair saves less than the aggressive pair,
+    // since aggressive additionally allows the group just flagged unsafe
+    assert.match(stdout, /2 \(2\) {2,}-\d+(?:\.\d+)? (?:B|KB|MB) \(-\d+\.\d%\) {2,}-\d+(?:\.\d+)? (?:B|KB|MB) \(-\d+\.\d%\) {2,}-\d+(?:\.\d+)? (?:B|KB|MB) \(-\d+\.\d%\) {2,}-\d+(?:\.\d+)? (?:B|KB|MB) \(-\d+\.\d%\)/);
   });
 
   test('merge-safety.css --fix consolidates the safe pair and skips the unsafe one', () => {
@@ -1467,17 +1490,97 @@ describe('Fixtures', () => {
     assert.match(stdout, RE_PAYOFF_FIX);
   });
 
-  test('aggressive.css reports nothing by default, but notes the `--aggressive` potential in parentheses', () => {
+  test('aggressive.css finds nothing under default rules, but the report table still quotes the aggressive column', () => {
     const { stdout, status } = run([path.join(fixturesDir, 'aggressive.css')]);
+    // Nothing for `--fix` (no `--aggressive`) to act on by default, so this
+    // doesn’t count against the exit code the way a default-mode finding would
     assert.strictEqual(status, 0);
-    assert.match(stdout, /No duplicate declarations found\. With `--aggressive`: 1 consolidation possible\./);
+    assert.match(stdout, findingsRow(0));
+    assert.match(stdout, /0 \(1\)/);
   });
 
-  test('aggressive.css reports the duplicate with `--aggressive`', () => {
-    const { stdout, status } = run(['--aggressive', path.join(fixturesDir, 'aggressive.css')]);
-    assert.strictEqual(status, 1);
+  test('aggressive.css lists the aggressive-only duplicate in detail even though report mode ignores `--aggressive`', () => {
+    const { stdout } = run([path.join(fixturesDir, 'aggressive.css')]);
     assert.ok(stdout.includes('duplicate   color: hsl(0 0% 100%)'));
-    assert.match(stdout, RE_PAYOFF_FIX);
+    // `-f`/`-f -s` read `n/a`, not `0 B (0.0%)`—there are 0 findings under
+    // default rules, so there’s nothing for either to have run on
+    assert.match(stdout, /0 \(1\) {2,}n\/a {2,}n\/a {2,}-[\d.]+ (?:B|KB|MB) \(-\d+\.\d%\)/);
+  });
+
+  test('Rejects bare `--aggressive` without `--fix`', () => {
+    const { stderr, status } = run(['--aggressive', path.join(fixturesDir, 'basic.css')]);
+    assert.strictEqual(status, 1);
+    assert.ok(stderr.includes('`--aggressive` only applies together with `--fix`'));
+  });
+
+  test('A column reads `n/a`, not `0 B (0.0%)`, when its own mode has 0 findings', () => {
+    const { stdout } = run([path.join(fixturesDir, 'aggressive.css')]);
+    // `-f`/`-f -s` belong to default rules, which find nothing here—`-f -a`/
+    // `-f -a -s` belong to aggressive rules, which do, so only those two
+    // carry a real figure
+    assert.match(stdout, /0 \(1\) {2,}n\/a {2,}n\/a {2,}-[\d.]+ (?:B|KB|MB) \(-\d+\.\d%\)/);
+  });
+
+  test('A column reads `n/a` when its findings are all unsafe, even though `findings > 0`', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_all_unsafe');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'all-unsafe.css');
+    // The one duplicate here is blocked by the intervening `.mid` rule under
+    // default rules, so `--fix` wouldn’t touch the file at all—`findings`
+    // is 1, not 0, but `applied` still comes out empty
+    fs.writeFileSync(file, '.a { color: red; }\n.mid { color: blue; }\n.b { color: red; }\n');
+
+    try {
+      const { stdout } = run([file]);
+      assert.match(stdout, /1 \(1\) {2,}n\/a {2,}n\/a {2,}-[\d.]+ (?:B|KB|MB) \(-\d+\.\d%\)/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Highlights the best savings column(s) in bold green, excluding `n/a`', () => {
+    // merge-safety.css: `-f -a`/`-f -a -s` tie for the best (real) outcome;
+    // `-f`/`-f -s` save less and stay unmarked
+    const clearWinner = runColor([path.join(fixturesDir, 'merge-safety.css')]);
+    const winners = [...clearWinner.stdout.matchAll(BEST_CELL)].map(match => match[1].trim());
+    assert.deepStrictEqual(winners, ['-34 B (-8.9%)', '-34 B (-8.9%)']);
+
+    // basic.css: All four columns save the same amount (aggressive adds
+    // nothing here), so all four tie and all four get marked
+    const fourWayTie = runColor([path.join(fixturesDir, 'basic.css')]);
+    const tied = [...fourWayTie.stdout.matchAll(BEST_CELL)].map(match => match[1].trim());
+    assert.strictEqual(tied.length, 4);
+    assert.ok(tied.every(cell => cell === '-46 B (-16.9%)'));
+  });
+
+  test('Marks nothing when every non-`n/a` column would grow the file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_highlight_all_grow');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(file, cssGrowing);
+
+    try {
+      // `-f`/`-f -a` both grow the file (the only real, non-`n/a` figures
+      // here); a “least-bad” growth isn’t an improvement worth pointing at.
+      // `matchAll()` over the shared global-flagged `BEST_CELL`, not
+      // `.test()`, which would mutate its `lastIndex` for later tests.
+      const { stdout } = runColor([file]);
+      assert.strictEqual([...stdout.matchAll(BEST_CELL)].length, 0);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Highlights the all-files table’s best column(s) per row, including the `Total` row', () => {
+    const { stdout } = runColor([path.join(fixturesDir, 'basic.css'), path.join(fixturesDir, 'aggressive.css'), path.join(fixturesDir, 'merge-safety.css')]);
+    // The all-files table is the last of several tables in this output—only
+    // count matches from `Summary for all files:` onward
+    const allFilesTable = stdout.slice(stdout.indexOf('Summary for all files:'));
+    const winners = [...allFilesTable.matchAll(BEST_CELL)].map(match => match[1].trim());
+    // basic.css (4-way tie) + aggressive.css (`-f`/`-f -s` are `n/a`, so
+    // only its 2-way `-f -a`/`-f -a -s` tie counts) + merge-safety.css
+    // (2-way tie) + Total (2-way tie, aggressive columns) = 10 marked cells
+    assert.strictEqual(winners.length, 10);
   });
 
   test('aggressive.css --fix --aggressive merges across the blocks, drops the emptied one, and suggests testing', () => {
@@ -1567,7 +1670,8 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run([file]);
-      assert.match(stdout, /\* 1 finding: Reduce duplication but grow by \d+ bytes \(\+\d+\.\d%\) with `--fix`/);
+      // The `-f` savings column shows a growth (`+`) instead of a save
+      assert.match(stdout, /1 \(1\) {2,}\+\d+ (?:B|KB|MB) \(\+\d+\.\d%\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1725,7 +1829,10 @@ describe('CLI', () => {
 
     try {
       const report = run([file]);
-      assert.match(report.stdout, /\* Further consolidation in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
+      // The `-f -a` column saves more than plain `-f`, even though the
+      // finding count is unchanged (a cross-block merge absorbing entries
+      // rather than adding new ones)
+      assert.match(report.stdout, /1 \(1\) {2,}-30 B \(-22\.4%\) {2,}-30 B \(-22\.4%\) {2,}-0\.1 KB \(-55\.2%\) {2,}-0\.1 KB \(-55\.2%\)/);
 
       const fix = run(['--fix', file]);
       assert.match(fix.stdout, /\* Further consolidation in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
@@ -1777,7 +1884,11 @@ describe('CLI', () => {
 
     try {
       const report = run([file]);
-      assert.match(report.stdout, /\* 1 more finding in aggressive mode: Reduce duplication but grow by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive`/);
+      // `-f`/`-f -s` read `n/a`: The one default-mode finding is unsafe (see
+      // the skipped-group detail above), so nothing would actually apply.
+      // `-f -a` finds the same group safe to merge, but it would grow the
+      // file (`+`), so `-f -a -s` declines it (`n/a`), too.
+      assert.match(report.stdout, /1 \(1\) {2,}n\/a {2,}n\/a {2,}\+\d+(?:\.\d+)? (?:B|KB|MB) \(\+\d+\.\d%\) {2,}n\/a/);
 
       const fix = run(['--fix', file]);
       assert.match(fix.stdout, /\* 1 more finding in aggressive mode: Reduce duplication but grow by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive`/);
@@ -1826,7 +1937,7 @@ describe('CLI', () => {
     }
   });
 
-  test('Labels each file’s own summary with its path, and closes with an overall summary, in report mode', () => {
+  test('Labels each file’s own summary with its path, and closes with an all-files table, in report mode', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_report');
     fs.mkdirSync(dirTemp, { recursive: true });
     const fileA = path.join(dirTemp, 'a.css');
@@ -1836,20 +1947,22 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run([fileA, fileB]);
-      assert.ok(stdout.includes(`Summary for ${fileA}:\n* 1 finding: Reduce duplication and save`));
-      assert.ok(stdout.includes(`Summary for ${fileB}:\n* 1 finding: Reduce duplication and save`));
-      assert.match(stdout, /Summary for all files:\n\* 2 findings: Reduce duplication and save \d+ bytes \(-\d+\.\d%\) with `--fix`/);
-      // A single file’s own summary stays unlabeled—no ambiguity to resolve
+      assert.ok(stdout.includes(`Summary for ${fileA}:`));
+      assert.ok(stdout.includes(`Summary for ${fileB}:`));
+      assert.ok(stdout.includes('Summary for all files:'));
+      assert.match(stdout, /File +Findings -f \(-a\).*\na\.css.*\nb\.css.*\nTotal +2 \(2\)/s);
+      // A single file’s own summary is labeled with its path too—by the
+      // time a long run ends, the per-file header printed above may
+      // already be out of scrollback, single-file runs included
       const { stdout: single } = run([fileA]);
-      assert.ok(single.includes('Summary:\n* 1 finding: Reduce duplication and save'));
-      assert.ok(!single.includes('Summary for'));
+      assert.ok(single.includes(`Summary for ${fileA}:`));
       assert.ok(!single.includes('Summary for all files'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
   });
 
-  test('Separates shrinking and growing files in the overall summary, and points at `--savings-only`', () => {
+  test('Separates shrinking and growing files in the overall summary table', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_mixed');
     fs.mkdirSync(dirTemp, { recursive: true });
     const fileShrink = path.join(dirTemp, 'shrink.css');
@@ -1860,15 +1973,18 @@ describe('CLI', () => {
     try {
       const { stdout } = run([fileShrink, fileGrow]);
       // The lone growing file (18 bytes) outweighs the shrinking file (15
-      // bytes), so the net—the actual bottom line for plain `--fix`—comes
-      // out growing, too, not shrinking
-      assert.match(stdout, /\* 2 findings: Reduce duplication and shrink 1 file by \d+ bytes \(-\d+\.\d%\) but grow 1 file by \d+ bytes \(\+\d+\.\d%\) with `--fix` \(total: \+\d+ bytes \/ \+\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --savings-only`/);
+      // bytes), so the plain `-f` Total comes out growing (`+`)—but the
+      // `-f -s` Total only counts what `--savings-only` would actually keep
+      // (the growing file declines), so it nets to a save (`-`) instead
+      assert.match(stdout, /shrink\.css {2,}1 \(1\) {2,}-15 B \(-39\.5%\) {2,}-15 B \(-39\.5%\)/);
+      assert.match(stdout, /grow\.css {2,}1 \(1\) {2,}\+18 B \(\+21\.7%\) {2,}n\/a {2,}\+18 B \(\+21\.7%\) {2,}n\/a/);
+      assert.match(stdout, /Total {2,}2 \(2\) {2,}\+3 B \(\+2\.5%\) {2,}-15 B \(-12\.4%\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
   });
 
-  test('Reports a net shrink in the overall summary when a shrinking file outweighs a growing one', () => {
+  test('Reports a net shrink in the overall summary table when a shrinking file outweighs a growing one', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_net_shrink');
     fs.mkdirSync(dirTemp, { recursive: true });
     const fileShrink = path.join(dirTemp, 'shrink.css');
@@ -1879,9 +1995,8 @@ describe('CLI', () => {
     try {
       const { stdout } = run([fileShrink, fileGrow]);
       // The shrinking file’s savings now outweigh the one growing file, so
-      // the net flips to “shrink” (a “-” sign) instead of the previous
-      // test’s “grow” (a “+” sign)
-      assert.match(stdout, /\* 2 findings: Reduce duplication and shrink 1 file by \d+ bytes \(-\d+\.\d%\) but grow 1 file by \d+ bytes \(\+\d+\.\d%\) with `--fix` \(total: -\d+ bytes \/ -\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --savings-only`/);
+      // the plain `-f` Total flips to a save (`-`) too, not just `-f -s`
+      assert.match(stdout, /Total {2,}2 \(2\) {2,}-27 B \(-17\.0%\) {2,}-45 B \(-28\.3%\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1898,8 +2013,95 @@ describe('CLI', () => {
     try {
       const { stdout, stderr, status } = run([fileGood, fileBad]);
       assert.match(stderr, RE_SYNTAX_ERROR);
-      assert.ok(stdout.includes('Summary for all files: (1 file could not be processed; see errors above)\n* 1 finding: Reduce duplication and save'));
+      assert.ok(stdout.includes('Summary for all files: (1 file could not be processed; see errors above)'));
+      assert.match(stdout, /good\.css {2,}1 \(1\)/);
+      assert.match(stdout, /Total {2,}1 \(1\)/);
       assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('The all-files table’s `-s` Total is `n/a` only when nothing would be saved anywhere in the run, not just because one file declined', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_all_decline');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileA = path.join(dirTemp, 'a.css');
+    const fileB = path.join(dirTemp, 'b.css');
+    fs.writeFileSync(fileA, cssGrowing);
+    fs.writeFileSync(fileB, cssGrowing);
+
+    try {
+      const { stdout } = run([fileA, fileB]);
+      // Both files would grow under every combination here, so the plain
+      // `-f`/`-f -a` Totals still quote the real (growing) net, but every
+      // file’s `-s` outcome is 0—declined—so those Totals read `n/a`
+      assert.match(stdout, /Total {2,}2 \(2\) {2,}\+36 B \(\+21\.7%\) {2,}n\/a {2,}\+36 B \(\+21\.7%\) {2,}n\/a/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Disambiguates same-named files in the all-files table by extending just enough of their path', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_collision');
+    const dirA = path.join(dirTemp, 'components');
+    const dirB = path.join(dirTemp, 'pages');
+    fs.mkdirSync(dirA, { recursive: true });
+    fs.mkdirSync(dirB, { recursive: true });
+    const fileA = path.join(dirA, 'button.css');
+    const fileB = path.join(dirB, 'button.css');
+    fs.writeFileSync(fileA, '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(fileB, '.x { margin: 0; }\n.y { margin: 0; }\n');
+
+    try {
+      const { stdout } = run([fileA, fileB]);
+      // Neither label is the bare `button.css` shared by both—each is
+      // extended by exactly the one path segment that tells them apart
+      assert.ok(!/\n {2,}button\.css {2,}/.test(stdout));
+      assert.match(stdout, /components\/button\.css/);
+      assert.match(stdout, /pages\/button\.css/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Wraps a File cell too long for the terminal at a path separator, keeping every column flush', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_wrap');
+    const dirA = path.join(dirTemp, 'aa', 'bb', 'cc');
+    const dirB = path.join(dirTemp, 'aa', 'dd', 'cc');
+    fs.mkdirSync(dirA, { recursive: true });
+    fs.mkdirSync(dirB, { recursive: true });
+    const fileA = path.join(dirA, 'shared.css');
+    const fileB = path.join(dirB, 'shared.css');
+    fs.writeFileSync(fileA, '.a { color: red; }\n.b { color: red; }\n');
+    fs.writeFileSync(fileB, '.a { color: red; }\n.b { color: red; }\n');
+
+    try {
+      const { stdout } = run([fileA, fileB]);
+      // `spawnSync` gives the child no TTY, so `process.stdout.columns` is
+      // undefined and the table falls back to the 80-column budget—well
+      // under what these disambiguated labels (`bb/cc/shared.css`,
+      // `dd/cc/shared.css`) need alongside four savings columns, so the
+      // wrap is expected to trigger here, not just be possible
+      const lines = stdout.split('\n');
+      const headerIndex = lines.findIndex(line => line.startsWith('File '));
+      assert.notStrictEqual(headerIndex, -1, 'expected the all-files table header');
+
+      // A bare wrapped head fragment (just the leading path segment(s),
+      // ending in `/`, nothing padded after it) for each of the two
+      // colliding files—`bb/cc/shared.css` and `dd/cc/shared.css` disagree
+      // starting at `bb`/`dd`, but the split lands after `cc/` since that’s
+      // the last separator that still fits the budgeted width
+      const heads = lines.filter(line => /^(bb|dd)\/cc\/$/.test(line));
+      assert.strictEqual(heads.length, 2);
+
+      // Every data row’s Findings cell (`N (N)`) must start at the same
+      // column—both the two wrapped continuation lines (just `shared.css`
+      // plus the rest of the row) and the `Total` row, which never
+      // wraps—proving the wrap didn’t drag anything out of alignment
+      const dataLines = lines.filter(line => /^(shared\.css|Total) /.test(line));
+      assert.strictEqual(dataLines.length, 3);
+      const findingsStarts = new Set(dataLines.map(line => line.search(/\d+ \(\d+\)/)));
+      assert.strictEqual(findingsStarts.size, 1, `expected one shared column start, got columns at ${[...findingsStarts]}`);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1944,7 +2146,7 @@ describe('CLI', () => {
     }
   });
 
-  test('Rolls up the `--aggressive` hint across files in the overall summary, identically under report and `--fix` mode', () => {
+  test('Rolls up the aggressive columns/hint across files in the overall summary, under report and `--fix` mode alike', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_multi_summary_aggressive');
     fs.mkdirSync(dirTemp, { recursive: true });
     const fileShrink = path.join(dirTemp, 'shrink.css');
@@ -1952,17 +2154,21 @@ describe('CLI', () => {
     fs.writeFileSync(fileShrink, cssShrinkingAggressive);
     fs.writeFileSync(fileGrow, cssGrowingAggressive);
 
-    // One file’s aggressive-only merge would save bytes, the other’s would
-    // cost more than it saves—so the aggregate must sum, not just count,
-    // both files’ deltas to land on the net direction. The bullet itself is
-    // always a preview (never yet applied), so it reads identically whether
-    // the base run was report or `--fix` mode—`--savings-only` gates the
-    // whole file, not just the aggressive-only merges within it, so the
-    // hint names the growing file the same way in both.
-    const RE_AGGRESSIVE_ROLLUP = /\* 2 more findings in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(total: [-+]\d+ bytes \/ [-+]\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
-
+    // One file’s aggressive-only merge saves bytes, the other’s costs more
+    // than it saves—so the `Total` row must sum, not just count, both
+    // files’ deltas to land on the net direction: `-f -a` (no gate) still
+    // grows overall, but `-f -a -s` (each file gated on its own outcome)
+    // nets to a save once the growing file’s decline is factored in. `-f`/
+    // `-f -s` are `n/a`: neither file has a safe default-mode merge
+    // (shrink.css needs aggressive rules, grow.css’s one finding is unsafe).
     try {
-      assert.match(run([fileShrink, fileGrow]).stdout, RE_AGGRESSIVE_ROLLUP);
+      const report = run([fileShrink, fileGrow]).stdout;
+      assert.match(report, /Total {2,}1 \(2\) {2,}n\/a {2,}n\/a {2,}\+42 B \(\+16\.2%\) {2,}-31 B \(-12\.0%\)/);
+
+      // `--fix` mode’s own bullet is untouched by the report table rework,
+      // and its “preview, never yet applied” phrasing is identical whether
+      // the base run was report or `--fix` mode
+      const RE_AGGRESSIVE_ROLLUP = /\* 2 more findings in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(total: [-+]\d+ bytes \/ [-+]\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
       assert.match(run(['--fix', fileShrink, fileGrow]).stdout, RE_AGGRESSIVE_ROLLUP);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -2032,7 +2238,7 @@ describe('CLI', () => {
       const { stdout, stderr, status } = run([dirTemp]);
       assert.match(stderr, RE_SYNTAX_ERROR);
       assert.ok(stdout.includes(path.join(dirTemp, 'good.css')));
-      assert.ok(stdout.includes('1 finding'));
+      assert.match(stdout, findingsRow(1));
       assert.strictEqual(status, 1);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -2041,7 +2247,7 @@ describe('CLI', () => {
 
   test('Reads from STDIN with `-` in report mode', () => {
     const { stdout } = run(['-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
-    assert.ok(stdout.includes('1 finding'));
+    assert.match(stdout, findingsRow(1));
   });
 
   test('`--fix -` writes the consolidated CSS to stdout, and status to STDERR', () => {
@@ -2108,13 +2314,22 @@ describe('CLI', () => {
     assert.ok(stdout.includes('No duplicate declarations found.'));
   });
 
-  test('`-a` is the short flag for `--aggressive`', () => {
-    const { stdout, status } = run(['-a', path.join(fixturesDir, 'aggressive.css')]);
-    assert.strictEqual(status, 1);
-    assert.ok(stdout.includes('duplicate   color: hsl(0 0% 100%)'));
+  test('`-a` is the short flag for `--aggressive` (with `--fix`, since report mode always shows both variants)', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_short_aggressive');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'aggressive.css');
+    fs.copyFileSync(path.join(fixturesDir, 'aggressive.css'), file);
+
+    try {
+      const { stdout, status } = run(['-f', '-a', file]);
+      assert.strictEqual(status, 0);
+      assert.ok(stdout.includes('* 1 declaration consolidated'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
   });
 
-  test('Loads `aggressive: true` from the config file', () => {
+  test('Loads `aggressive: true` from the config file for `--fix`', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_config_aggressive');
     fs.mkdirSync(dirTemp, { recursive: true });
     fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { aggressive: true };\n');
@@ -2122,9 +2337,12 @@ describe('CLI', () => {
     fs.writeFileSync(file, '.a { word-wrap: break-word; }\n.b { overflow-wrap: break-word; }\n');
 
     try {
-      const { stdout, status } = run([file], { cwd: dirTemp });
-      assert.strictEqual(status, 1);
-      assert.ok(stdout.includes('duplicate'));
+      // Report mode always shows both variants regardless of config, so
+      // only `--fix` can demonstrate the config setting actually took—the
+      // alias fold below is aggressive-only
+      const { stdout } = run(['--fix', file], { cwd: dirTemp });
+      assert.ok(stdout.includes('* 1 declaration consolidated'));
+      assert.ok(fs.readFileSync(file, 'utf8').includes('.a, .b { overflow-wrap: break-word; }'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

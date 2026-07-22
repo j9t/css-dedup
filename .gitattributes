@@ -1,0 +1,4 @@
+# Byte-exact LF for the CSS fixtures the test suite measures byte savings
+# against—without this, a Windows checkout defaults to CRLF, inflating
+# every fixture’s byte count and shifting the exact savings math tests assert
+test/fixtures/*.css text eol=lf

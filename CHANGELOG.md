@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-* Corrected `--aggressive` to requires `--fix` (similar to `--savings-only`)
+* Corrected `--aggressive` to require `--fix` (similar to `--savings-only`)
 
 ### Changed
 

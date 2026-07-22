@@ -57,8 +57,8 @@ Arguments:
 
 Options:
   -f, --fix                        Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)
-  -a, --aggressive                 With \`--fix\`: Also apply merges that are probably—but not provably—safe (test afterwards); report mode always shows both variants side-by-side
-  -s, --savings-only               With \`--fix\`: Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file)
+  -a, --aggressive                 Also apply merges that are probably—but not provably—safe (test afterwards); only applies together with \`--fix\`
+  -s, --savings-only               Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file); only applies together with \`--fix\`
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -p, --ignore-path <pattern>      Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable)
   -n, --no-ignore-selectors-defaults  Disable the built-in selector hack ignore list (vendor-prefixed pseudo-elements, IE hacks)

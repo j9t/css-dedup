@@ -73,8 +73,8 @@ Pass one or more files—each is analyzed (and, with `--fix`, rewritten) indepen
 | Option | Description |
 | --- | --- |
 | `--fix`, `-f` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
-| `--aggressive`, `-a` | With `--fix`: Also apply merges that are probably—but not provably—safe (see [aggressive mode](#aggressive-mode)); report mode always shows both variants side-by-side |
-| `--savings-only`, `-s` | Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file); only valid together with `--fix`, since report mode doesn’t write |
+| `--aggressive`, `-a` | Also apply merges that are probably—but not provably—safe (see [aggressive mode](#aggressive-mode)); only applies together with `--fix`, since report mode’s table already previews both variants automatically |
+| `--savings-only`, `-s` | Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file); only applies together with `--fix`, since report mode doesn’t write |
 | `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
 | `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector hack ignore list |
 | `--ignore-path <pattern>`, `-p` | Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable) |
@@ -233,8 +233,6 @@ By default, CSS Dedup only consolidates what it can prove safe. `--aggressive` (
 What aggressive mode deliberately does _not_ do: drop same-rule overrides with differing values (`color: red; color: oklch(…)`). That pattern is CSS’s fallback mechanism for progressive enhancement, and there is no way to tell an intentional fallback from an accident. (Overrides that are really the same color spelled two ways—`color: #fff; color: hsl(0 0% 100%)`—do collapse, via the color equivalence above.)
 
 The byte economics don’t change with the flag—aggressive mode just unlocks more merges, each carrying the same trade-off between the declaration removed and the selector-list bytes added. Cross-block merges usually save, since they remove whole rules or blocks; declaration-only merges between rules with long selectors can grow the file, so `--aggressive` can also tip a style sheet further into growth. Either way, report mode’s table shows both variants side-by-side (the `-f -a`/`-f -a -s` columns), so that trade-off is visible before you decide.
-
-`--aggressive` deliberately doesn’t imply `--fix`: The two flags are orthogonal—`--aggressive` sets how much risk to accept, `--fix` whether to write. Report mode’s table always shows both the default and aggressive variants regardless of flags. Since these merges are not provable, review the diff and test the affected pages after an aggressive `--fix`—the CLI reminds you, counting how many of the merges actually rode on the flag.
 
 ***
 

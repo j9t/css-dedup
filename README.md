@@ -28,9 +28,13 @@ $ npx css-dedup default.css
     .a (line 2)
     .b (line 7)
 
-Summary: 1 finding
-Run with `--fix` to save 10 bytes (15.9%).
+Summary for /path/to/default.css:
+Findings -f (-a)  Savings with: -f  -f -s           -f -a           -f -a -s
+1 (1)             -10 B (-15.6%)    -10 B (-15.6%)  -10 B (-15.6%)  -10 B (-15.6%)
+Legend: -f: --fix, -s: --savings-only, -a: --aggressive
 ```
+
+(A cell reads `n/a` when no findings would be safe to apply, or if `--savings-only` would decline the merge for growing the file.)
 
 Running with `--fix` folds `.a` and `.b` into a single rule for the shared declaration:
 
@@ -69,7 +73,7 @@ Pass one or more files—each is analyzed (and, with `--fix`, rewritten) indepen
 | Option | Description |
 | --- | --- |
 | `--fix`, `-f` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
-| `--aggressive`, `-a` | Also allow merges that are probably—but not provably—safe (see [aggressive mode](#aggressive-mode)); on its own this widens the report, with `--fix` it applies the merges |
+| `--aggressive`, `-a` | With `--fix`: Also apply merges that are probably—but not provably—safe (see [aggressive mode](#aggressive-mode)); report mode always shows both variants side-by-side |
 | `--savings-only`, `-s` | Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file); only valid together with `--fix`, since report mode doesn’t write |
 | `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
 | `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector hack ignore list |
@@ -79,7 +83,7 @@ Pass one or more files—each is analyzed (and, with `--fix`, rewritten) indepen
 
 `--ignore-selector` and `--ignore-path` are singular because they’re repeatable flags—each occurrence (`-i pattern1 -i pattern2`) adds one pattern. The corresponding config-file options, `ignoreSelectors` and `ignorePaths`, take an array. `--ignore-path` excludes whole files by path rather than by selector content, matched against each file’s path relative to the working directory—useful for keeping a directory scan out of a build output folder (`node_modules` and dotfolders are always skipped; nothing else is otherwise).
 
-Without `--fix`, CSS Dedup only reports. Report mode still runs the same safety checks `--fix` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if it finds anything to report (or, with `--fix`, anything skipped as unsafe or withheld by `--savings-only`) in any of the given files.
+Without `--fix`, CSS Dedup only reports. Report mode still runs the same safety checks `--fix` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if default-mode rules find anything to report (or, with `--fix`, anything skipped as unsafe or withheld by `--savings-only`) in any of the given files—an aggressive-only finding that default rules wouldn’t otherwise report doesn’t, on its own, flip the exit code.
 
 A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported and CSS Dedup moves on to the rest.
 
@@ -102,7 +106,7 @@ export default {
 };
 ```
 
-CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, `--ignore-path` patterns are added to `ignorePaths`, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `savingsOnly` is a consolidation policy, so on plain report runs it only adjusts the payoff line (a report doesn’t write anyway); on `--fix` runs it decides whether the file is written.
+CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, `--ignore-path` patterns are added to `ignorePaths`, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `aggressive` and `savingsOnly` are consolidation policies, so they only take effect on `--fix` runs, deciding what gets merged and whether the file is written.
 
 ### Programmatic Use
 
@@ -210,7 +214,7 @@ CSS Dedup:
 
 Overall, CSS Dedup is conservative by design and will leave some safe merges for manual review.
 
-`test/fixtures/*.css` contains small example style sheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/css-dedup.js test/fixtures/<file>.css` (add `--fix` for `merge-safety.css`, and `--aggressive` for `aggressive.css`) to see them in action.
+`test/fixtures/*.css` contains small example style sheets that exercise each of these behaviors, including nesting (`nesting.css`) and `@layer` (`layers.css`)—run `node bin/css-dedup.js test/fixtures/<file>.css` (add `--fix` for `merge-safety.css`) to see them in action.
 
 ### Aggressive Mode
 
@@ -228,9 +232,9 @@ By default, CSS Dedup only consolidates what it can prove safe. `--aggressive` (
 
 What aggressive mode deliberately does _not_ do: drop same-rule overrides with differing values (`color: red; color: oklch(…)`). That pattern is CSS’s fallback mechanism for progressive enhancement, and there is no way to tell an intentional fallback from an accident. (Overrides that are really the same color spelled two ways—`color: #fff; color: hsl(0 0% 100%)`—do collapse, via the color equivalence above.)
 
-The byte economics don’t change with the flag—aggressive mode just unlocks more merges, each carrying the same trade-off between the declaration removed and the selector-list bytes added. Cross-block merges usually save, since they remove whole rules or blocks; declaration-only merges between rules with long selectors can grow the file, so `--aggressive` can also tip a style sheet further into growth. Either way, the usual growth notes call it out—including in the parenthetical previews shown when the flag is off.
+The byte economics don’t change with the flag—aggressive mode just unlocks more merges, each carrying the same trade-off between the declaration removed and the selector-list bytes added. Cross-block merges usually save, since they remove whole rules or blocks; declaration-only merges between rules with long selectors can grow the file, so `--aggressive` can also tip a style sheet further into growth. Either way, report mode’s table shows both variants side-by-side (the `-f -a`/`-f -a -s` columns), so that trade-off is visible before you decide.
 
-`--aggressive` deliberately doesn’t imply `--fix`: The two flags are orthogonal—`--aggressive` sets how much risk to accept, `--fix` whether to write. On its own, `--aggressive` widens report mode (aggressive equivalences surface as findings, the savings estimate includes the aggressive merges), which provides the preview needed for merges that carry risk (add `--fix` to apply them). Since these merges are not provable, review the diff and test the affected pages after an aggressive `--fix`—the CLI reminds you, counting how many of the merges actually rode on the flag. Conversely, without the flag, reports and `--fix` runs note in parentheses what `--aggressive` would add.
+`--aggressive` deliberately doesn’t imply `--fix`: The two flags are orthogonal—`--aggressive` sets how much risk to accept, `--fix` whether to write. Report mode’s table always shows both the default and aggressive variants regardless of flags. Since these merges are not provable, review the diff and test the affected pages after an aggressive `--fix`—the CLI reminds you, counting how many of the merges actually rode on the flag.
 
 ***
 

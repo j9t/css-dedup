@@ -57,7 +57,7 @@ Arguments:
 
 Options:
   -f, --fix                        Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)
-  -a, --aggressive                 Also allow merges that are probably—but not provably—safe; on its own this widens the report, with \`--fix\` it applies the merges (test afterwards)
+  -a, --aggressive                 With \`--fix\`: Also apply merges that are probably—but not provably—safe (test afterwards); report mode always shows both variants side-by-side
   -s, --savings-only               With \`--fix\`: Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file)
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -p, --ignore-path <pattern>      Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable)
@@ -72,12 +72,18 @@ if (positionals.includes('-') && positionals.length > 1) {
   process.exit(1);
 }
 
-// A write policy needs a write mode: Report mode never touches a file, so a
-// bare `--savings-only` could only sit inert and mislead
-if (values['savings-only'] && !values.fix) {
-  console.error('`--savings-only` only applies together with `--fix` (report mode doesn’t write).');
+// A flag active without `--fix` that couldn’t change anything about report
+// mode would only sit inert and mislead—`--savings-only` since report mode
+// never writes, `--aggressive` since the summary table always shows the
+// default and aggressive variants side-by-side regardless of the flag (see
+// the `Findings -f (-a)` column and the four `Savings with:` columns)
+function requireFix(active, flag, reason) {
+  if (!active || values.fix) return;
+  console.error(`\`${flag}\` only applies together with \`--fix\` (${reason}).`);
   process.exit(1);
 }
+requireFix(values['savings-only'], '--savings-only', 'report mode doesn’t write');
+requireFix(values.aggressive, '--aggressive', 'report mode already shows both variants');
 
 // Settings file
 async function loadConfig(pathConfig) {
@@ -139,9 +145,15 @@ async function expandTargets(targets, ignorePathPatterns) {
 
   if (!ignorePathPatterns.length) return { files: expanded, discovered: expanded.length };
 
-  // Normalize to `/` before testing, regardless of host OS
-  const files = expanded.filter(file => file === '-' || !ignorePathPatterns.some(pattern => pattern.test(relative(process.cwd(), file).split(sep).join('/'))));
+  const files = expanded.filter(file => file === '-' || !ignorePathPatterns.some(pattern => pattern.test(toPortablePath(file))));
   return { files, discovered: expanded.length };
+}
+
+// A path relative to the working directory with forward slashes, regardless
+// of host OS—shared by `--ignore-path` matching above and the all-files
+// table’s File-column disambiguation below
+function toPortablePath(file) {
+  return relative(process.cwd(), file).split(sep).join('/');
 }
 
 // A `/*# sourceMappingURL=… */` comment means a build tool generated this
@@ -471,11 +483,299 @@ function logSkippedDetail(log, skipped, skippedAggressive) {
   log('');
 }
 
-async function processCss(css, targetOptions, { isStdin, label, multi }) {
-  const potential = targetOptions.aggressive ? null : oppositePass(css, targetOptions);
-  const skippedAggressive = skippedWithAggressive(potential);
+// A byte magnitude for the report table: Decimal KB by default (matching
+// how web-perf tooling usually states transfer size), falling back to a
+// plain byte count when KB would round to “0.0” (a real, if small, saving
+// shouldn’t read as nothing), and up to MB once the value crosses the
+// million-byte line
+function formatSize(bytesAbs) {
+  if (bytesAbs >= 1_000_000) return `${(bytesAbs / 1_000_000).toFixed(1)} MB`;
+  const kb = (bytesAbs / 1000).toFixed(1);
+  if (kb === '0.0') return `${bytesAbs.toLocaleString()} B`;
+  return `${kb} KB`;
+}
 
+// One report-table savings cell: Sign on both the magnitude and the
+// percentage (unlike the `--fix`-mode bullets’ `formatByteMagnitude()`,
+// which only signs the percentage)—“-” for savings, “+” for growth, no sign
+// (and no “-0”) for an exact no-op
+function formatSavingsCell(saved, before) {
+  if (saved === 0) return `${formatSize(0)} (0.0%)`;
+  const sign = saved >= 0 ? '-' : '+';
+  const percent = before ? (Math.abs(saved) / before) * 100 : 0;
+  return `${sign}${formatSize(Math.abs(saved))} (${sign}${percent.toFixed(1)}%)`;
+}
+
+// A report-table cell: `n/a` whenever this pass wouldn’t actually write
+// anything—no findings under this mode, every finding unsafe to auto-merge
+// (findings exist, but none of them safe), or the engine’s `savingsOnly`
+// gate declining a real merge for growing the file. All three collapse to
+// the same one question—would `--fix` with these flags touch the
+// file?—which `pass.unavailable` (see `slimPass()`) already answers
+// directly, rather than this needing to re-derive it from `findings` and
+// `withheld` separately. The real figure otherwise: a genuine net-zero
+// result (bytes wash out, but something *was* applied) still counts as
+// touching the file, so that’s not `n/a`.
+function reportCell(pass) {
+  return pass.unavailable ? 'n/a' : formatSavingsCell(pass.bytes.saved, pass.bytes.before);
+}
+
+// Which of a row’s four savings columns (in `reportRowValues()`’s order:
+// `-f`, `-f -s`, `-f -a`, `-f -a -s`) to mark as the row’s best outcome—shared
+// by the per-file rows and the `Total` row alike. An `n/a` column (see
+// `reportCell()`—nothing found, or the `savingsOnly` gate declined it) is
+// excluded both from winning and from setting the bar the others are
+// compared against—marking (or comparing against) an outcome nothing
+// actually produced would misattribute it. A row whose best remaining
+// column still grows the file isn’t marked at all, since growth isn’t an
+// improvement to point at. Ties all win.
+function bestSavingsColumns(passes) {
+  const eligible = passes.map((pass, i) => ({ i, pass })).filter(({ pass }) => !pass.unavailable);
+  if (!eligible.length) return new Set();
+  const best = Math.max(...eligible.map(({ pass }) => pass.saved));
+  if (best < 0) return new Set();
+  return new Set(eligible.filter(({ pass }) => pass.saved === best).map(({ i }) => i));
+}
+
+// `bestSavingsColumns()`’s indices are relative to the four savings
+// columns alone—shifted here by however many columns (`Findings` alone in
+// the single-file table, `File` and `Findings` in the all-files table)
+// precede them in the row actually being rendered
+function shiftColumns(columns, offset) {
+  return new Set([...columns].map(i => i + offset));
+}
+
+// Keeps only what the report table (single-file and all-files alike) needs
+// from a `dedup()` result—not the rewritten CSS text itself, which a
+// multi-file run would otherwise hold onto for every file for no reason.
+// `unavailable` is the one question every `n/a` cell in the table asks:
+// would this pass actually write anything? `applied.length === 0` answers
+// it directly, covering every way the answer can be “no” in one
+// check—nothing found, every finding unsafe to auto-merge, or the
+// `savingsOnly` gate declining a real merge for growing the file (each of
+// which already leaves `applied` empty, by construction, before this ever
+// looks at it)—rather than this needing to separately ask about findings
+// counts and the gate.
+function slimPass(pass) {
+  return { bytes: pass.bytes, unavailable: pass.applied.length === 0 };
+}
+
+// Mirrors `dedupRoot()`’s `savingsOnly` gate (`src/index.js`) against an
+// already-computed plain pass, instead of running `dedup()` a second time
+// with `savingsOnly: true` just to reapply a rule that only ever looks at
+// the first pass’s own `bytes.saved`: a non-negative result is kept as-is
+// (the engine grafts its clone’s changes onto the real root unchanged),
+// a negative one is replaced with the untouched-file outcome, `applied`
+// emptied to match what actually happened (nothing)
+function applySavingsOnlyGate(pass) {
+  if (pass.bytes.saved >= 0) return pass;
+  return {
+    bytes: { before: pass.bytes.before, after: pass.bytes.before, saved: 0 },
+    applied: [],
+  };
+}
+
+// The four passes the report table compares side-by-side, regardless of
+// which flags this run was actually invoked with—`--aggressive` and
+// `--savings-only` describe table columns here, not run modes. Only two
+// actually run `dedup()`; the `-s` variants are derived from those in JS
+// (see `applySavingsOnlyGate()`), since a second full consolidation pass
+// would just reproduce the first one’s `bytes` before the gate looks at them.
+function computeReportPasses(css, targetOptions) {
+  const passDefault = dedup(css, { ...targetOptions, aggressive: false, savingsOnly: false });
+  const passAgg = dedup(css, { ...targetOptions, aggressive: true, savingsOnly: false });
+  return {
+    passDefault,
+    passDefaultS: applySavingsOnlyGate(passDefault),
+    passAgg,
+    passAggS: applySavingsOnlyGate(passAgg),
+  };
+}
+
+function buildReportStats({ label, findingsDefault, findingsAgg, passDefault, passDefaultS, passAgg, passAggS }) {
+  return {
+    label,
+    findingsDefault,
+    findingsAgg,
+    passDefault: slimPass(passDefault),
+    passDefaultS: slimPass(passDefaultS),
+    passAgg: slimPass(passAgg),
+    passAggS: slimPass(passAggS),
+  };
+}
+
+// A row’s four savings passes as `{ saved, unavailable }`, the shape
+// `bestSavingsColumns()` compares—in `reportRowValues()`’s column order
+function reportSavingsPasses(stats) {
+  return [stats.passDefault, stats.passDefaultS, stats.passAgg, stats.passAggS]
+    .map(pass => ({ saved: pass.bytes.saved, unavailable: pass.unavailable }));
+}
+
+// One report table row’s data cells (everything but the leading `File`
+// cell, which only the all-files table has)
+function reportRowValues(stats) {
+  return [
+    `${stats.findingsDefault} (${stats.findingsAgg})`,
+    reportCell(stats.passDefault),
+    reportCell(stats.passDefaultS),
+    reportCell(stats.passAgg),
+    reportCell(stats.passAggS),
+  ];
+}
+
+// The `Total` row’s four savings passes, in the same `{ saved, unavailable }`
+// shape `reportSavingsPasses()` gives a single file’s row: `unavailable`
+// only when every file’s own pass was—one file’s real, applied merge
+// (even a net-zero one, bytes washing out but the file still gets
+// rewritten) means something happens somewhere in the run, so the total
+// isn’t `n/a` just because it happens to net to zero
+function totalSavingsPasses(statsList) {
+  const columns = [
+    statsList.map(s => s.passDefault),
+    statsList.map(s => s.passDefaultS),
+    statsList.map(s => s.passAgg),
+    statsList.map(s => s.passAggS),
+  ];
+  return columns.map(passes => ({
+    saved: sumBy(passes, pass => pass.bytes.saved),
+    unavailable: passes.every(pass => pass.unavailable),
+  }));
+}
+
+// The all-files table’s closing `Total` row
+function reportTotalRowValues(statsList) {
+  const totalBefore = sumBy(statsList, s => s.passDefault.bytes.before);
+  const findingsDefaultTotal = sumBy(statsList, s => s.findingsDefault);
+  const findingsAggTotal = sumBy(statsList, s => s.findingsAgg);
+  const [f, fs, fa, fas] = totalSavingsPasses(statsList);
+
+  return [
+    `${findingsDefaultTotal} (${findingsAggTotal})`,
+    f.unavailable ? 'n/a' : formatSavingsCell(f.saved, totalBefore),
+    fs.unavailable ? 'n/a' : formatSavingsCell(fs.saved, totalBefore),
+    fa.unavailable ? 'n/a' : formatSavingsCell(fa.saved, totalBefore),
+    fas.unavailable ? 'n/a' : formatSavingsCell(fas.saved, totalBefore),
+  ];
+}
+
+// The all-files table’s `File` labels: The basename alone, unless two (or
+// more) files share one—then, and only for those, one more path segment is
+// added at a time until every label in the run is unique. A file that’s
+// already unique at its current depth never grows further, so one long
+// outlier path doesn’t drag every other row’s label out with it.
+function disambiguateLabels(labels) {
+  const segments = labels.map(label => (label === '(stdin)' ? [label] : toPortablePath(label).split('/')));
+  const depth = segments.map(() => 1);
+  const candidate = i => {
+    const segs = segments[i];
+    const d = Math.min(depth[i], segs.length);
+    return segs.slice(segs.length - d).join('/');
+  };
+
+  for (let changed = true; changed;) {
+    changed = false;
+    const current = labels.map((_, i) => candidate(i));
+    const counts = new Map();
+    for (const label of current) counts.set(label, (counts.get(label) ?? 0) + 1);
+    for (let i = 0; i < labels.length; i++) {
+      if (counts.get(current[i]) > 1 && depth[i] < segments[i].length) {
+        depth[i]++;
+        changed = true;
+      }
+    }
+  }
+
+  return labels.map((label, i) => candidate(i));
+}
+
+const TABLE_GUTTER = '  ';
+
+// `highlight`—a `Set` of column indices—colors the row’s best savings
+// column(s) (see `bestSavingsColumns()`). Padding happens on the plain text
+// first, and the color wraps the already-padded (fixed-width) result
+// after—coloring first would fold the invisible escape-code bytes into
+// `padEnd()`’s width, under-padding the cell and dragging every column
+// after it out of line with the rest of the table. The final trailing
+// trim moves to the last cell alone, ahead of that cell’s own color
+// wrapping, since trimming the whole joined line afterward wouldn’t reach
+// past a trailing reset code to the padding it’s meant to strip.
+function padRow(cells, widths, highlight = new Set()) {
+  const padded = cells.map((cell, i) => cell.padEnd(widths[i]));
+  padded[padded.length - 1] = padded[padded.length - 1].trimEnd();
+  return padded.map((cell, i) => (highlight.has(i) ? styleText(['bold', 'green'], cell) : cell)).join(TABLE_GUTTER);
+}
+
+// Finds the last `/` at or before `ceiling`, the rightmost (and so
+// shortest-tail) split that still keeps the head within budget—or `null`
+// when nothing splits that early, in which case the cell is left whole
+// rather than cut mid-segment. The one seam both the width-floor pre-pass
+// below and the actual render call through, sharing the same `ceiling`
+// argument each time, so the two can never disagree on where a cell splits.
+function splitCellForWrap(cell, ceiling) {
+  const splitAt = cell.lastIndexOf('/', ceiling);
+  if (splitAt <= 0) return null;
+  return { head: cell.slice(0, splitAt + 1), tail: cell.slice(splitAt + 1) };
+}
+
+// One rendered table row, wrapping the `wrapColumn` cell at the last `/`
+// that still fits within `budget`—so one very long path doesn’t widen every
+// row’s `File` column past the terminal, and doesn’t break mid-segment either.
+// A path with no slash short enough to fit is left to overflow that one line
+// rather than get cut mid-word.
+function renderTableRow(row, widths, wrapColumn, budget, highlight) {
+  if (wrapColumn < 0 || row[wrapColumn].length <= widths[wrapColumn]) return [padRow(row, widths, highlight)];
+
+  const split = splitCellForWrap(row[wrapColumn], budget);
+  if (!split) return [padRow(row, widths, highlight)];
+
+  const tailRow = [...row];
+  tailRow[wrapColumn] = split.tail;
+  return [split.head, padRow(tailRow, widths, highlight)];
+}
+
+// Renders `header` + `rows` as a flush, 2-space-gutter, left-aligned table—
+// every column’s width is computed from its header and every row’s actual
+// content, so columns can’t drift the way hand-aligned output would.
+// `wrapColumn`, when given, is the column (the all-files table’s `File`)
+// that gets capped to the terminal’s width and wrapped instead of widening
+// the whole table to fit its longest value—but never below what a row
+// actually needs post-wrap: the whole cell when it has no `/` to split on
+// (a bare basename can’t be broken onto a second line), or otherwise just
+// the tail `splitCellForWrap()` would leave at that same budget. Skipping
+// this and clamping to the budget outright would leave a too-long tail
+// unpadded, dragging every column after it out of line with the rest of the
+// table—which is exactly why the render call below is passed this same
+// `budget`, rather than the (possibly since-widened) final column width.
+// `rowHighlights[i]`, when given, is the `Set` of column indices to color
+// in `rows[i]` (see `padRow()`)—parallel to `rows`, one entry per row.
+function renderReportTable(header, rows, { wrapColumn = -1, rowHighlights } = {}) {
+  const widths = header.map((cell, i) => Math.max(cell.length, ...rows.map(row => row[i].length)));
+  let budget = -1;
+
+  if (wrapColumn >= 0) {
+    const width = process.stdout.columns || 80;
+    const fixedWidth = widths.reduce((sum, w, i) => (i === wrapColumn ? sum : sum + w), 0) + TABLE_GUTTER.length * (widths.length - 1);
+    budget = Math.max(width - fixedWidth, 8);
+    let minRequired = header[wrapColumn].length;
+    for (const row of rows) {
+      const split = splitCellForWrap(row[wrapColumn], budget);
+      minRequired = Math.max(minRequired, split ? split.tail.length : row[wrapColumn].length);
+    }
+    widths[wrapColumn] = Math.max(minRequired, Math.min(widths[wrapColumn], budget));
+  }
+
+  const lines = [padRow(header, widths)];
+  rows.forEach((row, i) => lines.push(...renderTableRow(row, widths, wrapColumn, budget, rowHighlights?.[i])));
+  return lines;
+}
+
+const REPORT_LEGEND = 'Legend: -f: --fix, -s: --savings-only, -a: --aggressive';
+
+async function processCss(css, targetOptions, { isStdin, label, multi }) {
   if (values.fix) {
+    const potential = targetOptions.aggressive ? null : oppositePass(css, targetOptions);
+    const skippedAggressive = skippedWithAggressive(potential);
+
     // `savingsOnly` is the engine’s gate (see `dedupRoot()`): A withheld
     // result arrives as the untouched style sheet, with `applied` empty and
     // the declined outcome under `withheld`
@@ -557,68 +857,59 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
     };
   }
 
-  const { findings } = analyze(css, targetOptions);
+  // Report mode always compares the default and aggressive variants side by
+  // side (see the summary table below)—`--aggressive`/`--savings-only` name
+  // table columns here, not a mode to switch into (bare `--aggressive`
+  // without `--fix` is rejected above, before this point, for exactly that
+  // reason). The four `dedup()` combinations this needs are deferred past
+  // the all-clean shortcut just below, though: For the common case of
+  // scanning a directory of already-clean files, there’s nothing for them
+  // to find, so running them at all would just be four wasted consolidation
+  // passes over a style sheet already known to have no duplicates.
+  const findingsDefault = analyze(css, { ...targetOptions, aggressive: false }).findings;
+  const findingsAgg = analyze(css, { ...targetOptions, aggressive: true }).findings;
 
-  if (!findings.length) {
-    const note = potential?.applied.length
-      ? ` With \`--aggressive\`: ${potential.applied.length} consolidation${potential.applied.length !== 1 ? 's' : ''} possible.`
-      : '';
-    console.log(`No duplicate declarations found.${note}`);
+  if (!findingsDefault.length && !findingsAgg.length) {
+    console.log('No duplicate declarations found.');
+    const before = Buffer.byteLength(css, 'utf8');
+    const zeroPass = { bytes: { before, after: before, saved: 0 }, applied: [] };
     return {
       exitFailure: false,
       errored: false,
-      stats: buildStats({
-        findings: 0,
-        applied: [],
-        skipped: [],
-        bytes: { before: Buffer.byteLength(css, 'utf8'), saved: 0 },
-        withheld: null,
-        aggExtra: potential?.applied.length ?? 0,
-        aggExtraSaved: potential?.bytes.saved ?? 0,
-        aggDiffers: Boolean(potential?.applied.length),
-      }),
+      stats: buildReportStats({ label, findingsDefault: 0, findingsAgg: 0, passDefault: zeroPass, passDefaultS: zeroPass, passAgg: zeroPass, passAggS: zeroPass }),
     };
   }
 
-  printFindings(findings);
+  const { passDefault, passDefaultS, passAgg, passAggS } = computeReportPasses(css, targetOptions);
 
-  // A dry-run consolidation, purely to report the payoff—same safety rules
-  // as `--fix`, just discarded instead of written
-  const { css: cssDryRun, applied, skipped, bytes, withheld } = dedup(css, targetOptions);
+  // A style sheet clean under default rules but with something aggressive
+  // mode would additionally catch (the table’s `Findings -f (-a)` column
+  // showing e.g. `0 (1)`) still gets its one duplicate group listed in
+  // detail—otherwise the table’s aggressive columns would quote a byte
+  // figure for a finding the reader can’t actually see anywhere
+  if (findingsDefault.length) printFindings(findingsDefault);
+  else if (findingsAgg.length) printFindings(findingsAgg);
 
   // Findings above don't distinguish safe from unsafe—without this, a
   // duplicate group that `--fix` would just skip (see its own safety
   // checks) reads as if nothing follows from it at all, when there’s a
   // concrete, explainable reason it wasn't offered as a `--fix` win
-  logSkippedDetail(console.log, skipped, skippedAggressive);
+  logSkippedDetail(console.log, passDefault.skipped, skippedWithAggressive(passAgg));
 
-  // Summary and `--fix` payoff close each style sheet’s report. With a
-  // single file that’s unambiguous on its own; with several, the filename
-  // is restated here, too—by the time a long multi-file run ends, the
-  // per-file header above may already be out of scrollback.
-  console.log(styleText('bold', multi ? `Summary for ${label}:` : 'Summary:'));
-  if (withheld) {
-    // The dry run went through the engine’s `savingsOnly` gate (set via the
-    // config file—the CLI flag itself requires `--fix`), so `--fix` here
-    // would decline to write; say so instead of promising a change
-    console.log(`* ${findings.length} finding${findings.length !== 1 ? 's' : ''}: \`savingsOnly\` leaves this file untouched—consolidating would ${formatByteDeltaClause(withheld.bytes.saved, withheld.bytes.before)} with \`--fix\``);
-  } else if (applied.length) {
-    console.log(`* ${findings.length} finding${findings.length !== 1 ? 's' : ''}: ${formatReduceClause(bytes.saved, bytes.before)} with \`--fix\``);
-    if (bytes.saved < 0) {
-      console.log(styleText('dim', '  (worth it for maintainability, not for transfer size)'));
-    }
-  }
-  // Gated on the outputs differing, never on entry counts: One aggressive
-  // cross-block or alias fold can absorb what the default pass would have
-  // done in more, separate merges, so a count delta can be zero or negative
-  // on exactly the files where `--aggressive` changes (and saves) the most
-  const { aggExtra, aggExtraSaved, aggDiffers } = computeAggressivePreview(potential, cssDryRun, applied, bytes);
-  if (aggDiffers) console.log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before, bytes.saved));
+  // Summary and `--fix` payoff close each style sheet’s report. The label is
+  // always restated here (even for a single file): by the time a long run
+  // ends, the per-file header printed above may already be out of scrollback.
+  console.log(styleText('bold', `Summary for ${label}:`));
+  const stats = buildReportStats({ label, findingsDefault: findingsDefault.length, findingsAgg: findingsAgg.length, passDefault, passDefaultS, passAgg, passAggS });
+  const header = ['Findings -f (-a)', 'Savings with: -f', '-f -s', '-f -a', '-f -a -s'];
+  const rowHighlights = [shiftColumns(bestSavingsColumns(reportSavingsPasses(stats)), 1)];
+  for (const line of renderReportTable(header, [reportRowValues(stats)], { rowHighlights })) console.log(line);
+  console.log(REPORT_LEGEND);
 
   return {
-    exitFailure: true,
+    exitFailure: findingsDefault.length > 0,
     errored: false,
-    stats: buildStats({ findings: findings.length, applied, skipped, bytes, withheld, aggExtra, aggExtraSaved, aggDiffers }),
+    stats,
   };
 }
 
@@ -646,6 +937,26 @@ function printOverallSummary(results, { fix }) {
   const erroredNote = errored ? ` (${errored} file${errored !== 1 ? 's' : ''} could not be processed; see errors above)` : '';
 
   console.log('');
+  console.log(styleText('bold', `Summary for all files:${erroredNote}`));
+
+  if (!fix) {
+    // Report mode’s all-files table is the per-file summary table again,
+    // with one row per file plus a closing `Total` row—no separate
+    // “further with `--aggressive`” bullet needed, since aggressive is
+    // already its own pair of columns rather than a mode to switch into
+    const labels = disambiguateLabels(ok.map(result => result.stats.label));
+    const header = ['File', 'Findings -f (-a)', 'Savings with: -f', '-f -s', '-f -a', '-f -a -s'];
+    const rows = ok.map((result, i) => [labels[i], ...reportRowValues(result.stats)]);
+    const rowHighlights = ok.map(result => shiftColumns(bestSavingsColumns(reportSavingsPasses(result.stats)), 2));
+    if (ok.length) {
+      const statsList = ok.map(result => result.stats);
+      rows.push(['Total', ...reportTotalRowValues(statsList)]);
+      rowHighlights.push(shiftColumns(bestSavingsColumns(totalSavingsPasses(statsList)), 2));
+    }
+    for (const line of renderReportTable(header, rows, { wrapColumn: 0, rowHighlights })) console.log(line);
+    console.log(REPORT_LEGEND);
+    return;
+  }
 
   // Every percentage below is against this—the combined original size of
   // every successfully processed file—since there’s no single file left to
@@ -670,55 +981,31 @@ function printOverallSummary(results, { fix }) {
   // affect, so `aggShrinkTotal - aggGrowTotal` already nets to 0 there)
   const aggNetAll = (shrinkTotal - growTotal) + (aggShrinkTotal - aggGrowTotal);
 
-  console.log(styleText('bold', `Summary for all files:${erroredNote}`));
+  const totalApplied = sumBy(ok, result => result.stats.applied);
+  const totalSkipped = sumBy(ok, result => result.stats.skipped);
 
-  if (fix) {
-    const totalApplied = sumBy(ok, result => result.stats.applied);
-    const totalSkipped = sumBy(ok, result => result.stats.skipped);
-
-    const outcome = formatOutcomeBullet({
-      countLabel: `${totalApplied} declaration${totalApplied !== 1 ? 's' : ''} consolidated`,
-      tense: 'done',
-      filesShrinkLen: filesShrink.length,
-      shrinkTotal,
-      filesGrowLen: filesGrow.length,
-      growTotal,
-      totalBefore: totalBeforeAll,
-      skipFlag: '--fix --savings-only',
-    });
-    if (outcome) {
-      for (const line of outcome) console.log(line);
-    }
-    if (totalSkipped) {
-      console.log(styleText('yellow', `* ${totalSkipped} finding${totalSkipped !== 1 ? 's' : ''} skipped (considered unsafe to auto-merge)`));
-    }
-    if (withheldFiles.length) {
-      console.log(`* ${withheldFiles.length} file${withheldFiles.length !== 1 ? 's' : ''} left untouched by \`--savings-only\`—consolidating would have made ${withheldFiles.length !== 1 ? 'them' : 'it'} ${formatBytesShareOfTotal(withheldGrowthTotal, totalBeforeAll)} bigger in total`);
-    }
-  } else {
-    if (withheldFiles.length) {
-      console.log(`\`--fix\` would leave ${withheldFiles.length} file${withheldFiles.length !== 1 ? 's' : ''} untouched—\`savingsOnly\` is set, and consolidating would make ${withheldFiles.length !== 1 ? 'them' : 'it'} ${formatBytesShareOfTotal(withheldGrowthTotal, totalBeforeAll)} bigger.`);
-    }
-    const totalFindings = sumBy(ok, result => result.stats.findings);
-    const outcome = formatOutcomeBullet({
-      countLabel: `${totalFindings} finding${totalFindings !== 1 ? 's' : ''}`,
-      tense: 'todo',
-      filesShrinkLen: filesShrink.length,
-      shrinkTotal,
-      filesGrowLen: filesGrow.length,
-      growTotal,
-      totalBefore: totalBeforeAll,
-      flag: '--fix',
-      skipFlag: '--fix --savings-only',
-    });
-    if (outcome) {
-      for (const line of outcome) console.log(line);
-    }
+  const outcome = formatOutcomeBullet({
+    countLabel: `${totalApplied} declaration${totalApplied !== 1 ? 's' : ''} consolidated`,
+    tense: 'done',
+    filesShrinkLen: filesShrink.length,
+    shrinkTotal,
+    filesGrowLen: filesGrow.length,
+    growTotal,
+    totalBefore: totalBeforeAll,
+    skipFlag: '--fix --savings-only',
+  });
+  if (outcome) {
+    for (const line of outcome) console.log(line);
+  }
+  if (totalSkipped) {
+    console.log(styleText('yellow', `* ${totalSkipped} finding${totalSkipped !== 1 ? 's' : ''} skipped (considered unsafe to auto-merge)`));
+  }
+  if (withheldFiles.length) {
+    console.log(`* ${withheldFiles.length} file${withheldFiles.length !== 1 ? 's' : ''} left untouched by \`--savings-only\`—consolidating would have made ${withheldFiles.length !== 1 ? 'them' : 'it'} ${formatBytesShareOfTotal(withheldGrowthTotal, totalBeforeAll)} bigger in total`);
   }
 
-  // Always a preview (never yet applied), regardless of whether the base
-  // run above was `--fix` or report mode—so this block, unlike the two
-  // above, doesn’t vary by `fix` and only needs to run once
+  // Always a preview (never yet applied) of what `--fix --aggressive` would
+  // add on top of the `--fix` run that just happened
   if (aggFiles.length) {
     const extra = sumBy(aggFiles, result => result.stats.aggExtra);
     const aggOutcome = formatOutcomeBullet({

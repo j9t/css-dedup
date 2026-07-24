@@ -2531,8 +2531,14 @@ describe('Exit code', () => {
 
   // `chmod` only restricts read access on POSIX—on Windows it merely toggles
   // the read-only (write-protection) attribute, so `readFile` would still
-  // succeed there and this couldn’t exercise the failure it’s meant to
-  test('Does not forgive a file discovered but unreadable at read time', { skip: process.platform === 'win32' ? 'chmod doesn’t restrict read access on Windows' : false }, () => {
+  // succeed there and this couldn’t exercise the failure it’s meant to. Root
+  // bypasses file permission checks entirely on POSIX, too, so a CI runner
+  // (or container) executing as root would hit the same false negative.
+  const skipUnreadableTest = process.platform === 'win32'
+    ? 'chmod doesn’t restrict read access on Windows'
+    : (process.getuid?.() === 0 ? 'root bypasses file permission checks' : false);
+
+  test('Does not forgive a file discovered but unreadable at read time', { skip: skipUnreadableTest }, () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_exit_zero_unreadable');
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'locked.css');

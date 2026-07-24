@@ -2639,3 +2639,69 @@ describe('Exit code', () => {
     assert.ok(stdout.includes('-e, --no-exit-zero'));
   });
 });
+
+describe('Quiet mode', () => {
+  test('Report mode: suppresses the findings and skipped-group detail, keeps the summary table', () => {
+    const file = path.join(fixturesDir, 'merge-safety.css');
+    const plain = run([file]);
+    assert.ok(plain.stdout.includes('duplicate   color: red'));
+    assert.ok(plain.stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
+
+    const { stdout, status } = run(['--quiet', file]);
+    assert.strictEqual(status, 1);
+    assert.ok(!stdout.includes('duplicate   color: red'));
+    assert.ok(!stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
+    assert.ok(!stdout.includes('— intervening'));
+    assert.match(stdout, findingsRow(2));
+    assert.ok(stdout.includes(`Summary for ${file}:`));
+  });
+
+  test('`--fix --quiet`: suppresses the skipped-group detail listing, keeps the summary bullets', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_quiet_fix');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'merge-safety.css');
+    fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
+
+    try {
+      const { stdout } = run(['--fix', '--quiet', file]);
+      assert.ok(!stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
+      assert.ok(!stdout.includes('— intervening'));
+      assert.ok(stdout.includes('1 finding skipped (considered unsafe to auto-merge)'));
+      assert.ok(stdout.includes('declaration consolidated'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Multi-file `--quiet` run: suppresses each file’s path header, keeps per-file and overall summaries', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_quiet_multi');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileA = path.join(dirTemp, 'a.css');
+    const fileB = path.join(dirTemp, 'b.css');
+    fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), fileA);
+    fs.copyFileSync(path.join(fixturesDir, 'basic.css'), fileB);
+
+    try {
+      const { stdout } = run(['--quiet', fileA, fileB]);
+      const headerLines = stdout.split('\n').filter(line => line.trim() === fileA || line.trim() === fileB);
+      assert.strictEqual(headerLines.length, 0);
+      assert.ok(stdout.includes(`Summary for ${fileA}:`));
+      assert.ok(stdout.includes(`Summary for ${fileB}:`));
+      assert.ok(stdout.includes('Summary for all files:'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`-q` is the short form for `--quiet`', () => {
+    const file = path.join(fixturesDir, 'merge-safety.css');
+    const { stdout } = run(['-q', file]);
+    assert.ok(!stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
+  });
+
+  test('Help text lists `-q, --quiet`', () => {
+    const { stdout, status } = run(['--help']);
+    assert.strictEqual(status, 0);
+    assert.ok(stdout.includes('-q, --quiet'));
+  });
+});

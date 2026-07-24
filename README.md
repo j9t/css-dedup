@@ -80,6 +80,7 @@ Pass one or more files—each is analyzed (and, with `--fix`, rewritten) indepen
 | `--ignore-path <pattern>`, `-p` | Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable) |
 | `--exit-zero`, `-z` | Exit with status 0 even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`; a file that fails to read or parse still exits 1 |
 | `--no-exit-zero`, `-e` | Override `exitZero: true` from a config file for the respective run |
+| `--quiet`, `-q` | Suppress the per-file findings/skipped-group detail listing (and its file-path header); summaries still print |
 | `--config <path>`, `-c <path>` | Path to a config file (defaults to `css-dedup.config.js` in the working directory, if present) |
 | `--help`, `-h` | Show usage information |
 
@@ -90,6 +91,8 @@ Without `--fix`, CSS Dedup only reports. Report mode still runs the same safety 
 CSS Dedup only ever merges what it can prove safe: A duplicate group flagged unsafe to auto-merge is never merged, `--exit-zero` or not, and the finding still prints exactly the same either way—nothing about the flag changes what gets analyzed or reported, only what happens to the exit code. That’s for a build step that must otherwise succeed (e.g., a minification pipeline gating CI): `--fix` should not produce anything wrong (that would be a bug), so failing the build over a finding it just left on record for later is a separate call from whether the CSS itself is fine. Exit `1` still applies to a file that couldn’t be read or parsed.
 
 A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported and CSS Dedup moves on to the rest.
+
+By default, every finding and every skipped-as-unsafe group is listed in full, with its reasoning (e.g., which intervening declaration blocked a merge)—useful for deciding whether to hand-fix something or reach for `--aggressive`, but often more than a build log needs. `--quiet` drops that per-file detail listing (and the file-path header that precedes it), while still printing each file’s summary and the overall summary for a multi-file run—both already state the finding/skipped counts on their own. Re-run without `--quiet` to see the detail behind those counts.
 
 Note: `--fix` rewrites CSS text only—it doesn’t regenerate a source map. If a rewritten file references one (a `/*# sourceMappingURL=… */` comment, typically left by a build tool), CSS Dedup notes that the map is now stale.
 

@@ -773,7 +773,7 @@ function renderReportTable(header, rows, { wrapColumn = -1, rowHighlights } = {}
   return lines;
 }
 
-const REPORT_LEGEND = 'Legend: -f: --fix, -s: --savings-only, -a: --aggressive';
+const REPORT_LEGEND = 'Legend: -f: --fix, -a: --aggressive, -s: --savings-only';
 
 async function processCss(css, targetOptions, { isStdin, label, multi }) {
   if (values.fix) {
@@ -814,7 +814,7 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
     }
 
     // Detail (what was skipped, and why) prints before the counts—so a long
-    // skipped list can't push the outcome off-screen and out of scrollback,
+    // skipped list can’t push the outcome off-screen and out of scrollback,
     // the same order report mode already uses for its own skipped list
     logSkippedDetail(log, skipped, skippedAggressive);
 
@@ -894,10 +894,10 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
   if (findingsDefault.length) printFindings(findingsDefault);
   else if (findingsAgg.length) printFindings(findingsAgg);
 
-  // Findings above don't distinguish safe from unsafe—without this, a
+  // Findings above don’t distinguish safe from unsafe—without this, a
   // duplicate group that `--fix` would just skip (see its own safety
   // checks) reads as if nothing follows from it at all, when there’s a
-  // concrete, explainable reason it wasn't offered as a `--fix` win
+  // concrete, explainable reason it wasn’t offered as a `--fix` win
   logSkippedDetail(console.log, passDefault.skipped, skippedWithAggressive(passAgg));
 
   // Summary and `--fix` payoff close each style sheet’s report. The label is
@@ -1083,7 +1083,7 @@ async function main() {
     const result = await processTarget(file, options, { multi }, prefetched[index]);
     // `--exit-zero` never changes what got merged—only what a finding
     // (skipped as unsafe, or withheld by `--savings-only`) does to the exit
-    // code. A file that couldn't be read or parsed is a real failure, and
+    // code. A file that couldn’t be read or parsed is a real failure, and
     // stays one regardless of the flag.
     if (result.exitFailure && !(exitZero && !result.errored)) failed = true;
     results.push(result);

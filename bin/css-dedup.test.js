@@ -314,8 +314,8 @@ describe('Analysis', () => {
     assert.strictEqual(analyze('.a { transform: rotate(90deg); } .b { transform: rotate(0.25turn); }', { aggressive: true }).findings.length, 1);
     // `grad`→`deg` is an exact rational conversion (×9/10)
     assert.strictEqual(analyze('.a { transform: rotate(90deg); } .b { transform: rotate(100grad); }', { aggressive: true }).findings.length, 1);
-    // `rad`→`deg` involves π, so it's rounded—still expected to land on the
-    // same canonical key at the conversion's fixed precision
+    // `rad`→`deg` involves π, so it’s rounded—still expected to land on the
+    // same canonical key at the conversion’s fixed precision
     assert.strictEqual(analyze('.a { transform: rotate(57.29578deg); } .b { transform: rotate(1rad); }', { aggressive: true }).findings.length, 1);
     assert.strictEqual(analyze('.a { transform: rotate(45deg); } .b { transform: rotate(1rad); }', { aggressive: true }).findings.length, 0);
   });
@@ -1438,7 +1438,7 @@ describe('Fixtures', () => {
     assert.ok(stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
     assert.match(stdout, /background: #ffffff — intervening `background` declaration in `\.y`/);
     // The unsafe-group detail must print before the summary, so a long
-    // skipped list can't push the outcome off-screen and out of scrollback
+    // skipped list can’t push the outcome off-screen and out of scrollback
     const unsafeIndex = stdout.indexOf('unsafe to auto-merge');
     const summaryIndex = stdout.indexOf('Summary for');
     assert.ok(unsafeIndex !== -1 && summaryIndex !== -1);
@@ -1770,7 +1770,7 @@ describe('CLI', () => {
       const countsIndex = stdout.indexOf('0 declarations consolidated, 1 withheld');
       assert.ok(detailIndex !== -1 && countsIndex !== -1);
       assert.ok(detailIndex < countsIndex);
-      // The counts line—the run's conclusion—must be among the last things
+      // The counts line—the run’s conclusion—must be among the last things
       // printed, not stranded above the skipped-group detail
       assert.ok(stdout.includes('more findings in aggressive mode'));
       assert.match(stdout, /\* 0 declarations consolidated, 1 withheld:.*\n\* 1 finding skipped \(considered unsafe to auto-merge\)/);
@@ -1809,7 +1809,7 @@ describe('CLI', () => {
     fs.mkdirSync(dirTemp, { recursive: true });
     const file = path.join(dirTemp, 'cross.css');
     // Aggressive merges all four selectors in ONE entry where the default
-    // pass would do TWO per-block merges—entry counts can't tell the modes
+    // pass would do TWO per-block merges—entry counts can’t tell the modes
     // apart here, only the outputs can
     fs.writeFileSync(file, '@media (min-width: 40em) { .a { color: red; } .b { color: red; } }\n@media (min-width: 40em) { .c { color: red; } .d { color: red; } }\n');
 

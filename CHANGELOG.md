@@ -6,10 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [1.6.0] - 2026-07-24
 
+### Fixed
+
+* A missing target path, or a directory `readdir` can’t access, now reports a clean error instead of a raw stack trace
+
 ### Added
 
 * Added `--exit-zero`/`-z` (and the `exitZero` config option) to exit `0` even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`—for build pipelines that shouldn’t gate on findings that are already reviewed and permanent
   - A file that fails to read or parse still exits `1` regardless of the flag.
+* Added `--no-exit-zero`/`-e` to override `exitZero: true` from a config file for a run
 
 ## [1.5.0] - 2026-07-22
 

@@ -79,6 +79,7 @@ Pass one or more files—each is analyzed (and, with `--fix`, rewritten) indepen
 | `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector hack ignore list |
 | `--ignore-path <pattern>`, `-p` | Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable) |
 | `--exit-zero`, `-z` | Exit with status 0 even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`; a file that fails to read or parse still exits 1 |
+| `--no-exit-zero`, `-e` | Override `exitZero: true` from a config file for the respective run |
 | `--config <path>`, `-c <path>` | Path to a config file (defaults to `css-dedup.config.js` in the working directory, if present) |
 | `--help`, `-h` | Show usage information |
 
@@ -110,7 +111,7 @@ export default {
 };
 ```
 
-CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, `--ignore-path` patterns are added to `ignorePaths`, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `aggressive` and `savingsOnly` are consolidation policies, so they only take effect on `--fix` runs, deciding what gets merged and whether the file is written. `exitZero` applies regardless of `--fix`, since report mode’s exit code carries the same “anything left to review” meaning `--fix` mode’s does.
+CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, `--ignore-path` patterns are added to `ignorePaths`, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `aggressive` and `savingsOnly` are consolidation policies, so they only take effect on `--fix` runs, deciding what gets merged and whether the file is written. `exitZero` applies regardless of `--fix`, since report mode’s exit code carries the same “anything left to review” meaning `--fix` mode’s does; `--no-exit-zero` always wins over `exitZero: true` in the config, the same way `--no-ignore-selectors-defaults` wins over its own default.
 
 ### Programmatic Use
 

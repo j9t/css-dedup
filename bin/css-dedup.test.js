@@ -2498,6 +2498,22 @@ describe('Exit code', () => {
     }
   });
 
+  test('`--fix --savings-only` exits 0 despite a withheld file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_exit_zero_withheld');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(file, cssGrowing);
+
+    try {
+      const { stdout, status } = run(['--fix', '--savings-only', '--exit-zero', file]);
+      assert.match(stdout, RE_WITHHELD_ONE);
+      assert.strictEqual(status, 0);
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), cssGrowing);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
   test('Does not forgive a file that fails to read or parse', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_exit_zero_error');
     fs.mkdirSync(dirTemp, { recursive: true });
@@ -2524,6 +2540,19 @@ describe('Exit code', () => {
     try {
       const { stderr, status } = run(['--exit-zero', fileGood, fileBad]);
       assert.match(stderr, RE_SYNTAX_ERROR);
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('A missing file still fails the run, even with `--exit-zero`', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_exit_zero_missing');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'missing.css');
+
+    try {
+      const { status } = run(['--exit-zero', file]);
       assert.strictEqual(status, 1);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });

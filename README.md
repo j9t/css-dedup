@@ -78,12 +78,16 @@ Pass one or more files—each is analyzed (and, with `--fix`, rewritten) indepen
 | `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
 | `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector hack ignore list |
 | `--ignore-path <pattern>`, `-p` | Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable) |
+| `--exit-zero`, `-z` | Exit with status 0 even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`; a file that fails to read or parse still exits 1 |
+| `--no-exit-zero`, `-e` | Override `exitZero: true` from a config file for the respective run |
 | `--config <path>`, `-c <path>` | Path to a config file (defaults to `css-dedup.config.js` in the working directory, if present) |
 | `--help`, `-h` | Show usage information |
 
 `--ignore-selector` and `--ignore-path` are singular because they’re repeatable flags—each occurrence (`-i pattern1 -i pattern2`) adds one pattern. The corresponding config-file options, `ignoreSelectors` and `ignorePaths`, take an array. `--ignore-path` excludes whole files by path rather than by selector content, matched against each file’s path relative to the working directory—useful for keeping a directory scan out of a build output folder (`node_modules` and dotfolders are always skipped; nothing else is otherwise).
 
 Without `--fix`, CSS Dedup only reports. Report mode still runs the same safety checks `--fix` would, though, so a finding that is considered unsafe to auto-merge (an intervening declaration on some other selector, say) is called out right there, alongside the byte estimate for whatever is safe—rather than the estimate silently going missing for that group. Exit code is `1` if default-mode rules find anything to report (or, with `--fix`, anything skipped as unsafe or withheld by `--savings-only`) in any of the given files—an aggressive-only finding that default rules wouldn’t otherwise report doesn’t, on its own, flip the exit code.
+
+Some duplicate groups are unsafe to auto-merge for good reason and stay that way—an intervening declaration that reflects real cascade order isn’t something a later run will resolve on its own. Wiring CSS Dedup into a build step that must otherwise succeed (e.g., a minification pipeline gating CI) turns that permanent, already-reviewed state into a permanent failure. `--exit-zero` is for that case: exit `1` still applies to a file that couldn’t be read or parsed, but a run that completed and merely has findings left for a human exits `0` instead.
 
 A file that fails to parse—invalid CSS, or a non-standard dialect PostCSS doesn’t accept—doesn’t stop the run: Its error is reported and CSS Dedup moves on to the rest.
 
@@ -102,11 +106,12 @@ export default {
   savingsOnly: false,             // set to `true` to skip files whose consolidation would grow them (`--fix` runs only)
   ignoreSelectors: [],            // additional selector patterns to exclude, e.g., `[/^\.legacy-/]`
   ignoreSelectorsDefaults: true,  // set to `false` to disable the built-in hack list
-  ignorePaths: []                 // file paths to exclude, matched relative to the working directory, e.g., `[/dist\//]`
+  ignorePaths: [],                // file paths to exclude, matched relative to the working directory, e.g., `[/dist\//]`
+  exitZero: false                 // set to `true` to exit 0 even when findings are left for a human
 };
 ```
 
-CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, `--ignore-path` patterns are added to `ignorePaths`, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `aggressive` and `savingsOnly` are consolidation policies, so they only take effect on `--fix` runs, deciding what gets merged and whether the file is written.
+CLI flags layer on top of the config file rather than replacing it: `--ignore-selector` patterns are added to `ignoreSelectors` from the config, `--ignore-path` patterns are added to `ignorePaths`, and `--no-ignore-selectors-defaults` always wins over `ignoreSelectorsDefaults: true` in the config. `aggressive` and `savingsOnly` are consolidation policies, so they only take effect on `--fix` runs, deciding what gets merged and whether the file is written. `exitZero` applies regardless of `--fix`, since report mode’s exit code carries the same “anything left to review” meaning `--fix` mode’s does; `--no-exit-zero` always wins over `exitZero: true` in the config, the same way `--no-ignore-selectors-defaults` wins over its own default.
 
 ### Programmatic Use
 

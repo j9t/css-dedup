@@ -1358,7 +1358,7 @@ describe('Aggressive mode', () => {
   });
 });
 
-describe('savingsOnly', () => {
+describe('Savings only', () => {
   test('Withholds a growing consolidation, returning the style sheet untouched', () => {
     const css = cssGrowing;
     const { css: output, applied, skipped, bytes, withheld } = dedup(css, { savingsOnly: true });
@@ -2467,5 +2467,169 @@ describe('CLI', () => {
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Exit code', () => {
+  test('Report mode exits 0 despite findings', () => {
+    const { stdout, status } = run(['--exit-zero', path.join(fixturesDir, 'merge-safety.css')]);
+    assert.match(stdout, findingsRow(2));
+    assert.strictEqual(status, 0);
+  });
+
+  test('`-z` is the short form', () => {
+    const { status } = run(['-z', path.join(fixturesDir, 'merge-safety.css')]);
+    assert.strictEqual(status, 0);
+  });
+
+  test('`--fix` exits 0 despite a group skipped as unsafe, and still applies the safe merge', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_exit_zero_fix');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'merge-safety.css');
+    fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
+
+    try {
+      const { stdout, status } = run(['--fix', '--exit-zero', file]);
+      assert.ok(stdout.includes('1 finding skipped (considered unsafe to auto-merge)'));
+      assert.strictEqual(status, 0);
+      assert.match(fs.readFileSync(file, 'utf8'), RE_MERGED_AC);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--fix --savings-only` exits 0 despite a withheld file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_exit_zero_withheld');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(file, cssGrowing);
+
+    try {
+      const { stdout, status } = run(['--fix', '--savings-only', '--exit-zero', file]);
+      assert.match(stdout, RE_WITHHELD_ONE);
+      assert.strictEqual(status, 0);
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), cssGrowing);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Does not forgive a file that fails to read or parse', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_exit_zero_error');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'bad.css');
+    fs.writeFileSync(file, '.broken { color XP_WIN, }\n');
+
+    try {
+      const { stderr, status } = run(['--exit-zero', file]);
+      assert.match(stderr, RE_SYNTAX_ERROR);
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  // `chmod` only restricts read access on POSIX—on Windows it merely toggles
+  // the read-only (write-protection) attribute, so `readFile` would still
+  // succeed there and this couldn’t exercise the failure it’s meant to
+  test('Does not forgive a file discovered but unreadable at read time', { skip: process.platform === 'win32' ? 'chmod doesn’t restrict read access on Windows' : false }, () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_exit_zero_unreadable');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'locked.css');
+    fs.writeFileSync(file, '.a { color: red; }\n');
+    fs.chmodSync(file, 0o000);
+
+    try {
+      const { stderr, status } = run(['--exit-zero', file]);
+      assert.match(stderr, /Could not read/);
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.chmodSync(file, 0o644);
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('A read/parse failure still fails the run even alongside a clean file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_exit_zero_error_multi');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const fileGood = path.join(dirTemp, 'good.css');
+    const fileBad = path.join(dirTemp, 'bad.css');
+    fs.writeFileSync(fileGood, '.a { color: blue; }\n');
+    fs.writeFileSync(fileBad, '.broken { color XP_WIN, }\n');
+
+    try {
+      const { stderr, status } = run(['--exit-zero', fileGood, fileBad]);
+      assert.match(stderr, RE_SYNTAX_ERROR);
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('A missing file still fails the run, even with `--exit-zero`', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_exit_zero_missing');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    const file = path.join(dirTemp, 'missing.css');
+
+    try {
+      const { stderr, status } = run(['--exit-zero', file]);
+      assert.match(stderr, /Could not resolve/);
+      assert.doesNotMatch(stderr, /\bat\s+async\b/);
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Loads `exitZero: true` from the config file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_config_exit_zero');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { exitZero: true };\n');
+    const file = path.join(dirTemp, 'merge-safety.css');
+    fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
+
+    try {
+      const { status } = run([file], { cwd: dirTemp });
+      assert.strictEqual(status, 0);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--no-exit-zero` overrides `exitZero: true` from the config file', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_config_no_exit_zero');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { exitZero: true };\n');
+    const file = path.join(dirTemp, 'merge-safety.css');
+    fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
+
+    try {
+      const { status } = run(['--no-exit-zero', file], { cwd: dirTemp });
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`-e` is the short form for `--no-exit-zero`', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_config_no_exit_zero_short');
+    fs.mkdirSync(dirTemp, { recursive: true });
+    fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { exitZero: true };\n');
+    const file = path.join(dirTemp, 'merge-safety.css');
+    fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
+
+    try {
+      const { status } = run(['-e', file], { cwd: dirTemp });
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Help text lists `-z, --exit-zero` and `-e, --no-exit-zero`', () => {
+    const { stdout, status } = run(['--help']);
+    assert.strictEqual(status, 0);
+    assert.ok(stdout.includes('-z, --exit-zero'));
+    assert.ok(stdout.includes('-e, --no-exit-zero'));
   });
 });

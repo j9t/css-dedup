@@ -21,6 +21,8 @@ const OPTIONS_CONFIG = {
   'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
   'ignore-path': { type: 'string', short: 'p', multiple: true, default: [] },
   'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
+  'exit-zero': { type: 'boolean', short: 'z', default: false },
+  'no-exit-zero': { type: 'boolean', short: 'e', default: false },
   config: { type: 'string', short: 'c' },
   help: { type: 'boolean', short: 'h', default: false },
 };
@@ -62,6 +64,8 @@ Options:
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -p, --ignore-path <pattern>      Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable)
   -n, --no-ignore-selectors-defaults  Disable the built-in selector hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
+  -z, --exit-zero                  Exit with status 0 even when findings are skipped as unsafe to auto-merge or withheld by \`--savings-only\`; a file that fails to read or parse still exits 1
+  -e, --no-exit-zero               Override \`exitZero: true\` from a config file for the respective run
   -c, --config <path>              Path to a config file (defaults to \`css-dedup.config.js\` in the working directory, if present)
   -h, --help                       Show this help`);
   process.exit(values.help ? 0 : 1);
@@ -1042,8 +1046,22 @@ async function main() {
     ...(config.ignorePaths ?? []),
     ...values['ignore-path'].map(pattern => new RegExp(pattern, 'i')),
   ];
+  // `--no-exit-zero` wins over a project’s own `exitZero: true`, the same
+  // way `--no-ignore-selectors-defaults` wins over that config default—both
+  // exist to force a config-set default back off for one run
+  const exitZero = values['no-exit-zero'] ? false : values['exit-zero'] || (config.exitZero ?? false);
 
-  const { files, discovered } = await expandTargets(positionals, ignorePathPatterns);
+  // `stat()`/`readdir()` inside `expandTargets` aren’t wrapped there, so a
+  // missing path or an unreadable directory would otherwise surface as a
+  // raw stack trace via the top-level `catch` below instead of the same
+  // clean, styled message every other resolution error on this page gets
+  let files, discovered;
+  try {
+    ({ files, discovered } = await expandTargets(positionals, ignorePathPatterns));
+  } catch (err) {
+    console.error(styleText('red', `Could not resolve ${positionals.join(', ')}: ${err.message}`));
+    process.exit(1);
+  }
   if (!files.length) {
     if (discovered > 0) {
       console.error(`All ${discovered} \`.css\` file${discovered !== 1 ? 's' : ''} found under ${positionals.join(', ')} ${discovered !== 1 ? 'were' : 'was'} excluded by \`--ignore-path\`.`);
@@ -1063,7 +1081,11 @@ async function main() {
     // is visually separated from the next file’s header
     if (multi && index > 0) console.log('');
     const result = await processTarget(file, options, { multi }, prefetched[index]);
-    if (result.exitFailure) failed = true;
+    // `--exit-zero` only forgives findings that still need a human look
+    // (skipped as unsafe, or withheld by `--savings-only`)—a file that
+    // couldn't be read or parsed in the first place is a real failure, and
+    // stays one regardless of the flag
+    if (result.exitFailure && !(exitZero && !result.errored)) failed = true;
     results.push(result);
   }
 

@@ -31,7 +31,7 @@ $ npx css-dedup default.css
 Summary for /path/to/default.css:
 Findings -f (-a)  Savings with: -f  -f -s           -f -a           -f -a -s
 1 (1)             -10 B (-15.6%)    -10 B (-15.6%)  -10 B (-15.6%)  -10 B (-15.6%)
-Legend: -f: --fix, -s: --savings-only, -a: --aggressive
+Legend: -f: --fix, -a: --aggressive, -s: --savings-only
 ```
 
 (A cell reads `n/a` when no findings would be safe to apply, or if `--savings-only` would decline the merge for growing the file.)

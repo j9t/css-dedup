@@ -504,7 +504,7 @@ function formatSize(bytesAbs) {
 // which only signs the percentage)—“-” for savings, “+” for growth, no sign
 // (and no “-0”) for an exact no-op
 function formatSavingsCell(saved, before) {
-  if (saved === 0) return `${formatSize(0)} (0.0%)`;
+  if (saved === 0) return `${formatSize(0)} (0%)`;
   const sign = saved >= 0 ? '-' : '+';
   const percent = before ? (Math.abs(saved) / before) * 100 : 0;
   return `${sign}${formatSize(Math.abs(saved))} (${sign}${percent.toFixed(1)}%)`;

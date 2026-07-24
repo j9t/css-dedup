@@ -4,6 +4,13 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-07-24
+
+### Added
+
+* Added `--exit-zero`/`-z` (and the `exitZero` config option) to exit `0` even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`—for build pipelines that shouldn’t gate on findings that are already reviewed and permanent
+  - A file that fails to read or parse still exits `1` regardless of the flag.
+
 ## [1.5.0] - 2026-07-22
 
 ### Fixed

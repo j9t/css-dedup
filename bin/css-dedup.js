@@ -21,6 +21,7 @@ const OPTIONS_CONFIG = {
   'ignore-selector': { type: 'string', short: 'i', multiple: true, default: [] },
   'ignore-path': { type: 'string', short: 'p', multiple: true, default: [] },
   'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
+  'exit-zero': { type: 'boolean', short: 'z', default: false },
   config: { type: 'string', short: 'c' },
   help: { type: 'boolean', short: 'h', default: false },
 };
@@ -62,6 +63,7 @@ Options:
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)
   -p, --ignore-path <pattern>      Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable)
   -n, --no-ignore-selectors-defaults  Disable the built-in selector hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
+  -z, --exit-zero                  Exit with status 0 even when findings are skipped as unsafe to auto-merge or withheld by \`--savings-only\`; a file that fails to read or parse still exits 1
   -c, --config <path>              Path to a config file (defaults to \`css-dedup.config.js\` in the working directory, if present)
   -h, --help                       Show this help`);
   process.exit(values.help ? 0 : 1);
@@ -1042,6 +1044,7 @@ async function main() {
     ...(config.ignorePaths ?? []),
     ...values['ignore-path'].map(pattern => new RegExp(pattern, 'i')),
   ];
+  const exitZero = values['exit-zero'] || (config.exitZero ?? false);
 
   const { files, discovered } = await expandTargets(positionals, ignorePathPatterns);
   if (!files.length) {
@@ -1063,7 +1066,11 @@ async function main() {
     // is visually separated from the next file’s header
     if (multi && index > 0) console.log('');
     const result = await processTarget(file, options, { multi }, prefetched[index]);
-    if (result.exitFailure) failed = true;
+    // `--exit-zero` only forgives findings that still need a human look
+    // (skipped as unsafe, or withheld by `--savings-only`)—a file that
+    // couldn't be read or parsed in the first place is a real failure, and
+    // stays one regardless of the flag
+    if (result.exitFailure && !(exitZero && !result.errored)) failed = true;
     results.push(result);
   }
 

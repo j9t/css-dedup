@@ -1081,10 +1081,10 @@ async function main() {
     // is visually separated from the next file’s header
     if (multi && index > 0) console.log('');
     const result = await processTarget(file, options, { multi }, prefetched[index]);
-    // `--exit-zero` only forgives findings that still need a human look
-    // (skipped as unsafe, or withheld by `--savings-only`)—a file that
-    // couldn't be read or parsed in the first place is a real failure, and
-    // stays one regardless of the flag
+    // `--exit-zero` never changes what got merged—only what a finding
+    // (skipped as unsafe, or withheld by `--savings-only`) does to the exit
+    // code. A file that couldn't be read or parsed is a real failure, and
+    // stays one regardless of the flag.
     if (result.exitFailure && !(exitZero && !result.errored)) failed = true;
     results.push(result);
   }

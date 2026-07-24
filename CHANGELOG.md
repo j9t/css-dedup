@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-* Added `--exit-zero`/`-z` (and the `exitZero` config option) to exit `0` even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`—for build pipelines that shouldn’t gate on findings that are already reviewed and permanent
+* Added `--exit-zero`/`-z` (and the `exitZero` config option) to exit `0` even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`, so a build pipeline doesn’t gate on them
   - A file that fails to read or parse still exits `1` regardless of the flag.
 * Added `--no-exit-zero`/`-e` to override `exitZero: true` from a config file for a run
 

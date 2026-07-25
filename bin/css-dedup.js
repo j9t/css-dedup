@@ -23,6 +23,7 @@ const OPTIONS_CONFIG = {
   'no-ignore-selectors-defaults': { type: 'boolean', short: 'n', default: false },
   'exit-zero': { type: 'boolean', short: 'z', default: false },
   'no-exit-zero': { type: 'boolean', short: 'e', default: false },
+  quiet: { type: 'boolean', short: 'q', default: false },
   config: { type: 'string', short: 'c' },
   help: { type: 'boolean', short: 'h', default: false },
 };
@@ -66,6 +67,7 @@ Options:
   -n, --no-ignore-selectors-defaults  Disable the built-in selector hack ignore list (vendor-prefixed pseudo-elements, IE hacks)
   -z, --exit-zero                  Exit with status 0 even when findings are skipped as unsafe to auto-merge or withheld by \`--savings-only\`; a file that fails to read or parse still exits 1
   -e, --no-exit-zero               Override \`exitZero: true\` from a config file for the respective run
+  -q, --quiet                      Suppress the per-file findings/skipped-group detail listing (and its file-path header); summaries still print
   -c, --config <path>              Path to a config file (defaults to \`css-dedup.config.js\` in the working directory, if present)
   -h, --help                       Show this help`);
   process.exit(values.help ? 0 : 1);
@@ -398,7 +400,7 @@ async function processTarget(file, options, { multi }, preread) {
   const isStdin = file === '-';
   const label = isStdin ? '(stdin)' : resolve(file);
 
-  if (multi) console.log(styleText('bold', label));
+  if (multi && !values.quiet) console.log(styleText('bold', label));
 
   let css;
   if (preread) {
@@ -815,8 +817,10 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
 
     // Detail (what was skipped, and why) prints before the counts—so a long
     // skipped list can’t push the outcome off-screen and out of scrollback,
-    // the same order report mode already uses for its own skipped list
-    logSkippedDetail(log, skipped, skippedAggressive);
+    // the same order report mode already uses for its own skipped list.
+    // `--quiet` drops it: The summary bullets below already restate the
+    // skipped count on their own.
+    if (!values.quiet) logSkippedDetail(log, skipped, skippedAggressive);
 
     log(multi ? styleText('bold', summaryLabel.trim()) : 'Summary:');
     // Every remaining line is its own bullet, in the order a reader wants
@@ -891,14 +895,18 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
   // showing e.g. `0 (1)`) still gets its one duplicate group listed in
   // detail—otherwise the table’s aggressive columns would quote a byte
   // figure for a finding the reader can’t actually see anywhere
-  if (findingsDefault.length) printFindings(findingsDefault);
-  else if (findingsAgg.length) printFindings(findingsAgg);
+  // `--quiet` drops both detail blocks below: The report table that follows
+  // already gives the finding/savings counts on their own.
+  if (!values.quiet) {
+    if (findingsDefault.length) printFindings(findingsDefault);
+    else if (findingsAgg.length) printFindings(findingsAgg);
 
-  // Findings above don’t distinguish safe from unsafe—without this, a
-  // duplicate group that `--fix` would just skip (see its own safety
-  // checks) reads as if nothing follows from it at all, when there’s a
-  // concrete, explainable reason it wasn’t offered as a `--fix` win
-  logSkippedDetail(console.log, passDefault.skipped, skippedWithAggressive(passAgg));
+    // Findings above don’t distinguish safe from unsafe—without this, a
+    // duplicate group that `--fix` would just skip (see its own safety
+    // checks) reads as if nothing follows from it at all, when there’s a
+    // concrete, explainable reason it wasn’t offered as a `--fix` win
+    logSkippedDetail(console.log, passDefault.skipped, skippedWithAggressive(passAgg));
+  }
 
   // Summary and `--fix` payoff close each style sheet’s report. The label is
   // always restated here (even for a single file): by the time a long run

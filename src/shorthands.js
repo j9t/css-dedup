@@ -88,8 +88,42 @@ export const SHORTHAND_LONGHANDS = {
   'grid-column': ['grid-column-start', 'grid-column-end'],
 };
 
-function expandProperty(prop) {
-  return new Set([prop, ...(SHORTHAND_LONGHANDS[prop] ?? [])]);
+// Each shorthand’s expansion, including its own name—built once at module
+// load rather than per call, since `propertiesOverlap()` below sits on the
+// merge-safety hot path and ran once per declaration per scanned rule
+const EXPANSIONS = new Map(
+  Object.entries(SHORTHAND_LONGHANDS).map(([prop, longhands]) => [prop, new Set([prop, ...longhands])]),
+);
+
+// Every property name taking part in any shorthand/longhand relation, on
+// either side. A name outside this set expands to just itself, so it can
+// only ever overlap a property it’s equal to—which lets the overwhelmingly
+// common case (`color`, `display`, …) answer from one lookup.
+const RELATED_PROPS = new Set([
+  ...Object.keys(SHORTHAND_LONGHANDS),
+  ...Object.values(SHORTHAND_LONGHANDS).flat(),
+]);
+
+// Keyed by first property, then second—nested rather than by a joined
+// string, so a lookup allocates nothing. Bounded by `RELATED_PROPS` (a fixed
+// vocabulary), so unlike the per-run caches elsewhere this one never needs
+// clearing.
+const overlapCache = new Map();
+
+function computeOverlap(a, b) {
+  const expandedA = EXPANSIONS.get(a);
+  const expandedB = EXPANSIONS.get(b);
+  // Neither is a shorthand, so both expand to just themselves—and equality
+  // was already ruled out by the caller
+  if (!expandedA && !expandedB) return false;
+  if (!expandedA) return expandedB.has(a);
+  if (!expandedB) return expandedA.has(b);
+
+  const [small, large] = expandedA.size <= expandedB.size ? [expandedA, expandedB] : [expandedB, expandedA];
+  for (const prop of small) {
+    if (large.has(prop)) return true;
+  }
+  return false;
 }
 
 // “True” if setting one of the two (already-normalized) properties can affect
@@ -100,10 +134,17 @@ function expandProperty(prop) {
 // member of the other’s expansion)
 export function propertiesOverlap(a, b) {
   if (a === b) return true;
-  const expandedA = expandProperty(a);
-  const expandedB = expandProperty(b);
-  for (const prop of expandedA) {
-    if (expandedB.has(prop)) return true;
+  if (!RELATED_PROPS.has(a) || !RELATED_PROPS.has(b)) return false;
+
+  let row = overlapCache.get(a);
+  if (!row) {
+    row = new Map();
+    overlapCache.set(a, row);
   }
-  return false;
+  const cached = row.get(b);
+  if (cached !== undefined) return cached;
+
+  const overlap = computeOverlap(a, b);
+  row.set(b, overlap);
+  return overlap;
 }

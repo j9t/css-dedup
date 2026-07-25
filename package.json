@@ -52,6 +52,7 @@
     "url": "git+https://github.com/j9t/css-dedup.git"
   },
   "scripts": {
+    "benchmark": "node test/benchmark.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepare": "git config core.hooksPath .githooks || true",
@@ -61,5 +62,5 @@
   },
   "type": "module",
   "types": "src/index.d.ts",
-  "version": "1.7.0"
+  "version": "1.8.0"
 }

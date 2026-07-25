@@ -4,6 +4,16 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-07-25
+
+### Added
+
+* Added `npm run benchmark` to time both entry points against a generated style sheet (or files/directories passed as arguments), reporting declarations applied, groups skipped, and bytes saved alongside each timing
+
+### Changed
+
+* Sped up consolidation by roughly 3–5× on large style sheets, by bounding the merge-safety scan to the span it actually examines and memoizing property normalization, selector splitting, and shorthand/longhand overlap per run
+
 ## [1.7.0] - 2026-07-25
 
 ### Added

@@ -1,6 +1,25 @@
 // Splits a selector list on top-level commas only, respecting commas nested
-// inside `:is(a, b)`, `[attr="a,b"]`, and similar constructs
+// inside `:is(a, b)`, `[attr="a,b"]`, and similar constructs. Memoized on the
+// same per-run terms as `subjectIdentities` below—the same handful of
+// selector strings get split repeatedly within a run (eligibility filtering,
+// merge-safety scans, occurrence reporting), but selector text is unbounded
+// across runs.
+//
+// The cached array is shared between callers, so anything handing it to the
+// outside world (`Occurrence.selectors`, `AppliedChange.selectors`) copies
+// it first—see `index.js`.
+const splitCache = new Map();
+
 export function splitSelectors(selectorList) {
+  const cached = splitCache.get(selectorList);
+  if (cached) return cached;
+
+  const computed = computeSplitSelectors(selectorList);
+  splitCache.set(selectorList, computed);
+  return computed;
+}
+
+function computeSplitSelectors(selectorList) {
   const selectors = [];
   let depth = 0;
   let quote = null;
@@ -191,16 +210,18 @@ const RE_TYPE_SELECTOR = /^[a-zA-Z][\w-]*/;
 // risk a wrong disjointness call.
 //
 // Memoized, and scoped to one consolidation run (see
-// `resetSubjectIdentities()`): The merge-safety scan asks about the same
+// `resetSelectorCaches()`): The merge-safety scan asks about the same
 // selectors over and over within a run, but a long-lived process (a PostCSS
 // watch build, say) must not accumulate every selector—think generated or
 // hashed class names—it has ever seen.
 const subjectIdentities = new Map();
 
-// Called at the start of each top-level `dedupRoot()` run—the only flow that
-// reaches `subjectIdentity()`
-export function resetSubjectIdentities() {
+// Called at the start of each top-level `analyzeRoot()`/`dedupRoot()` run—
+// `subjectIdentity()` is reached only from the latter, but `splitSelectors()`
+// from both, so both have to bound their caches
+export function resetSelectorCaches() {
   subjectIdentities.clear();
+  splitCache.clear();
 }
 
 function subjectIdentity(selector) {

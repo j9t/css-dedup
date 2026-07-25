@@ -325,7 +325,7 @@ function computeAggressivePreview(potential, resultCss, applied, bytes) {
 // in the trailing note—the bullet’s main clause still quotes `aggExtraSaved`
 // on its own.
 function formatAggressivePreviewLine(aggExtra, aggExtraSaved, before, baseSaved) {
-  const label = aggExtra > 0 ? `${aggExtra} more finding${aggExtra !== 1 ? 's' : ''}` : 'Further consolidation';
+  const label = aggExtra > 0 ? `${aggExtra} more declaration${aggExtra !== 1 ? 's' : ''}` : 'Further consolidation';
   return `* ${label} in aggressive mode: ${formatReduceClause(aggExtraSaved, before, true)} with \`--fix --aggressive\`${formatAggregateTotalNote(baseSaved + aggExtraSaved, before)}`;
 }
 
@@ -1021,7 +1021,7 @@ function printOverallSummary(results, { fix }) {
   if (aggFiles.length) {
     const extra = sumBy(aggFiles, result => result.stats.aggExtra);
     const aggOutcome = formatOutcomeBullet({
-      countLabel: `${extra > 0 ? `${extra} more finding${extra !== 1 ? 's' : ''}` : 'Further consolidation'} in aggressive mode`,
+      countLabel: `${extra > 0 ? `${extra} more declaration${extra !== 1 ? 's' : ''}` : 'Further consolidation'} in aggressive mode`,
       tense: 'todo',
       filesShrinkLen: aggFilesShrink.length,
       shrinkTotal: aggShrinkTotal,

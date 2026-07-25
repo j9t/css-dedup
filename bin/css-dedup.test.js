@@ -1611,7 +1611,7 @@ describe('Fixtures', () => {
     try {
       const { stdout } = run(['--fix', file]);
       assert.match(stdout, /intervening `background` declaration in `\.y`.*\(may merge with `--aggressive`\)/);
-      assert.match(stdout, /\* 1 more finding in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive` \(total: -\d+ bytes \/ -\d+\.\d%\)/);
+      assert.match(stdout, /\* 1 more declaration in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive` \(total: -\d+ bytes \/ -\d+\.\d%\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1772,7 +1772,7 @@ describe('CLI', () => {
       assert.ok(detailIndex < countsIndex);
       // The counts line—the run’s conclusion—must be among the last things
       // printed, not stranded above the skipped-group detail
-      assert.ok(stdout.includes('more findings in aggressive mode'));
+      assert.ok(stdout.includes('more declarations in aggressive mode'));
       assert.match(stdout, /\* 0 declarations consolidated, 1 withheld:.*\n\* 1 finding skipped \(considered unsafe to auto-merge\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -1891,7 +1891,7 @@ describe('CLI', () => {
       assert.match(report.stdout, /1 \(1\) {2,}n\/a {2,}n\/a {2,}\+\d+(?:\.\d+)? (?:B|KB|MB) \(\+\d+\.\d%\) {2,}n\/a/);
 
       const fix = run(['--fix', file]);
-      assert.match(fix.stdout, /\* 1 more finding in aggressive mode: Reduce duplication but grow by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive`/);
+      assert.match(fix.stdout, /\* 1 more declaration in aggressive mode: Reduce duplication but grow by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -2168,7 +2168,7 @@ describe('CLI', () => {
       // `--fix` mode’s own bullet is untouched by the report table rework,
       // and its “preview, never yet applied” phrasing is identical whether
       // the base run was report or `--fix` mode
-      const RE_AGGRESSIVE_ROLLUP = /\* 2 more findings in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(total: [-+]\d+ bytes \/ [-+]\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
+      const RE_AGGRESSIVE_ROLLUP = /\* 2 more declarations in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(total: [-+]\d+ bytes \/ [-+]\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
       assert.match(run(['--fix', fileShrink, fileGrow]).stdout, RE_AGGRESSIVE_ROLLUP);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });

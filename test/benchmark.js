@@ -20,6 +20,24 @@ import { analyze, dedup } from '../src/index.js';
 const RUNS = 5;
 const RUNS_WARMUP = 2;
 
+// How often a generated root selector comes back around. Must divide the
+// generated rule count, or the repetition lands outside the fixture and
+// same-selector folding never gets exercised; at 500 against the default
+// 1,500 rules, each selector is written three times.
+const SELECTOR_PERIOD = 500;
+
+// The descendant half of the selector—a divisor of `SELECTOR_PERIOD`, so it
+// varies the names without lengthening the pair’s repetition period
+const SELECTOR_POOL_DESCENDANT = 25;
+
+// How often a rule restates the selector of the rule just before it. A
+// recurring selector isn’t enough on its own to exercise same-selector
+// folding: Folding merges into the last occurrence, so two occurrences
+// `SELECTOR_PERIOD` rules apart are nearly always blocked by an intervening
+// declaration on an overlapping property. Adjacent restatements—the
+// copy-paste shape folding exists for—are what actually reach it.
+const SELECTOR_RESTATE_INTERVAL = 25;
+
 // A deterministic pseudo-random generator, so the generated sheet—and so
 // every timing taken against it—is the same from run to run and machine to
 // machine (`Math.random()` would make two runs incomparable)
@@ -34,7 +52,8 @@ function makeRandom(seed) {
 // Stands in for a real style sheet when none is given: one large root scope
 // (where the merge-safety scan’s cost lives), declarations repeated across
 // rules often enough to form duplicate groups, shorthand/longhand pairs to
-// exercise the overlap check, and a few at-rule scopes
+// exercise the overlap check, restated selectors for same-selector folding,
+// and a few at-rule scopes
 function generateCss(ruleCount = 1500) {
   const random = makeRandom(42);
   const props = [
@@ -57,8 +76,13 @@ function generateCss(ruleCount = 1500) {
       decls.push(`\t${prop}: ${values[Math.floor(random() * values.length)]};`);
     }
     // A bounded class-name pool, so selectors repeat and same-selector folds
-    // have something to find
-    lines.push(`.c${i % 900} .e${i % 40} {\n${decls.join('\n')}\n}`);
+    // have something to find. The combined selector comes back around every
+    // `SELECTOR_PERIOD` rules—the descendant pool divides that period, so the
+    // pair’s own period is that same number rather than the two pools’ least
+    // common multiple, which is what silently pushed it past `ruleCount` here
+    // before.
+    const slot = i % SELECTOR_RESTATE_INTERVAL === 0 ? Math.max(i - 1, 0) : i;
+    lines.push(`.c${slot % SELECTOR_PERIOD} .e${slot % SELECTOR_POOL_DESCENDANT} {\n${decls.join('\n')}\n}`);
   }
 
   for (const query of ['(min-width: 768px)', '(min-width: 1024px)', 'print']) {

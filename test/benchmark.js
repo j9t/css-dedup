@@ -10,6 +10,11 @@
 // Alongside each timing it prints what the pass actually did (declarations
 // applied, groups skipped, bytes saved). Those numbers are the guard rail: a
 // speedup that changes any of them isn’t a speedup, it’s a behavior change.
+//
+// Only compare figures taken against the same input. That’s obvious for a
+// real style sheet, less so for the generated one: Editing the generator
+// moves its timings and its applied/skipped/saved counts alike, so numbers
+// from either side of such an edit aren’t a before/after pair.
 
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
@@ -94,20 +99,29 @@ function generateCss(ruleCount = 1500) {
   return lines.join('\n\n');
 }
 
-// The median, not the mean: One descheduled run (GC, another process waking
-// up) skews an average badly at these sample sizes, and the median just
-// ignores it
+// The fastest run, not the mean or the median: Contention (GC, another
+// process waking up) only ever adds time, so the floor is the sample least
+// polluted by it—and the floor is what compares two versions of the code
+// fairly. A median needs most of the batch to be clean, which a busy machine
+// doesn’t give: Measured over identical batches, the median’s readings
+// spanned 208% against the min’s 141%, and it recovered the true floor in
+// four of eight batches where the min managed six.
+//
+// Not a cure, though—a batch contended end to end has no clean sample to
+// find, and both statistics then report the busy machine rather than the
+// code. A figure well above the usual floor means “re-run,” not “regression.”
+// These numbers are a lower bound on the work, never a prediction of how long
+// a run takes.
 function measure(fn) {
   for (let i = 0; i < RUNS_WARMUP; i++) fn();
 
-  const times = [];
+  let fastest = Infinity;
   for (let i = 0; i < RUNS; i++) {
     const started = performance.now();
     fn();
-    times.push(performance.now() - started);
+    fastest = Math.min(fastest, performance.now() - started);
   }
-  times.sort((a, b) => a - b);
-  return times[Math.floor(times.length / 2)];
+  return fastest;
 }
 
 async function collectCssFiles(dirPath) {
@@ -143,7 +157,7 @@ function formatRow(cells, widths) {
 }
 
 function report(rows) {
-  const header = ['Pass', 'Median', 'Applied', 'Skipped', 'Saved'];
+  const header = ['Pass', 'Fastest', 'Applied', 'Skipped', 'Saved'];
   const table = [header, ...rows];
   const widths = header.map((_, i) => Math.max(...table.map(row => row[i].length)));
   for (const row of table) console.log(formatRow(row, widths));

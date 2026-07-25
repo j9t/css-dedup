@@ -973,6 +973,10 @@ function consolidateRoot(root, options = {}) {
       }
       const run = runs.at(-1);
       if (run.length) {
+        // Note: Replacing these scans with a rule → position `Map` is
+        // twice as slow. `indexOf()` stops at the hit; building the map is
+        // always a full pass, and each rebuild covers only a handful of
+        // lookups (`scope.rules` changes as merges land).
         const previousIndex = scope.rules.indexOf(run.at(-1));
         const nextIndex = scope.rules.indexOf(rule);
         if (findBlockingRule(scope, distinctRules, new Set(), previousIndex, nextIndex, propNormalized)) {

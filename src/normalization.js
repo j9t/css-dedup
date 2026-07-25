@@ -313,7 +313,31 @@ const PROPERTY_ALIASES = {
   'grid-column-gap': 'column-gap',
 };
 
+// Memoized, and scoped to one run (see `resetPropertyCache()`): The
+// merge-safety scan normalizes the same property names over and over within
+// a run, but a long-lived process (a PostCSS watch build) must not
+// accumulate every custom property name—think generated or hashed ones—it
+// has ever seen. One cache per mode, rather than one keyed by mode plus
+// name: Building that composite key would allocate a string per lookup.
+const propCacheDefault = new Map();
+const propCacheAggressive = new Map();
+
+export function resetPropertyCache() {
+  propCacheDefault.clear();
+  propCacheAggressive.clear();
+}
+
 export function normalizeProp(prop, aggressive = false) {
+  const cache = aggressive ? propCacheAggressive : propCacheDefault;
+  const cached = cache.get(prop);
+  if (cached !== undefined) return cached;
+
+  const computed = computeNormalizeProp(prop, aggressive);
+  cache.set(prop, computed);
+  return computed;
+}
+
+function computeNormalizeProp(prop, aggressive) {
   const trimmed = prop.trim();
   // Custom property names are case-sensitive (`--Foo` !== `--foo`); every
   // other CSS property name is ASCII-case-insensitive

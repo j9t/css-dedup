@@ -1,11 +1,29 @@
 import postcss from 'postcss';
-import { normalizeProp, declarationKey } from './normalization.js';
+import { normalizeProp, declarationKey, resetPropertyCache } from './normalization.js';
 import { isIgnoredSelector, resolveIgnorePatterns } from './hacks.js';
-import { splitSelectors, hasSpacedTopLevelComma, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint, resetSubjectIdentities } from './selectors.js';
+import { splitSelectors, hasSpacedTopLevelComma, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint, resetSelectorCaches } from './selectors.js';
 import { propertiesOverlap } from './shorthands.js';
 
 function normalizeScopeSegment(text) {
   return text.trim().replace(/\s+/g, ' ');
+}
+
+// The memoization the hot paths rely on is all per run: reused across one
+// style sheet’s passes, never carried over to the next (see
+// `resetSelectorCaches()` for why unbounded growth matters here). Called at
+// the start of both top-level entry points.
+function resetCaches() {
+  resetSelectorCaches();
+  resetPropertyCache();
+  separatorCache = new WeakMap();
+}
+
+// A rule’s own `splitSelectors()` result is a shared, cached array (see
+// `selectors.js`)—anything that ends up in the public `Occurrence.selectors`
+// or `AppliedChange.selectors` gets a copy, so a consumer mutating what it
+// was handed can’t corrupt the cache for the rest of the run
+function ownSelectors(selector) {
+  return [...splitSelectors(selector)];
 }
 
 // An anonymous `@layer {}` block is its own, distinct cascade layer—unlike
@@ -182,6 +200,8 @@ function eligibleRules(scope, ignorePatterns) {
 }
 
 export function analyzeRoot(root, options = {}) {
+  resetCaches();
+
   const ignorePatterns = resolveIgnorePatterns(options);
   const aggressive = options.aggressive ?? false;
   // The normalization mode is bound once per run (see `consolidateRoot()`)
@@ -250,7 +270,7 @@ export function analyzeRoot(root, options = {}) {
         repeated: true,
         occurrences: rules.map(rule => ({
           selector: rule.selector,
-          selectors: splitSelectors(rule.selector),
+          selectors: ownSelectors(rule.selector),
           line: rule.source?.start?.line,
         })),
       });
@@ -290,7 +310,7 @@ function findDecl(occurrences, rule) {
 function describeOccurrence({ rule, decl }) {
   return {
     selector: rule.selector,
-    selectors: splitSelectors(rule.selector),
+    selectors: ownSelectors(rule.selector),
     prop: decl.prop,
     value: decl.value,
     line: decl.source?.start?.line,
@@ -333,7 +353,23 @@ const RE_TRAILING_INDENT = /[ \t]*$/;
 // attachment spacing, near-always tight regardless of the file’s actual
 // rule-to-rule convention, and counting it lets a handful of commented
 // rules outvote that convention.
+//
+// Memoized per container for one run, by node identity. By the time a second
+// residual asks, the container already holds the residuals this run inserted
+// (each carrying this very separator), so a fresh tally would be counting its
+// own output.
+let separatorCache = new WeakMap();
+
 function typicalSeparator(container) {
+  const cached = separatorCache.get(container);
+  if (cached !== undefined) return cached;
+
+  const computed = computeTypicalSeparator(container);
+  separatorCache.set(container, computed);
+  return computed;
+}
+
+function computeTypicalSeparator(container) {
   const counts = new Map();
   for (let i = 1; i < container.nodes.length; i++) {
     if (container.nodes[i - 1].type === 'comment') continue;
@@ -456,9 +492,9 @@ export function dedupRoot(root, options = {}) {
 }
 
 function consolidateRoot(root, options = {}) {
-  // The subject-identity memoization is per run: fresh here, reused across
-  // this run’s fixed-point passes, never carried over to the next style sheet
-  resetSubjectIdentities();
+  // The memoization is per run: fresh here, reused across this run’s
+  // fixed-point passes, never carried over to the next style sheet
+  resetCaches();
 
   // Taken before any mutation, so it reflects the file as it stood on disk—
   // byte counts, not character counts, since the effectiveness this measures
@@ -564,12 +600,18 @@ function consolidateRoot(root, options = {}) {
   // intervening threat, since it’s being absorbed into the same coordinated
   // merge rather than staying behind.
   function findBlockingRule(scope, distinctRules, exemptRules, firstIndex, lastIndex, propNormalized) {
-    const groupSelectors = distinctRules.flatMap(rule => splitSelectors(rule.selector));
-    for (const [index, rule] of scope.rules.entries()) {
-      if (index <= firstIndex || index >= lastIndex || exemptRules.has(rule)) continue;
+    // Only the rules actually inside the span can block—walking the whole
+    // scope to skip everything outside it made this quadratic in the scope’s
+    // rule count. The group’s own selector list is likewise only needed once
+    // something in that span conflicts, which is the rare case.
+    let groupSelectors = null;
+    for (let index = firstIndex + 1; index < lastIndex; index++) {
+      const rule = scope.rules[index];
+      if (exemptRules.has(rule)) continue;
       const conflict = rule.nodes.find(node => node.type === 'decl' && propertiesOverlap(propOf(node.prop), propNormalized));
       if (!conflict) continue;
 
+      groupSelectors ??= distinctRules.flatMap(groupRule => splitSelectors(groupRule.selector));
       const candidateSelectors = splitSelectors(rule.selector);
       // The (memoized, cheap) heuristic goes first: In aggressive mode it
       // clears most pairs, saving the exclusivity proof’s full selector parse
@@ -645,14 +687,14 @@ function consolidateRoot(root, options = {}) {
         applied.push({
           scope: scope.label,
           key: splitSelectors(target.selector).join(', '),
-          selectors: splitSelectors(target.selector),
+          selectors: ownSelectors(target.selector),
           folded: true,
         });
         merged = true;
       }
 
       if (merged) {
-        applied.push(...removeRedundantDuplicates(target, scope.label, splitSelectors(target.selector)));
+        applied.push(...removeRedundantDuplicates(target, scope.label, ownSelectors(target.selector)));
       }
     }
   }
@@ -1295,7 +1337,7 @@ function consolidateRoot(root, options = {}) {
     const scopes = aggressive ? collectMergedScopes(root) : collectScopes(root);
     for (const scope of scopes) {
       for (const rule of eligibleRules(scope, ignorePatterns)) {
-        applied.push(...removeRedundantDuplicates(rule, scope.label, splitSelectors(rule.selector)));
+        applied.push(...removeRedundantDuplicates(rule, scope.label, ownSelectors(rule.selector)));
       }
     }
     for (const atrule of collectDeclOnlyContainers(root)) {

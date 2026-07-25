@@ -1,5 +1,5 @@
 // Benchmarks the engine’s two entry points against real (or generated) style
-// sheets: `npm run bench`, optionally with file or directory arguments.
+// sheets: `npm run benchmark`, optionally with file or directory arguments.
 //
 // Consolidation is superlinear in a scope’s rule count—the merge-safety scan
 // looks at every rule between a duplicate group’s first and last

@@ -1361,13 +1361,26 @@ function consolidateRoot(root, options = {}) {
 // style sheet alongside a source map. Consolidation shifts the positions
 // that map records, so it stops describing the file—reported (here and by
 // the CLI), never removed or regenerated.
-const RE_SOURCE_MAP = /\/\*#\s*sourceMappingURL=/;
+const RE_SOURCE_MAP = /^#\s*sourceMappingURL=/;
+
+// Matched against parsed comments rather than the raw text: The same string
+// sitting in a declaration value (`content: "/*# sourceMappingURL=… */"`)
+// parses as a value, not an annotation, and mustn’t count as one
+function referencesSourceMap(root) {
+  let found = false;
+  root.walkComments(comment => {
+    if (!RE_SOURCE_MAP.test(comment.text)) return undefined;
+    found = true;
+    return false;
+  });
+  return found;
+}
 
 export function dedup(css, options = {}) {
   const root = postcss.parse(css, { from: options.from });
   const result = dedupRoot(root, options);
   // Only a rewrite invalidates the map: A run that applied nothing (or had
   // its consolidation withheld) leaves the style sheet exactly as it was
-  const stale = result.applied.length > 0 && RE_SOURCE_MAP.test(css);
+  const stale = result.applied.length > 0 && referencesSourceMap(root);
   return { css: root.toString(), ...result, ...(stale && { sourceMapStale: true }) };
 }

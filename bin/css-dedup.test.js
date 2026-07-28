@@ -2436,6 +2436,9 @@ describe('CLI', () => {
     assert.equal(dedup(`.a { color: red; }${annotation}`).sourceMapStale, undefined);
     // Rewritten, but no map to invalidate
     assert.equal(dedup('.a { color: red; }\n.b { color: red; }\n').sourceMapStale, undefined);
+    // An annotation-shaped string in a declaration value is a value, not an
+    // annotation—it parses as one, so it can’t stand in for a real reference
+    assert.equal(dedup('.a { content: "/*# sourceMappingURL=fake.map */"; color: red; }\n.b { color: red; }\n').sourceMapStale, undefined);
     // Withheld consolidations leave the style sheet untouched, too
     const withheld = dedup(`${cssGrowing}${annotation}`, { savingsOnly: true });
     assert.ok(withheld.withheld);

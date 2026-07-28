@@ -27,7 +27,8 @@
     }
   },
   "files": [
-    "bin/css-dedup.js",
+    "bin",
+    "!bin/css-dedup.test.js",
     "src",
     "!src/index.test.ts",
     "!src/plugin.test.js"
@@ -62,5 +63,5 @@
   },
   "type": "module",
   "types": "src/index.d.ts",
-  "version": "1.9.0"
+  "version": "1.10.0"
 }

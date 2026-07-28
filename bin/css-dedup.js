@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { parseArgs, styleText } from 'node:util';
 import { resolve, relative, join, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { analyze, dedup } from '../src/index.js';
-import { declarationKey } from '../src/normalization.js';
+import { computeFilePass, describePassError, aggressiveKeySpelling } from './file-pass.js';
+import { runPool, shouldParallelize } from './pool.js';
 
 // Directories skipped when recursing into a target directory
 const DIRS_IGNORED = new Set(['node_modules']);
@@ -69,7 +69,10 @@ Options:
   -e, --no-exit-zero               Override \`exitZero: true\` from a config file for the respective run
   -q, --quiet                      Suppress the per-file findings/skipped-group detail listing (and its file-path header); summaries still print
   -c, --config <path>              Path to a config file (defaults to \`css-dedup.config.js\` in the working directory, if present)
-  -h, --help                       Show this help`);
+  -h, --help                       Show this help
+
+Environment:
+  CSS_DEDUP_WORKERS  Number of worker threads for multi-file runs (\`0\` or \`1\` to process files one at a time); defaults to one per core, minus one for the main thread`);
   process.exit(values.help ? 0 : 1);
 }
 
@@ -298,20 +301,6 @@ function formatOutcomeBullet({ countLabel, tense, filesShrinkLen, shrinkTotal, f
   return null;
 }
 
-// What `--aggressive` would add on top of this run’s real outcome, measured
-// against a discarded opposite-mode pass (`potential`)—shared by `--fix`
-// and report mode, which differ only in which CSS string and `bytes` they
-// compare it against (the written output vs. a discarded dry run)
-function computeAggressivePreview(potential, resultCss, applied, bytes) {
-  const aggDiffers = Boolean(potential && potential.css !== resultCss);
-  if (!aggDiffers) return { aggExtra: 0, aggExtraSaved: 0, aggDiffers: false };
-  return {
-    aggExtra: potential.applied.length - applied.length,
-    aggExtraSaved: potential.bytes.saved - bytes.saved,
-    aggDiffers: true,
-  };
-}
-
 // The “in aggressive mode” preview bullet, shared by `--fix` and report
 // mode—always still-hypothetical, so always `formatReduceClause()`’s
 // present-tense phrasing even inside a `--fix` run. `baseSaved` is the base
@@ -329,8 +318,8 @@ function formatAggressivePreviewLine(aggExtra, aggExtraSaved, before, baseSaved)
 function buildStats({ findings, applied, skipped, bytes, withheld, aggExtra, aggExtraSaved, aggDiffers }) {
   return {
     findings,
-    applied: applied.length,
-    skipped: skipped.length,
+    applied,
+    skipped,
     bytesBefore: bytes.before,
     bytesSaved: bytes.saved,
     withheldCount: withheld ? withheld.count : 0,
@@ -382,80 +371,64 @@ function printFindings(findings) {
 // many files that summary doesn’t speak for
 const RESULT_ERRORED = { exitFailure: true, errored: true, stats: null };
 
-// Processes one target (a file path, or `-` for STDIN) and returns
-// `{ exitFailure, errored, stats }`: `exitFailure` is whether it should
-// count against the process’s exit code, `errored` whether it never
-// produced stats (read/parse failure), and `stats` the per-file numbers the
-// overall summary aggregates across a multi-file run. In `--fix` mode,
-// STDIN is a special case: There is no file to rewrite in place, so the
-// consolidated CSS is printed to STDOUT instead—and, so that stream stays
-// pipeable, the usual status/summary lines go to STDERR rather than STDOUT.
-async function processTarget(file, options, { multi }, preread) {
+// The label a target is reported under: its resolved path, or `(stdin)`
+function targetLabel(file) {
+  return file === '-' ? '(stdin)' : resolve(file);
+}
+
+// Reads one target, returning the same `{ css }` / `{ err }` shape
+// `prefetchContents()` produces—so a target that was prefetched and one that
+// wasn’t (STDIN) reach `renderTarget()` looking identical
+async function readTarget(file, preread) {
+  if (preread) return preread;
+  try {
+    return { css: file === '-' ? await readStdin() : await readFile(resolve(file), 'utf8') };
+  } catch (err) {
+    return { err };
+  }
+}
+
+// Prints one target’s report from an already-computed pass (or from whatever
+// replaced it), and returns `{ exitFailure, errored, stats }`: `exitFailure`
+// is whether it should count against the process’s exit code, `errored`
+// whether it never produced stats (read/parse failure), and `stats` the
+// per-file numbers the overall summary aggregates across a multi-file run.
+//
+// Every line of a run’s output goes through here, on the main thread, in file
+// order—whether the pass itself ran here or on a worker.
+function renderTarget(file, { multi }, outcome) {
   const isStdin = file === '-';
-  const label = isStdin ? '(stdin)' : resolve(file);
+  const label = targetLabel(file);
 
   if (multi && !values.quiet) console.log(styleText('bold', label));
 
-  let css;
-  if (preread) {
-    if (preread.err) {
-      console.error(styleText('red', `Could not read ${label}: ${preread.err.message}`));
-      return RESULT_ERRORED;
-    }
-    css = preread.css;
-  } else {
-    try {
-      css = isStdin ? await readStdin() : await readFile(label, 'utf8');
-    } catch (err) {
-      console.error(styleText('red', `Could not read ${label}: ${err.message}`));
-      return RESULT_ERRORED;
-    }
+  if (outcome.readError) {
+    console.error(styleText('red', `Could not read ${label}: ${outcome.readError.message}`));
+    return RESULT_ERRORED;
   }
-
-  const targetOptions = { ...options, from: isStdin ? undefined : label };
-
   // A file that fails to parse (invalid CSS, or a non-standard dialect
   // PostCSS doesn’t accept) shouldn’t take the rest of the run down with it
-  try {
-    return await processCss(css, targetOptions, { isStdin, label, multi });
-  } catch (err) {
-    if (err.name === 'CssSyntaxError') {
-      console.error(styleText('red', err.message));
-      console.error(err.showSourceCode());
+  if (outcome.error) {
+    if (outcome.error.syntax) {
+      console.error(styleText('red', outcome.error.message));
+      console.error(outcome.error.sourceCode);
     } else {
-      console.error(styleText('red', `Error processing ${label}: ${err.message}`));
+      console.error(styleText('red', `Error processing ${label}: ${outcome.error.message}`));
     }
     return RESULT_ERRORED;
   }
+
+  return renderFilePass(outcome.payload, { isStdin, label, multi });
 }
 
-// The opposite-mode consolidation of the same source—a second, discarded
-// pass serving as the aggressive preview on default runs, and as the
-// default-mode baseline that measures what rode on the flag on aggressive
-// runs
-function oppositePass(css, targetOptions) {
-  return dedup(css, { ...targetOptions, aggressive: !targetOptions.aggressive });
-}
-
-// A skipped group’s key as the aggressive pass would spell it: Aggressive
-// normalization can rewrite the default spelling (`hsl()` onto hex,
-// `word-wrap` onto `overflow-wrap`), so matching the default spelling alone
-// would hint at groups the aggressive pass also skips. Selector-list keys
-// (blocked same-selector folds) carry no `prop: value` shape and pass
-// through unchanged.
-function aggressiveKeySpelling(key) {
-  const important = key.endsWith(' !important');
-  const base = important ? key.slice(0, -' !important'.length) : key;
-  const separator = base.indexOf(': ');
-  if (separator === -1) return key;
-  return declarationKey(base.slice(0, separator), base.slice(separator + 2), important, true);
-}
-
-// The scope + key identities of the groups the aggressive pass still skipped,
-// as one Set—so the “may merge” hint check below is a lookup, not a scan of
-// the whole skipped list per printed line
-function skippedWithAggressive(potential) {
-  return potential ? new Set(potential.skipped.map(item => `${item.scope}\0${item.key}`)) : null;
+// Computes one target’s pass on this thread, in the same `{ payload }` /
+// `{ error }` shape a worker sends back
+async function runFilePass(css, options, { isStdin, label }) {
+  try {
+    return { payload: await computeFilePass(css, options, { fix: values.fix, quiet: values.quiet, isStdin, label }) };
+  } catch (err) {
+    return { error: describePassError(err) };
+  }
 }
 
 // One skipped-group line, for fix and report mode alike—with the “may merge
@@ -545,63 +518,11 @@ function shiftColumns(columns, offset) {
   return new Set([...columns].map(i => i + offset));
 }
 
-// Keeps only what the report table (single-file and all-files alike) needs
-// from a `dedup()` result—not the rewritten CSS text itself, which a
-// multi-file run would otherwise hold onto for every file for no reason.
-// `unavailable` is the one question every `n/a` cell in the table asks:
-// would this pass actually write anything? `applied.length === 0` answers
-// it directly, covering every way the answer can be “no” in one
-// check—nothing found, every finding unsafe to auto-merge, or the
-// `savingsOnly` gate declining a real merge for growing the file (each of
-// which already leaves `applied` empty, by construction, before this ever
-// looks at it)—rather than this needing to separately ask about findings
-// counts and the gate.
-function slimPass(pass) {
-  return { bytes: pass.bytes, unavailable: pass.applied.length === 0 };
-}
-
-// Mirrors `dedupRoot()`’s `savingsOnly` gate (`src/index.js`) against an
-// already-computed plain pass, instead of running `dedup()` a second time
-// with `savingsOnly: true` just to reapply a rule that only ever looks at
-// the first pass’s own `bytes.saved`: a non-negative result is kept as-is
-// (the engine grafts its clone’s changes onto the real root unchanged),
-// a negative one is replaced with the untouched-file outcome, `applied`
-// emptied to match what actually happened (nothing)
-function applySavingsOnlyGate(pass) {
-  if (pass.bytes.saved >= 0) return pass;
-  return {
-    bytes: { before: pass.bytes.before, after: pass.bytes.before, saved: 0 },
-    applied: [],
-  };
-}
-
-// The four passes the report table compares side-by-side, regardless of
-// which flags this run was actually invoked with—`--aggressive` and
-// `--savings-only` describe table columns here, not run modes. Only two
-// actually run `dedup()`; the `-s` variants are derived from those in JS
-// (see `applySavingsOnlyGate()`), since a second full consolidation pass
-// would just reproduce the first one’s `bytes` before the gate looks at them.
-function computeReportPasses(css, targetOptions) {
-  const passDefault = dedup(css, { ...targetOptions, aggressive: false, savingsOnly: false });
-  const passAgg = dedup(css, { ...targetOptions, aggressive: true, savingsOnly: false });
-  return {
-    passDefault,
-    passDefaultS: applySavingsOnlyGate(passDefault),
-    passAgg,
-    passAggS: applySavingsOnlyGate(passAgg),
-  };
-}
-
-function buildReportStats({ label, findingsDefault, findingsAgg, passDefault, passDefaultS, passAgg, passAggS }) {
-  return {
-    label,
-    findingsDefault,
-    findingsAgg,
-    passDefault: slimPass(passDefault),
-    passDefaultS: slimPass(passDefaultS),
-    passAgg: slimPass(passAgg),
-    passAggS: slimPass(passAggS),
-  };
+// The report table’s per-row data: the four already-slimmed passes
+// `computeFilePass()` produced (see `slimPass()` there), under the label this
+// thread knows the file by
+function buildReportStats(label, { findingsDefault, findingsAgg, passes }) {
+  return { label, findingsDefault, findingsAgg, ...passes };
 }
 
 // A row’s four savings passes as `{ saved, unavailable }`, the shape
@@ -771,43 +692,23 @@ function renderReportTable(header, rows, { wrapColumn = -1, rowHighlights } = {}
 
 const REPORT_LEGEND = 'Legend: -f: --fix, -a: --aggressive, -s: --savings-only';
 
-async function processCss(css, targetOptions, { isStdin, label, multi }) {
-  if (values.fix) {
-    const potential = targetOptions.aggressive ? null : oppositePass(css, targetOptions);
-    const skippedAggressive = skippedWithAggressive(potential);
-
-    // `savingsOnly` is the engine’s gate (see `dedupRoot()`): A withheld
-    // result arrives as the untouched style sheet, with `applied` empty and
-    // the declined outcome under `withheld`
-    const { css: output, applied, skipped, bytes, withheld, sourceMapStale } = dedup(css, targetOptions);
+// Prints one file’s report from the payload `computeFilePass()` produced,
+// wherever it ran. Everything here is formatting and terminal state—no
+// consolidation, no file I/O beyond STDIN’s pass-through below.
+function renderFilePass(payload, { isStdin, label, multi }) {
+  if (payload.mode === 'fix') {
+    const { applied, skipped, skippedAggressive, bytes, withheld, sourceMapStale, aggressiveDiffers, aggressiveOnly, aggExtra, aggExtraSaved, aggDiffers } = payload;
     const log = isStdin ? console.error : console.log;
     // A multi-file run’s overall summary needs each file’s label restated on
     // its own summary line—by the time the run ends, the header this file
     // printed at the top of its report may already be out of scrollback
     const summaryLabel = multi ? `Summary for ${label}: ` : '';
 
-    // Whether anything actually rode on the flag—measured by comparing
-    // output against a discarded default-mode pass, never by entry counts:
-    // One aggressive cross-block or alias fold can absorb what the default
-    // pass would have done in more, separate merges, so a count delta can be
-    // zero or negative on a run whose merges were entirely aggressive-only.
-    // The count survives only as the message’s detail, where it’s positive.
-    let aggressiveDiffers = false;
-    let aggressiveOnly = 0;
-    if (targetOptions.aggressive && applied.length) {
-      const baseline = oppositePass(css, targetOptions);
-      aggressiveDiffers = output !== baseline.css;
-      aggressiveOnly = Math.max(applied.length - baseline.applied.length, 0);
-    }
-
-    // STDOUT must always carry the complete style sheet for STDIN input—
-    // even with nothing consolidated (or everything withheld), a pipeline
-    // consuming it would otherwise receive nothing and lose the CSS entirely
-    if (isStdin) {
-      process.stdout.write(output);
-    } else if (applied.length) {
-      await writeFile(label, output);
-    }
+    // The consolidated style sheet for STDIN input, which has no file to be
+    // rewritten in place (see `computeFixPass()`). It goes out before any of
+    // the status lines below, which is also why those go to STDERR here: so
+    // STDOUT stays a clean, pipeable style sheet.
+    if (payload.stdout !== null) process.stdout.write(payload.stdout);
 
     // Detail (what was skipped, and why) prints before the counts—so a long
     // skipped list can’t push the outcome off-screen and out of scrollback,
@@ -824,9 +725,9 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
     if (withheld) {
       log(`* 0 declarations consolidated, ${withheld.count} withheld: \`savingsOnly\` left this file untouched—consolidating would ${formatByteDeltaClause(withheld.bytes.saved, withheld.bytes.before)}`);
     } else {
-      log(`* ${applied.length} declaration${applied.length !== 1 ? 's' : ''} consolidated${applied.length ? `: ${formatAppliedReduceClause(bytes)}` : ''}`);
+      log(`* ${applied} declaration${applied !== 1 ? 's' : ''} consolidated${applied ? `: ${formatAppliedReduceClause(bytes)}` : ''}`);
     }
-    if (applied.length) {
+    if (applied) {
       if (bytes.saved < 0) {
         log('* Worth it for maintainability (each declaration used once); skip `--fix` here if you care more about transfer size.');
       }
@@ -836,7 +737,7 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
           : 'Some of these merges are';
         log(styleText('yellow', `* ${share} aggressive-only—probably, but not provably, safe. Review the diff and test the affected pages.`));
       }
-      if (!isStdin) log(`* Wrote ${label}`);
+      if (payload.wrote) log(`* Wrote ${label}`);
       if (sourceMapStale) {
         log(styleText('yellow', `* ${isStdin ? 'This style sheet' : label} references a source map (\`sourceMappingURL\`); \`--fix\` doesn’t regenerate it, so the map no longer describes this file and should be rebuilt. To keep maps intact, run CSS Dedup before your minifier, or in-pipeline via \`css-dedup/plugin\`.`));
       }
@@ -845,75 +746,49 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
       log(styleText('yellow', `* ${skipped.length} finding${skipped.length !== 1 ? 's' : ''} skipped (considered unsafe to auto-merge)`));
     }
     // What `--aggressive` would actually change on disk, measured against
-    // this run’s real outcome: `potential` went through the same
-    // `savingsOnly` gate as this run, so an aggressive result the re-run
-    // would withhold compares equal to the untouched style sheet and earns
-    // no hint
-    const { aggExtra, aggExtraSaved, aggDiffers } = computeAggressivePreview(potential, output, applied, bytes);
+    // this run’s real outcome: the discarded opposite-mode pass it was
+    // compared against went through the same `savingsOnly` gate as this run,
+    // so an aggressive result the re-run would withhold compares equal to the
+    // untouched style sheet and earns no hint
     if (aggDiffers) log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before, bytes.saved));
 
     return {
       exitFailure: skipped.length > 0 || Boolean(withheld),
       errored: false,
-      stats: buildStats({ findings: null, applied, skipped, bytes, withheld, aggExtra, aggExtraSaved, aggDiffers }),
+      stats: buildStats({ findings: null, applied, skipped: skipped.length, bytes, withheld, aggExtra, aggExtraSaved, aggDiffers }),
     };
   }
 
-  // Report mode always compares the default and aggressive variants side by
-  // side (see the summary table below)—`--aggressive`/`--savings-only` name
-  // table columns here, not a mode to switch into (bare `--aggressive`
-  // without `--fix` is rejected above, before this point, for exactly that
-  // reason). The four `dedup()` combinations this needs are deferred past
-  // the all-clean shortcut just below, though: For the common case of
-  // scanning a directory of already-clean files, there’s nothing for them
-  // to find, so running them at all would just be four wasted consolidation
-  // passes over a style sheet already known to have no duplicates.
-  const findingsDefault = analyze(css, { ...targetOptions, aggressive: false }).findings;
-  const findingsAgg = analyze(css, { ...targetOptions, aggressive: true }).findings;
-
-  if (!findingsDefault.length && !findingsAgg.length) {
+  if (payload.clean) {
     console.log('No duplicate declarations found.');
-    const before = Buffer.byteLength(css, 'utf8');
-    const zeroPass = { bytes: { before, after: before, saved: 0 }, applied: [] };
-    return {
-      exitFailure: false,
-      errored: false,
-      stats: buildReportStats({ label, findingsDefault: 0, findingsAgg: 0, passDefault: zeroPass, passDefaultS: zeroPass, passAgg: zeroPass, passAggS: zeroPass }),
-    };
+    return { exitFailure: false, errored: false, stats: buildReportStats(label, payload) };
   }
 
-  const { passDefault, passDefaultS, passAgg, passAggS } = computeReportPasses(css, targetOptions);
-
-  // A style sheet clean under default rules but with something aggressive
-  // mode would additionally catch (the table’s `Findings -f (-a)` column
-  // showing e.g. `0 (1)`) still gets its one duplicate group listed in
-  // detail—otherwise the table’s aggressive columns would quote a byte
-  // figure for a finding the reader can’t actually see anywhere
   // `--quiet` drops both detail blocks below: The report table that follows
-  // already gives the finding/savings counts on their own.
-  if (!values.quiet) {
-    if (findingsDefault.length) printFindings(findingsDefault);
-    else if (findingsAgg.length) printFindings(findingsAgg);
+  // already gives the finding/savings counts on their own—which is why
+  // `computeReportPass()` leaves them out of the payload entirely then
+  if (payload.findings) {
+    printFindings(payload.findings);
 
     // Findings above don’t distinguish safe from unsafe—without this, a
     // duplicate group that `--fix` would just skip (see its own safety
     // checks) reads as if nothing follows from it at all, when there’s a
     // concrete, explainable reason it wasn’t offered as a `--fix` win
-    logSkippedDetail(console.log, passDefault.skipped, skippedWithAggressive(passAgg));
+    logSkippedDetail(console.log, payload.skipped, payload.skippedAggressive);
   }
 
   // Summary and `--fix` payoff close each style sheet’s report. The label is
   // always restated here (even for a single file): by the time a long run
   // ends, the per-file header printed above may already be out of scrollback.
   console.log(styleText('bold', `Summary for ${label}:`));
-  const stats = buildReportStats({ label, findingsDefault: findingsDefault.length, findingsAgg: findingsAgg.length, passDefault, passDefaultS, passAgg, passAggS });
+  const stats = buildReportStats(label, payload);
   const header = ['Findings -f (-a)', 'Savings with: -f', '-f -s', '-f -a', '-f -a -s'];
   const rowHighlights = [shiftColumns(bestSavingsColumns(reportSavingsPasses(stats)), 1)];
   for (const line of renderReportTable(header, [reportRowValues(stats)], { rowHighlights })) console.log(line);
   console.log(REPORT_LEGEND);
 
   return {
-    exitFailure: findingsDefault.length > 0,
+    exitFailure: payload.findingsDefault > 0,
     errored: false,
     stats,
   };
@@ -1075,25 +950,66 @@ async function main() {
 
   const multi = files.length > 1;
   const prefetched = await prefetchContents(files);
-  let failed = false;
   const results = [];
 
-  for (const [index, file] of files.entries()) {
+  // One target’s rendering, in file order—the single place a result reaches
+  // the terminal, whether its pass ran here or on a worker
+  const render = (index, outcome) => {
     // A blank line between per-file reports, so each file’s closing summary
     // is visually separated from the next file’s header
     if (multi && index > 0) console.log('');
-    const result = await processTarget(file, options, { multi }, prefetched[index]);
-    // `--exit-zero` never changes what got merged—only what a finding
-    // (skipped as unsafe, or withheld by `--savings-only`) does to the exit
-    // code. A file that couldn’t be read or parsed is a real failure, and
-    // stays one regardless of the flag.
-    if (result.exitFailure && !(exitZero && !result.errored)) failed = true;
-    results.push(result);
+    results.push(renderTarget(files[index], { multi }, outcome));
+  };
+
+  // A run big enough to pay for a pool computes its files across worker
+  // threads; anything smaller (and STDIN, which never reaches here alongside
+  // other targets) stays on this one. Both paths run the same
+  // `computeFilePass()` over the same input and hand the same payload to the
+  // same renderer, so the two differ in timing only.
+  const totalSize = sumBy(prefetched, entry => entry?.css?.length ?? 0);
+  const parallel = !files.includes('-') && shouldParallelize(files.length, totalSize);
+
+  if (parallel) {
+    const slots = files.map((file, index) => {
+      const preread = prefetched[index];
+      if (preread.err) return { outcome: { readError: preread.err } };
+      return { css: preread.css, label: targetLabel(file) };
+    });
+    const settings = { options, fix: values.fix, quiet: values.quiet };
+    // Nothing has been printed at this point, so a pool that can’t start at
+    // all (see `runPool()`) can still fall through to the sequential path
+    // without having produced half a run’s output first
+    try {
+      await runPool(slots, settings, render);
+    } catch (err) {
+      if (results.length) throw err;
+      await runSequentially(files, options, prefetched, render);
+    }
+  } else {
+    await runSequentially(files, options, prefetched, render);
   }
 
   if (multi) printOverallSummary(results, { fix: values.fix });
 
-  if (failed) process.exitCode = 1;
+  // `--exit-zero` never changes what got merged—only what a finding
+  // (skipped as unsafe, or withheld by `--savings-only`) does to the exit
+  // code. A file that couldn’t be read or parsed is a real failure, and
+  // stays one regardless of the flag.
+  if (results.some(result => result.exitFailure && !(exitZero && !result.errored))) process.exitCode = 1;
+}
+
+// One file at a time on this thread: compute, then render, then move on—so a
+// long run’s output appears as it goes rather than all at the end
+async function runSequentially(files, options, prefetched, render) {
+  for (const [index, file] of files.entries()) {
+    const isStdin = file === '-';
+    const read = await readTarget(file, prefetched[index]);
+    if (read.err) {
+      render(index, { readError: read.err });
+      continue;
+    }
+    render(index, await runFilePass(read.css, options, { isStdin, label: targetLabel(file) }));
+  }
 }
 
 main().catch(err => {

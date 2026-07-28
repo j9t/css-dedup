@@ -47,6 +47,7 @@ const RE_PAYOFF_FIX = /Findings -f \(-a\).*\n\d+ \(\d+\) {2,}-[\d.]+ (?:B|KB|MB)
 // default-mode finding count without caring what the table’s other columns say
 const findingsRow = n => new RegExp(`\\n${n} \\(\\d+\\) `);
 const RE_SYNTAX_ERROR = /Unknown word/;
+const RE_SYNTAX_ERROR_UNCLOSED = /Unclosed block/;
 
 function run(args, spawnOptions = {}) {
   const result = spawnSync('node', [scriptPath, ...args], { encoding: 'utf-8', timeout: 30_000, ...spawnOptions });
@@ -2720,5 +2721,120 @@ describe('Quiet mode', () => {
     const { stdout, status } = run(['--help']);
     assert.strictEqual(status, 0);
     assert.ok(stdout.includes('-q, --quiet'));
+  });
+});
+// A parallel run must be a timing change and nothing else, so every test here
+// is a comparison against the same run forced onto one thread
+// (`CSS_DEDUP_WORKERS=0`) rather than an assertion about particular output—the
+// rest of this file already pins down what that output says
+describe('Parallel runs', () => {
+  // Enough files, findings, and skipped groups per file to exercise every
+  // detail block—and, at four files, to clear the pool’s own file-count floor
+  const cssPerFile = [
+    '.a { color: red; }',
+    '.b { color: red; }',
+    '@media print { .c { margin: 0; } .d { margin: 0; } }',
+    '.e { transform: rotate(90deg); }',
+    '.unrelated:hover { color: blue; }',
+    '.f { transform: rotate(100grad); }',
+    '',
+  ].join('\n');
+
+  function withCorpus(name, fileCount, fn) {
+    const dirTemp = path.join(__dirname, '..', 'test', `temp_parallel_${name}`);
+    fs.rmSync(dirTemp, { recursive: true, force: true });
+    fs.mkdirSync(dirTemp, { recursive: true });
+    for (let i = 0; i < fileCount; i++) {
+      fs.writeFileSync(path.join(dirTemp, `sheet-${i}.css`), cssPerFile);
+    }
+    try {
+      return fn(dirTemp);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  }
+
+  const runWithWorkers = (workers, args) => run(args, { env: { ...process.env, CSS_DEDUP_WORKERS: String(workers) } });
+
+  // Both paths run over their own copy of the corpus, so `--fix` writes don’t
+  // leave the second run nothing to do
+  function compare(name, fileCount, args) {
+    const sequential = withCorpus(`${name}_seq`, fileCount, dir => ({ dir, ...runWithWorkers(0, [...args, dir]), files: readAll(dir) }));
+    const parallel = withCorpus(`${name}_par`, fileCount, dir => ({ dir, ...runWithWorkers(4, [...args, dir]), files: readAll(dir) }));
+    return { sequential, parallel };
+  }
+
+  // Keyed by name rather than full path, which differs between the two copies
+  function readAll(dir) {
+    return Object.fromEntries(fs.readdirSync(dir).sort().map(name => [name, fs.readFileSync(path.join(dir, name), 'utf8')]));
+  }
+
+  // The two runs report their own directory’s paths, so those are normalized
+  // away before the outputs are compared verbatim
+  function assertSameRun({ sequential, parallel }) {
+    const normalize = ({ dir }, text) => text.split(dir).join('<dir>');
+    assert.strictEqual(normalize(parallel, parallel.stdout), normalize(sequential, sequential.stdout));
+    assert.strictEqual(normalize(parallel, parallel.stderr), normalize(sequential, sequential.stderr));
+    assert.strictEqual(parallel.status, sequential.status);
+    assert.deepStrictEqual(parallel.files, sequential.files);
+  }
+
+  test('Report mode: output is identical to the same run on one thread', () => {
+    const results = compare('report', 6, []);
+    assert.ok(results.parallel.stdout.includes('Summary for all files:'));
+    assertSameRun(results);
+  });
+
+  test('`--fix`: output and the files written are identical to the same run on one thread', () => {
+    const results = compare('fix', 6, ['--fix']);
+    assert.ok(results.parallel.stdout.includes('* Wrote '));
+    assertSameRun(results);
+  });
+
+  test('`--fix --aggressive` and `--fix --savings-only`: identical to the same runs on one thread', () => {
+    assertSameRun(compare('fix_agg', 6, ['--fix', '--aggressive']));
+    assertSameRun(compare('fix_savings', 6, ['--fix', '--savings-only']));
+  });
+
+  test('`--quiet`: identical to the same run on one thread', () => {
+    assertSameRun(compare('quiet', 6, ['--quiet']));
+  });
+
+  test('Per-file reports stay in file order, however the workers finish', () => {
+    withCorpus('order', 8, dir => {
+      const { stdout } = runWithWorkers(4, [dir]);
+      const headers = stdout.split('\n').filter(line => line.startsWith(dir)).map(line => path.basename(line.trim()));
+      assert.deepStrictEqual(headers, fs.readdirSync(dir).sort());
+    });
+  });
+
+  // A file that fails keeps its place in the output and its effect on the exit
+  // code, rather than surfacing wherever its worker happened to give up
+  test('A file that fails to parse fails only itself, in place', () => {
+    const dirTemp = path.join(__dirname, '..', 'test', 'temp_parallel_broken');
+    fs.rmSync(dirTemp, { recursive: true, force: true });
+    fs.mkdirSync(dirTemp, { recursive: true });
+    for (const name of ['a.css', 'b.css', 'c.css', 'e.css']) {
+      fs.writeFileSync(path.join(dirTemp, name), cssPerFile);
+    }
+    fs.writeFileSync(path.join(dirTemp, 'd.css'), 'a { color: red;\n');
+
+    try {
+      const sequential = runWithWorkers(0, [dirTemp]);
+      const parallel = runWithWorkers(4, [dirTemp]);
+      assert.strictEqual(parallel.status, 1);
+      assert.ok(parallel.stdout.includes('(1 file could not be processed; see errors above)'));
+      assert.match(parallel.stderr, RE_SYNTAX_ERROR_UNCLOSED);
+      assert.strictEqual(parallel.stdout, sequential.stdout);
+      assert.strictEqual(parallel.stderr, sequential.stderr);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`CSS_DEDUP_WORKERS` is listed in the help text', () => {
+    const { stdout, status } = run(['--help']);
+    assert.strictEqual(status, 0);
+    assert.ok(stdout.includes('CSS_DEDUP_WORKERS'));
   });
 });

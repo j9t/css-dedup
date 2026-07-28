@@ -4,6 +4,16 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-07-28
+
+### Added
+
+* Added `CSS_DEDUP_WORKERS` to override the thread count for a run (`0` or `1` processes files one at a time)
+
+### Changed
+
+* Sped up multi-file runs by spreading consolidation across worker threads (one per core, minus one for the main thread); output is byte-identical to a single-threaded run, since every file is still rendered from the main thread in file order, and runs too small to pay for a pool stay on one thread
+
 ## [1.9.0] - 2026-07-28
 
 ### Fixed

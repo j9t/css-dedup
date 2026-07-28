@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { stripVTControlCharacters } from 'node:util';
+import { availableParallelism } from 'node:os';
+import { shouldParallelize, poolSize } from './pool.js';
 import { analyze, dedup } from '../src/index.js';
 import { normalizeValue } from '../src/normalization.js';
 import { splitSelectors, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint } from '../src/selectors.js';
@@ -2723,13 +2725,15 @@ describe('Quiet mode', () => {
     assert.ok(stdout.includes('-q, --quiet'));
   });
 });
-// A parallel run must be a timing change and nothing else, so every test here
-// is a comparison against the same run forced onto one thread
-// (`CSS_DEDUP_WORKERS=0`) rather than an assertion about particular output—the
-// rest of this file already pins down what that output says
+// A parallel run must be a timing change and nothing else, so these compare
+// against the same run forced onto one thread rather than asserting particular
+// output—the rest of this file already pins down what that output says
 describe('Parallel runs', () => {
-  // Enough files, findings, and skipped groups per file to exercise every
-  // detail block—and, at four files, to clear the pool’s own file-count floor
+  // Kept in step with `css-dedup.js`, which can’t be imported (it parses
+  // `process.argv` on load)
+  const MESSAGE_POOL_FALLBACK = 'Could not start worker threads; processing files one at a time';
+
+  // Enough findings and skipped groups per file to reach every detail block
   const cssPerFile = [
     '.a { color: red; }',
     '.b { color: red; }',
@@ -2740,12 +2744,12 @@ describe('Parallel runs', () => {
     '',
   ].join('\n');
 
-  function withCorpus(name, fileCount, fn) {
+  function withCorpus(name, fileCount, fn, body = () => cssPerFile) {
     const dirTemp = path.join(__dirname, '..', 'test', `temp_parallel_${name}`);
     fs.rmSync(dirTemp, { recursive: true, force: true });
     fs.mkdirSync(dirTemp, { recursive: true });
     for (let i = 0; i < fileCount; i++) {
-      fs.writeFileSync(path.join(dirTemp, `sheet-${i}.css`), cssPerFile);
+      fs.writeFileSync(path.join(dirTemp, `sheet-${i}.css`), body(i));
     }
     try {
       return fn(dirTemp);
@@ -2756,22 +2760,24 @@ describe('Parallel runs', () => {
 
   const runWithWorkers = (workers, args) => run(args, { env: { ...process.env, CSS_DEDUP_WORKERS: String(workers) } });
 
-  // Both paths run over their own copy of the corpus, so `--fix` writes don’t
-  // leave the second run nothing to do
+  // Each path gets its own copy, so `--fix` writes don’t leave the second run
+  // nothing to do
   function compare(name, fileCount, args) {
     const sequential = withCorpus(`${name}_seq`, fileCount, dir => ({ dir, ...runWithWorkers(0, [...args, dir]), files: readAll(dir) }));
     const parallel = withCorpus(`${name}_par`, fileCount, dir => ({ dir, ...runWithWorkers(4, [...args, dir]), files: readAll(dir) }));
     return { sequential, parallel };
   }
 
-  // Keyed by name rather than full path, which differs between the two copies
+  // Keyed by name, since the full path differs between the two copies
   function readAll(dir) {
     return Object.fromEntries(fs.readdirSync(dir).sort().map(name => [name, fs.readFileSync(path.join(dir, name), 'utf8')]));
   }
 
-  // The two runs report their own directory’s paths, so those are normalized
-  // away before the outputs are compared verbatim
+  // Identical output is also what a silent fallback to sequential processing
+  // would produce, so this asserts the pool actually ran—without that, the
+  // suite would stay green with the worker path broken
   function assertSameRun({ sequential, parallel }) {
+    assert.ok(!parallel.stderr.includes(MESSAGE_POOL_FALLBACK), `expected the worker pool to run, but it fell back:\n${parallel.stderr}`);
     const normalize = ({ dir }, text) => text.split(dir).join('<dir>');
     assert.strictEqual(normalize(parallel, parallel.stdout), normalize(sequential, sequential.stdout));
     assert.strictEqual(normalize(parallel, parallel.stderr), normalize(sequential, sequential.stderr));
@@ -2800,16 +2806,81 @@ describe('Parallel runs', () => {
     assertSameRun(compare('quiet', 6, ['--quiet']));
   });
 
+  // The first file is by far the slowest, so it is dispatched first and lands
+  // last, forcing every later result to be buffered. Equally-sized files would
+  // often finish in order and pass without exercising `deliver()` at all.
   test('Per-file reports stay in file order, however the workers finish', () => {
+    const cssSlow = Array.from({ length: 600 }, (_, i) => `.slow-${i} { color: red; margin: 0; padding: 0; }`).join('\n');
     withCorpus('order', 8, dir => {
       const { stdout } = runWithWorkers(4, [dir]);
       const headers = stdout.split('\n').filter(line => line.startsWith(dir)).map(line => path.basename(line.trim()));
       assert.deepStrictEqual(headers, fs.readdirSync(dir).sort());
-    });
+    }, i => (i === 0 ? cssSlow : cssPerFile));
   });
 
-  // A file that fails keeps its place in the output and its effect on the exit
-  // code, rather than surfacing wherever its worker happened to give up
+  // Everything above sets `CSS_DEDUP_WORKERS`, which bypasses both floors—so
+  // without this, the default branch every real run takes goes untested
+  test('Auto: a run over both floors uses the pool with `CSS_DEDUP_WORKERS` unset', () => {
+    // Bytes PostCSS parses but barely consolidates: big without being slow
+    const padding = `/* ${'-'.repeat(50_000)} */\n`;
+    const body = () => padding + cssPerFile;
+    const auto = withCorpus('auto_par', 4, dir => ({ dir, ...run([dir]), files: readAll(dir) }), body);
+    const sequential = withCorpus('auto_seq', 4, dir => ({ dir, ...runWithWorkers(0, [dir]), files: readAll(dir) }), body);
+
+    // Below three cores the run correctly stays sequential, with no pool to
+    // assert about
+    if (poolSize(4) > 1) {
+      assert.ok(shouldParallelize(4, padding.length * 4), 'expected this corpus to clear both automatic floors');
+      assertSameRun({ sequential, parallel: auto });
+    }
+  });
+
+  test('A run under either floor stays on one thread', () => {
+    // Enough files, but nowhere near enough CSS
+    assert.strictEqual(shouldParallelize(60, 191_999), false);
+    // Plenty of CSS, but too few files
+    assert.strictEqual(shouldParallelize(3, 10_000_000), false);
+    // Over both, the answer is whatever the core count allows
+    assert.strictEqual(shouldParallelize(4, 192_000), poolSize(4) > 1);
+  });
+
+  test('`CSS_DEDUP_WORKERS` overrides both the pool size and the floors', () => {
+    const previous = process.env.CSS_DEDUP_WORKERS;
+    try {
+      process.env.CSS_DEDUP_WORKERS = '3';
+      assert.strictEqual(poolSize(10), 3);
+      // Never more workers than there are files to give them
+      assert.strictEqual(poolSize(2), 2);
+      // An explicit setting means it, floors and all
+      assert.strictEqual(shouldParallelize(2, 1), true);
+
+      // `0` and `1` both name the sequential path
+      for (const sequential of ['0', '1']) {
+        process.env.CSS_DEDUP_WORKERS = sequential;
+        assert.strictEqual(shouldParallelize(60, 10_000_000), false);
+      }
+
+      // A value that isn’t a count at all falls back to automatic sizing
+      process.env.CSS_DEDUP_WORKERS = 'lots';
+      assert.strictEqual(poolSize(1000), Math.max(availableParallelism() - 1, 0));
+    } finally {
+      if (previous === undefined) delete process.env.CSS_DEDUP_WORKERS;
+      else process.env.CSS_DEDUP_WORKERS = previous;
+    }
+  });
+
+  test('Auto: the pool leaves one core to the main thread', () => {
+    const previous = process.env.CSS_DEDUP_WORKERS;
+    delete process.env.CSS_DEDUP_WORKERS;
+    try {
+      assert.strictEqual(poolSize(1000), Math.max(availableParallelism() - 1, 0));
+    } finally {
+      if (previous !== undefined) process.env.CSS_DEDUP_WORKERS = previous;
+    }
+  });
+
+  // A failure keeps its place in the output rather than surfacing wherever its
+  // worker happened to give up
   test('A file that fails to parse fails only itself, in place', () => {
     const dirTemp = path.join(__dirname, '..', 'test', 'temp_parallel_broken');
     fs.rmSync(dirTemp, { recursive: true, force: true });

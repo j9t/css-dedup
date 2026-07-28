@@ -376,9 +376,8 @@ function targetLabel(file) {
   return file === '-' ? '(stdin)' : resolve(file);
 }
 
-// Reads one target, returning the same `{ css }` / `{ err }` shape
-// `prefetchContents()` produces—so a target that was prefetched and one that
-// wasn’t (STDIN) reach `renderTarget()` looking identical
+// Same `{ css }` / `{ err }` shape `prefetchContents()` produces, so a
+// prefetched target and STDIN reach `renderTarget()` looking identical
 async function readTarget(file, preread) {
   if (preread) return preread;
   try {
@@ -388,14 +387,12 @@ async function readTarget(file, preread) {
   }
 }
 
-// Prints one target’s report from an already-computed pass (or from whatever
-// replaced it), and returns `{ exitFailure, errored, stats }`: `exitFailure`
-// is whether it should count against the process’s exit code, `errored`
-// whether it never produced stats (read/parse failure), and `stats` the
-// per-file numbers the overall summary aggregates across a multi-file run.
+// Prints one target’s report and returns `{ exitFailure, errored, stats }`:
+// whether it counts against the exit code, whether it never produced stats
+// (read/parse failure), and the numbers the overall summary aggregates
 //
 // Every line of a run’s output goes through here, on the main thread, in file
-// order—whether the pass itself ran here or on a worker.
+// order—whether the pass ran here or on a worker.
 function renderTarget(file, { multi }, outcome) {
   const isStdin = file === '-';
   const label = targetLabel(file);
@@ -421,8 +418,7 @@ function renderTarget(file, { multi }, outcome) {
   return renderFilePass(outcome.payload, { isStdin, label, multi });
 }
 
-// Computes one target’s pass on this thread, in the same `{ payload }` /
-// `{ error }` shape a worker sends back
+// One target’s pass on this thread, in the shape a worker sends back
 async function runFilePass(css, options, { isStdin, label }) {
   try {
     return { payload: await computeFilePass(css, options, { fix: values.fix, quiet: values.quiet, isStdin, label }) };
@@ -518,9 +514,7 @@ function shiftColumns(columns, offset) {
   return new Set([...columns].map(i => i + offset));
 }
 
-// The report table’s per-row data: the four already-slimmed passes
-// `computeFilePass()` produced (see `slimPass()` there), under the label this
-// thread knows the file by
+// The report table’s per-row data, under the label this thread knows the file by
 function buildReportStats(label, { findingsDefault, findingsAgg, passes }) {
   return { label, findingsDefault, findingsAgg, ...passes };
 }
@@ -692,9 +686,12 @@ function renderReportTable(header, rows, { wrapColumn = -1, rowHighlights } = {}
 
 const REPORT_LEGEND = 'Legend: -f: --fix, -a: --aggressive, -s: --savings-only';
 
-// Prints one file’s report from the payload `computeFilePass()` produced,
-// wherever it ran. Everything here is formatting and terminal state—no
-// consolidation, no file I/O beyond STDIN’s pass-through below.
+// Same result, but as slow as a sequential run—worth a word rather than a
+// silent slowdown. Mirrored in the test suite, which asserts on its absence.
+const MESSAGE_POOL_FALLBACK = 'Could not start worker threads; processing files one at a time';
+
+// Formatting and terminal state only—no consolidation, and no file I/O beyond
+// STDIN’s pass-through below
 function renderFilePass(payload, { isStdin, label, multi }) {
   if (payload.mode === 'fix') {
     const { applied, skipped, skippedAggressive, bytes, withheld, sourceMapStale, aggressiveDiffers, aggressiveOnly, aggExtra, aggExtraSaved, aggDiffers } = payload;
@@ -704,10 +701,9 @@ function renderFilePass(payload, { isStdin, label, multi }) {
     // printed at the top of its report may already be out of scrollback
     const summaryLabel = multi ? `Summary for ${label}: ` : '';
 
-    // The consolidated style sheet for STDIN input, which has no file to be
-    // rewritten in place (see `computeFixPass()`). It goes out before any of
-    // the status lines below, which is also why those go to STDERR here: so
-    // STDOUT stays a clean, pipeable style sheet.
+    // STDIN’s consolidated style sheet, which has no file to be rewritten in
+    // place. It goes out before the status lines, which is why those go to
+    // STDERR here—so STDOUT stays a clean, pipeable style sheet.
     if (payload.stdout !== null) process.stdout.write(payload.stdout);
 
     // Detail (what was skipped, and why) prints before the counts—so a long
@@ -745,11 +741,8 @@ function renderFilePass(payload, { isStdin, label, multi }) {
     if (skipped.length) {
       log(styleText('yellow', `* ${skipped.length} finding${skipped.length !== 1 ? 's' : ''} skipped (considered unsafe to auto-merge)`));
     }
-    // What `--aggressive` would actually change on disk, measured against
-    // this run’s real outcome: the discarded opposite-mode pass it was
-    // compared against went through the same `savingsOnly` gate as this run,
-    // so an aggressive result the re-run would withhold compares equal to the
-    // untouched style sheet and earns no hint
+    // The opposite-mode pass this was measured against went through the same
+    // `savingsOnly` gate, so a result the re-run would withhold earns no hint
     if (aggDiffers) log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before, bytes.saved));
 
     return {
@@ -764,9 +757,7 @@ function renderFilePass(payload, { isStdin, label, multi }) {
     return { exitFailure: false, errored: false, stats: buildReportStats(label, payload) };
   }
 
-  // `--quiet` drops both detail blocks below: The report table that follows
-  // already gives the finding/savings counts on their own—which is why
-  // `computeReportPass()` leaves them out of the payload entirely then
+  // Absent under `--quiet`, where the table below already gives the counts
   if (payload.findings) {
     printFindings(payload.findings);
 
@@ -952,8 +943,7 @@ async function main() {
   const prefetched = await prefetchContents(files);
   const results = [];
 
-  // One target’s rendering, in file order—the single place a result reaches
-  // the terminal, whether its pass ran here or on a worker
+  // The single place a result reaches the terminal, in file order
   const render = (index, outcome) => {
     // A blank line between per-file reports, so each file’s closing summary
     // is visually separated from the next file’s header
@@ -961,11 +951,9 @@ async function main() {
     results.push(renderTarget(files[index], { multi }, outcome));
   };
 
-  // A run big enough to pay for a pool computes its files across worker
-  // threads; anything smaller (and STDIN, which never reaches here alongside
-  // other targets) stays on this one. Both paths run the same
-  // `computeFilePass()` over the same input and hand the same payload to the
-  // same renderer, so the two differ in timing only.
+  // A run big enough to pay for a pool spreads across worker threads; anything
+  // smaller (and STDIN, never here alongside other targets) stays on this one.
+  // Both paths feed the same payloads to the same renderer.
   const totalSize = sumBy(prefetched, entry => entry?.css?.length ?? 0);
   const parallel = !files.includes('-') && shouldParallelize(files.length, totalSize);
 
@@ -976,13 +964,15 @@ async function main() {
       return { css: preread.css, label: targetLabel(file) };
     });
     const settings = { options, fix: values.fix, quiet: values.quiet };
-    // Nothing has been printed at this point, so a pool that can’t start at
-    // all (see `runPool()`) can still fall through to the sequential path
-    // without having produced half a run’s output first
     try {
       await runPool(slots, settings, render);
     } catch (err) {
-      if (results.length) throw err;
+      // Only a pool that never started can fall back: it dispatched nothing, so
+      // the run can start over here. A failure once work was under way has
+      // already written files and printed lines, and repeating the set would
+      // duplicate both.
+      if (!err.poolStartFailed) throw err;
+      console.error(styleText('yellow', `${MESSAGE_POOL_FALLBACK} (${err.message})`));
       await runSequentially(files, options, prefetched, render);
     }
   } else {
@@ -998,8 +988,7 @@ async function main() {
   if (results.some(result => result.exitFailure && !(exitZero && !result.errored))) process.exitCode = 1;
 }
 
-// One file at a time on this thread: compute, then render, then move on—so a
-// long run’s output appears as it goes rather than all at the end
+// Compute, render, move on—so a long run’s output appears as it goes
 async function runSequentially(files, options, prefetched, render) {
   for (const [index, file] of files.entries()) {
     const isStdin = file === '-';

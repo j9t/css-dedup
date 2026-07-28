@@ -1,11 +1,6 @@
-// One file’s consolidation work, with nothing printed and nothing formatted.
-//
-// The split exists so the same pass can run either on the main thread or on a
-// worker (see `pool.js`): everything here is pure computation over a CSS
-// string, returning a plain, structured-cloneable payload that `css-dedup.js`
-// renders. Anything that touches color, terminal width, or output order stays
-// on the main thread, so a parallel run prints exactly what a sequential one
-// does.
+// One file’s consolidation work: pure computation over a CSS string, returning
+// a structured-cloneable payload for `css-dedup.js` to render. Split out so the
+// same pass runs on the main thread or on a worker (see `pool.js`).
 
 import { writeFile } from 'node:fs/promises';
 import { analyze, dedup } from '../src/index.js';
@@ -33,9 +28,7 @@ export function aggressiveKeySpelling(key) {
 }
 
 // The scope + key identities of the groups the aggressive pass still skipped,
-// as one Set—so the “may merge” hint check is a lookup, not a scan of the
-// whole skipped list per printed line. A `Set` of strings survives the
-// structured clone to the main thread as-is.
+// so the “may merge” hint check is a lookup rather than a scan per printed line
 function skippedWithAggressive(potential) {
   return potential ? new Set(potential.skipped.map(item => `${item.scope}\0${item.key}`)) : null;
 }
@@ -54,17 +47,11 @@ function computeAggressivePreview(potential, resultCss, applied, bytes) {
   };
 }
 
-// Keeps only what the report table (single-file and all-files alike) needs
-// from a `dedup()` result—not the rewritten CSS text itself, which a
-// multi-file run would otherwise hold onto for every file for no reason (and
-// which a worker would then copy back across the thread boundary for nothing).
-// `unavailable` is the one question every `n/a` cell in the table asks: would
-// this pass actually write anything? `applied.length === 0` answers it
-// directly, covering every way the answer can be “no” in one check—nothing
-// found, every finding unsafe to auto-merge, or the `savingsOnly` gate
-// declining a real merge for growing the file (each of which already leaves
-// `applied` empty, by construction, before this ever looks at it)—rather than
-// this needing to separately ask about findings counts and the gate.
+// Keeps only what the report table needs from a `dedup()` result—not the
+// rewritten CSS, which a worker would otherwise copy back for nothing.
+// `unavailable` answers every `n/a` cell’s one question—would `--fix` touch
+// this file?—since nothing found, nothing safe, and a `savingsOnly` refusal all
+// leave `applied` empty by construction.
 function slimPass(pass) {
   return { bytes: pass.bytes, unavailable: pass.applied.length === 0 };
 }
@@ -101,11 +88,9 @@ function computeReportPasses(css, targetOptions) {
   };
 }
 
-// `--fix`: consolidate, and write the result where there’s a file to write.
-// The write happens here rather than at render time so a parallel run does its
-// I/O on the worker too, and so both paths write through one code path. STDIN
-// has no file to rewrite in place, so its output rides back on the payload for
-// the main thread to put on STDOUT.
+// `--fix`: consolidate, and write where there’s a file to write. The write
+// happens here, not at render time, so a parallel run does its I/O on the
+// worker. STDIN has no file, so its output rides back on the payload.
 async function computeFixPass(css, targetOptions, { isStdin, label }) {
   const potential = targetOptions.aggressive ? null : oppositePass(css, targetOptions);
 
@@ -133,9 +118,8 @@ async function computeFixPass(css, targetOptions, { isStdin, label }) {
 
   return {
     mode: 'fix',
-    // STDOUT must always carry the complete style sheet for STDIN input—
-    // even with nothing consolidated (or everything withheld), a pipeline
-    // consuming it would otherwise receive nothing and lose the CSS entirely
+    // Always the complete style sheet, even with nothing consolidated—a
+    // pipeline would otherwise receive nothing and lose the CSS entirely
     stdout: isStdin ? output : null,
     applied: applied.length,
     skipped,
@@ -185,14 +169,10 @@ function computeReportPass(css, targetOptions, { quiet }) {
     clean: false,
     findingsDefault: findingsDefault.length,
     findingsAgg: findingsAgg.length,
-    // A style sheet clean under default rules but with something aggressive
-    // mode would additionally catch (the table’s `Findings -f (-a)` column
-    // showing e.g. `0 (1)`) still gets its one duplicate group listed in
-    // detail—otherwise the table’s aggressive columns would quote a byte
-    // figure for a finding the reader can’t actually see anywhere.
-    // `--quiet` drops both detail blocks, so neither is computed into the
-    // payload then: they’re the one part of it that grows with the style
-    // sheet, and a worker would otherwise copy every finding back unread.
+    // Falling back to the aggressive findings keeps a `0 (1)` row from quoting
+    // byte figures for a finding the reader can’t see listed anywhere.
+    // `--quiet` prints neither block, so neither is computed—these are the one
+    // part of the payload that grows with the style sheet.
     findings: quiet ? null : (findingsDefault.length ? findingsDefault : findingsAgg),
     skipped: quiet ? [] : passDefault.skipped,
     skippedAggressive: quiet ? null : skippedWithAggressive(passAgg),
@@ -205,20 +185,15 @@ function computeReportPass(css, targetOptions, { quiet }) {
   };
 }
 
-// One file’s complete pass. `label` doubles as PostCSS’s `from` (for source
-// positions in error messages) and as the path `--fix` writes back to.
+// `label` doubles as PostCSS’s `from` and as the path `--fix` writes back to
 export function computeFilePass(css, options, { fix, quiet, isStdin, label }) {
   const targetOptions = { ...options, from: isStdin ? undefined : label };
   if (fix) return computeFixPass(css, targetOptions, { isStdin, label });
   return computeReportPass(css, targetOptions, { quiet });
 }
 
-// A pass failure reduced to just what the CLI prints for it. An `Error` (and
-// PostCSS’s `showSourceCode()`, which renders on demand) wouldn’t survive the
-// structured clone off a worker, so the rendering decision is made here and
-// only the resulting strings travel. PostCSS decides about color itself, as it
-// does on the main thread—see `workerEnv()` in `pool.js` for how a worker is
-// set up to reach the same answer.
+// A failure reduced to the strings the CLI prints—an `Error` and PostCSS’s
+// on-demand `showSourceCode()` wouldn’t survive the clone off a worker
 export function describePassError(err) {
   if (err.name === 'CssSyntaxError') return { syntax: true, message: err.message, sourceCode: err.showSourceCode() };
   return { syntax: false, message: err.message };

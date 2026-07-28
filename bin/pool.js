@@ -1,74 +1,52 @@
-// A worker pool for multi-file runs.
+// A worker pool for multi-file runs. Workers only compute `file-pass.js`
+// payloads; the main thread does all printing, in file order, so output matches
+// a sequential run byte for byte.
 //
-// Consolidation is independent per style sheet and entirely CPU-bound, so a
-// directory run is embarrassingly parallel—but only the computation is.
-// Ordering, color, terminal width, and the run’s totals all belong to one
-// terminal, so workers only ever compute `file-pass.js` payloads and the main
-// thread does every bit of printing, in file order (see `deliver()` below).
-// Output is therefore identical to a sequential run’s, byte for byte.
-//
-// This module is both the pool and the worker script it starts: the `Worker`
-// below points at this same file, and the bottom half runs only inside one
-// (see `isMainThread`). One file, so the two halves of the protocol can’t
-// drift apart.
+// This file is both the pool and the worker script it starts (see
+// `isMainThread` at the bottom), so the two halves can’t drift apart.
 
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { availableParallelism } from 'node:os';
 import { computeFilePass, describePassError } from './file-pass.js';
 
-// Fewer files than this finish before a pool would be done starting—each
-// worker costs its own module graph and a few tens of milliseconds
+// Below either floor, a run finishes before a pool would be done starting
 const PARALLEL_MIN_FILES = 4;
-
-// …and enough total CSS to be worth it regardless of file count—a directory
-// of small style sheets is dominated by startup, not consolidation
 const PARALLEL_MIN_SIZE = 192_000;
 
-// `CSS_DEDUP_WORKERS=0` forces the sequential path (and any other number sets
-// the pool size), so a run can be compared against it directly
 function workersRequested() {
   const requested = Number.parseInt(process.env.CSS_DEDUP_WORKERS ?? '', 10);
   return Number.isInteger(requested) && requested >= 0 ? requested : null;
 }
 
-// One thread is left to the main thread, which renders every file’s report and
-// stays busy throughout; more workers than files would just idle
+// One core is left to the main thread, which renders throughout; more workers
+// than files would just idle
 export function poolSize(fileCount) {
   const requested = workersRequested();
   const size = requested ?? availableParallelism() - 1;
   return Math.max(Math.min(size, fileCount), 0);
 }
 
-// Whether a run is big enough to earn a pool. `totalSize` is the combined
-// length of everything actually read—the prefetch already has it, so this
-// costs nothing to ask.
+// Whether a run is big enough to earn a pool. An explicit `CSS_DEDUP_WORKERS`
+// bypasses both floors.
 export function shouldParallelize(fileCount, totalSize) {
   const requested = workersRequested();
   if (requested !== null) return requested > 1 && fileCount > 1;
   return fileCount >= PARALLEL_MIN_FILES && totalSize >= PARALLEL_MIN_SIZE && poolSize(fileCount) > 1;
 }
 
-// A worker’s STDOUT is a pipe back to this process, never the terminal, so a
-// library that decides about color as it loads (PostCSS’s syntax-error
-// highlighting goes through picocolors, which reads this at import time) would
-// strip color from output the terminal is in fact going to show. Compensating
-// for exactly that one missing TTY—and passing the environment through
-// otherwise untouched—keeps `NO_COLOR`, `FORCE_COLOR`, `CI`, and the rest
-// meaning in a worker precisely what they mean here, rather than this having
-// to re-derive some other library’s idea of when color applies.
+// A worker’s STDOUT is a pipe, not the terminal, so libraries that settle color
+// support at import time (PostCSS’s error highlighting, via picocolors) would
+// strip it. Compensating for just the missing TTY leaves `NO_COLOR`,
+// `FORCE_COLOR`, and `CI` meaning exactly what they mean here.
 function workerEnv() {
   if (!process.stdout.isTTY || process.env.TERM === 'dumb') return process.env;
   return { ...process.env, FORCE_COLOR: process.env.FORCE_COLOR ?? '1' };
 }
 
-// Runs every dispatchable slot across a pool, handing each result to
-// `onOutcome(index, outcome)` in slot order. A slot is either `{ css, label }`
-// (work for a worker) or `{ outcome }` (already decided—a file that couldn’t
-// be read), so the two kinds stay interleaved in the order the run’s output
-// needs them.
-//
-// `onOutcome` receives `{ payload }` for a completed pass, or `{ error }` in
-// the `describePassError()` shape for one that threw.
+// Runs every slot across the pool, handing each result to
+// `onOutcome(index, { payload } | { error })` in slot order. A slot is either
+// `{ css, label }` or `{ outcome }`—a file that couldn’t be read, already
+// decided, kept in place so the run’s output stays interleaved correctly.
 export function runPool(slots, settings, onOutcome) {
   return new Promise((resolve, reject) => {
     const ready = new Map();
@@ -87,14 +65,16 @@ export function runPool(slots, settings, onOutcome) {
     function settle(err) {
       if (settled) return;
       settled = true;
-      for (const worker of workers) worker.terminate();
+      // Dismissed, not terminated: A worker still holding a file may be mid
+      // `--fix` write, and cutting the thread there could leave it half-written.
+      // `null` queues behind that job, so the worker stops once it’s done.
+      for (const worker of workers) worker.postMessage(null);
       workers.clear();
       if (err) reject(err);
       else resolve();
     }
 
-    // Results arrive in whatever order the workers finish; this releases them
-    // strictly in slot order, so the printed run reads like a sequential one
+    // Workers finish in any order; this releases results strictly in slot order
     function deliver() {
       while (ready.has(nextDelivered)) {
         const outcome = ready.get(nextDelivered);
@@ -128,12 +108,9 @@ export function runPool(slots, settings, onOutcome) {
       worker.postMessage({ index, ...slots[index] });
     }
 
-    // A worker that dies (out of memory, most plausibly) takes its in-flight
-    // file down as a per-file error rather than the whole run; whatever it
-    // hadn’t started yet goes back to the queue for the others. If it was the
-    // last one, the rest of the run finishes on the main thread—slower than
-    // planned, but finished, which beats a CLI that hangs waiting for a thread
-    // that is never going to answer.
+    // A worker that dies (out of memory, most plausibly) loses its in-flight
+    // file to a per-file error rather than taking the run down. If it was the
+    // last one, the rest finishes on the main thread—slower, but not a hang.
     function retire(worker, err) {
       if (settled) return;
       const index = inFlight.get(worker);
@@ -157,9 +134,8 @@ export function runPool(slots, settings, onOutcome) {
       }
     }
 
-    // Every worker is started before anything is dispatched or printed, so a
-    // pool that can’t start at all (see `main()`’s fallback) has yet to produce
-    // a single line of output
+    // Every worker starts before anything is dispatched, so a pool that can’t
+    // start at all has yet to write a file or print a line
     const size = Math.min(poolSize(queue.length), queue.length);
     try {
       for (let i = 0; i < size; i++) {
@@ -172,16 +148,19 @@ export function runPool(slots, settings, onOutcome) {
           dispatch(worker);
         });
         worker.on('error', err => retire(worker, err));
-        // A worker that goes away without an `error` first (a hard exit) would
-        // otherwise leave its file’s result outstanding and the run hanging on
-        // a thread that is never going to answer
+        // A hard exit without an `error` first would otherwise leave the run
+        // waiting on a result that is never coming
         worker.on('exit', code => {
           if (workers.has(worker)) retire(worker, new Error(`Worker exited unexpectedly (code ${code})`));
         });
         workers.add(worker);
       }
     } catch (err) {
+      // Idle, so safe to cut immediately. The marker tells `main()` this is the
+      // one failure it may still fall back from.
       for (const worker of workers) worker.terminate();
+      workers.clear();
+      err.poolStartFailed = true;
       settle(err);
       return;
     }
@@ -191,9 +170,7 @@ export function runPool(slots, settings, onOutcome) {
   });
 }
 
-// The worker half: one file per message, the payload (or the failure, reduced
-// to printable strings) back. `null` means the queue is empty and this worker
-// is done.
+// The worker half: one file per message, payload back. `null` means done.
 if (!isMainThread && workerData?.pool) {
   const { options, fix, quiet } = workerData;
 

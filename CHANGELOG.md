@@ -4,6 +4,20 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-07-28
+
+### Fixed
+
+* Adjusted source map warning to no longer fire for a `sourceMappingURL` string that merely appears in a declaration value (`content: "/*# sourceMappingURL=… */"`), since detection now inspects parsed comments rather than the raw style sheet text
+
+### Added
+
+* Updated `dedup()` to return `sourceMapStale: true` when it rewrites a style sheet carrying a `sourceMappingURL` comment, so programmatic users get the caveat the CLI already printed
+
+### Changed
+
+* Reworded the source map warning: The map should be treated as invalid rather than stale-but-usable (especially for minified style sheets, where every mapping is keyed by column), and both it and the README now point at running CSS Dedup before the minifier, or in-pipeline via `css-dedup/plugin`, to keep maps intact
+
 ## [1.8.1] - 2026-07-25
 
 ### Changed
@@ -40,8 +54,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-* Added `--exit-zero`/`-z` (and the `exitZero` config option) to exit `0` even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`, so a build pipeline doesn’t gate on them
-  - A file that fails to read or parse still exits `1` regardless of the flag.
+* Added `--exit-zero`/`-z` (and the `exitZero` config option) to exit “0” even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`, so a build pipeline doesn’t gate on them
+  - A file that fails to read or parse still exits “1” regardless of the flag.
 * Added `--no-exit-zero`/`-e` to override `exitZero: true` from a config file for a run
 
 ## [1.5.0] - 2026-07-22

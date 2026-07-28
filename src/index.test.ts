@@ -23,7 +23,7 @@ const { findings } = analyzeResult;
 
 // `dedup` accepts a CSS string, and returns `{ css, applied, skipped, bytes }`
 const dedupResult: DedupResult = dedup('.a { color: red; color: red; }', { savingsOnly: true });
-const { css, applied, skipped, bytes, withheld } = dedupResult;
+const { css, applied, skipped, bytes, withheld, sourceMapStale } = dedupResult;
 
 // `analyzeRoot`/`dedupRoot` operate on an already-parsed PostCSS root instead of a CSS string
 const root = postcss.parse('.a { color: red; }');
@@ -43,4 +43,4 @@ postcss([plugin]);
 // @ts-expect-error
 cssdedup({ fix: 'yes' });
 
-export { findings, css, applied, skipped, bytes, withheld, plugin };
+export { findings, css, applied, skipped, bytes, withheld, sourceMapStale, plugin };

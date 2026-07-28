@@ -6,9 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [1.9.0] - 2026-07-28
 
+### Fixed
+
+* Adjusted source map warning to no longer fire for a `sourceMappingURL` string that merely appears in a declaration value (`content: "/*# sourceMappingURL=… */"`), since detection now inspects parsed comments rather than the raw style sheet text
+
 ### Added
 
-* `dedup()` now returns `sourceMapStale: true` when it rewrote a style sheet carrying a `sourceMappingURL` comment, so programmatic users get the caveat the CLI already printed
+* Updated `dedup()` to return `sourceMapStale: true` when it rewrites a style sheet carrying a `sourceMappingURL` comment, so programmatic users get the caveat the CLI already printed
 
 ### Changed
 

@@ -1357,8 +1357,17 @@ function consolidateRoot(root, options = {}) {
   return { applied, skipped, bytes: { before, after, saved: before - after } };
 }
 
+// A `/*# sourceMappingURL=… */` comment means a build tool generated this
+// style sheet alongside a source map. Consolidation shifts the positions
+// that map records, so it stops describing the file—reported (here and by
+// the CLI), never removed or regenerated.
+const RE_SOURCE_MAP = /\/\*#\s*sourceMappingURL=/;
+
 export function dedup(css, options = {}) {
   const root = postcss.parse(css, { from: options.from });
   const result = dedupRoot(root, options);
-  return { css: root.toString(), ...result };
+  // Only a rewrite invalidates the map: A run that applied nothing (or had
+  // its consolidation withheld) leaves the style sheet exactly as it was
+  const stale = result.applied.length > 0 && RE_SOURCE_MAP.test(css);
+  return { css: root.toString(), ...result, ...(stale && { sourceMapStale: true }) };
 }

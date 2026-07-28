@@ -4,6 +4,16 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-07-28
+
+### Added
+
+* `dedup()` now returns `sourceMapStale: true` when it rewrote a style sheet carrying a `sourceMappingURL` comment, so programmatic users get the caveat the CLI already printed
+
+### Changed
+
+* Reworded the source map warning: The map should be treated as invalid rather than stale-but-usable (especially for minified style sheets, where every mapping is keyed by column), and both it and the README now point at running CSS Dedup before the minifier, or in-pipeline via `css-dedup/plugin`, to keep maps intact
+
 ## [1.8.1] - 2026-07-25
 
 ### Changed

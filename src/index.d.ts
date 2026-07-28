@@ -65,6 +65,7 @@ export interface DedupRootResult {
 
 export interface DedupResult extends DedupRootResult {
   css: string;
+  sourceMapStale?: true;
 }
 
 export declare function analyzeRoot(root: Root, options?: CssDedupOptions): AnalyzeResult;

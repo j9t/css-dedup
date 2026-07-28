@@ -2408,7 +2408,8 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run(['--fix', file]);
-      assert.match(stdout, /references a source map \(`sourceMappingURL`\); `--fix` doesn’t regenerate it, so the map is now stale\./);
+      assert.match(stdout, /references a source map \(`sourceMappingURL`\); `--fix` doesn’t regenerate it, so the map no longer describes this file and should be rebuilt\./);
+      assert.match(stdout, /run CSS Dedup before your minifier, or in-pipeline via `css-dedup\/plugin`\./);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -2426,6 +2427,19 @@ describe('CLI', () => {
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
+  });
+
+  test('`dedup()` reports a stale source map only when it rewrote a style sheet that references one', () => {
+    const annotation = '\n/*# sourceMappingURL=bundle.css.map */\n';
+    assert.equal(dedup(`.a { color: red; }\n.b { color: red; }${annotation}`).sourceMapStale, true);
+    // Nothing to consolidate, so the style sheet—and the map—stay as they were
+    assert.equal(dedup(`.a { color: red; }${annotation}`).sourceMapStale, undefined);
+    // Rewritten, but no map to invalidate
+    assert.equal(dedup('.a { color: red; }\n.b { color: red; }\n').sourceMapStale, undefined);
+    // Withheld consolidations leave the style sheet untouched, too
+    const withheld = dedup(`${cssGrowing}${annotation}`, { savingsOnly: true });
+    assert.ok(withheld.withheld);
+    assert.equal(withheld.sourceMapStale, undefined);
   });
 
   test('Rejects a single-dash long-option spelling (`-fix`) instead of silently clustering it as `-f -i x`', () => {

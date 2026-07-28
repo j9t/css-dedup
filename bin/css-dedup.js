@@ -162,12 +162,6 @@ function toPortablePath(file) {
   return relative(process.cwd(), file).split(sep).join('/');
 }
 
-// A `/*# sourceMappingURL=… */` comment means a build tool generated this
-// file alongside a source map; `--fix` rewrites the CSS text without
-// touching (or regenerating) that map, so its line/column data goes stale—
-// worth a one-line heads-up rather than a silently drifting map
-const RE_SOURCE_MAP = /\/\*#\s*sourceMappingURL=/;
-
 // Concurrency cap for `prefetchContents()` below
 const CONCURRENCY_READ = 8;
 
@@ -785,7 +779,7 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
     // `savingsOnly` is the engine’s gate (see `dedupRoot()`): A withheld
     // result arrives as the untouched style sheet, with `applied` empty and
     // the declined outcome under `withheld`
-    const { css: output, applied, skipped, bytes, withheld } = dedup(css, targetOptions);
+    const { css: output, applied, skipped, bytes, withheld, sourceMapStale } = dedup(css, targetOptions);
     const log = isStdin ? console.error : console.log;
     // A multi-file run’s overall summary needs each file’s label restated on
     // its own summary line—by the time the run ends, the header this file
@@ -843,8 +837,8 @@ async function processCss(css, targetOptions, { isStdin, label, multi }) {
         log(styleText('yellow', `* ${share} aggressive-only—probably, but not provably, safe. Review the diff and test the affected pages.`));
       }
       if (!isStdin) log(`* Wrote ${label}`);
-      if (RE_SOURCE_MAP.test(css)) {
-        log(styleText('yellow', `* ${isStdin ? 'This style sheet' : label} references a source map (\`sourceMappingURL\`); \`--fix\` doesn’t regenerate it, so the map is now stale.`));
+      if (sourceMapStale) {
+        log(styleText('yellow', `* ${isStdin ? 'This style sheet' : label} references a source map (\`sourceMappingURL\`); \`--fix\` doesn’t regenerate it, so the map no longer describes this file and should be rebuilt. To keep maps intact, run CSS Dedup before your minifier, or in-pipeline via \`css-dedup/plugin\`.`));
       }
     }
     if (skipped.length) {

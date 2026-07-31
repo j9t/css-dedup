@@ -12,10 +12,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // This directory—where the scratch dirs below are created
 export const dirTest = __dirname;
 
-// A scratch directory under `test/`, created fresh. Callers remove it in a
-// `finally` block—the CLI writes real files into these.
+// A scratch directory under `test/`, created empty. Callers remove it in a
+// `finally` block.
 export function makeTempDir(name) {
   const dir = path.join(dirTest, name);
+  fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }

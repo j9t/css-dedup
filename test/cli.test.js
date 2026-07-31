@@ -1307,9 +1307,7 @@ describe('Parallel runs', () => {
   ].join('\n');
 
   function withCorpus(name, fileCount, fn, body = () => cssPerFile) {
-    const dirTemp = path.join(dirTest, `temp_parallel_${name}`);
-    fs.rmSync(dirTemp, { recursive: true, force: true });
-    fs.mkdirSync(dirTemp, { recursive: true });
+    const dirTemp = makeTempDir(`temp_parallel_${name}`);
     for (let i = 0; i < fileCount; i++) {
       fs.writeFileSync(path.join(dirTemp, `sheet-${i}.css`), body(i));
     }
@@ -1444,9 +1442,7 @@ describe('Parallel runs', () => {
   // A failure keeps its place in the output rather than surfacing wherever its
   // worker happened to give up
   test('A file that fails to parse fails only itself, in place', () => {
-    const dirTemp = path.join(dirTest, 'temp_parallel_broken');
-    fs.rmSync(dirTemp, { recursive: true, force: true });
-    fs.mkdirSync(dirTemp, { recursive: true });
+    const dirTemp = makeTempDir('temp_parallel_broken');
     for (const name of ['a.css', 'b.css', 'c.css', 'e.css']) {
       fs.writeFileSync(path.join(dirTemp, name), cssPerFile);
     }

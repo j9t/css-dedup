@@ -10,11 +10,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 * Removed a dead fallback in the exact decimal scaling used for `<time>`/`<angle>` canonicalization (`|| '0'` could never apply)
 
+### Added
+
+* Added additional tests for improved CLI coverage
+
 ### Changed
 
 * Split the engine and the CLI into focused modules
 * Moved everything but the executable out of `bin/`
-* Replaced the merge strategies' shared closures with an explicit run context, so each strategy can be read (and tested) on its own
+* Replaced the merge strategies’ shared closures with an explicit run context, so each strategy can be read (and tested) on its own
 * Consolidated repeated logic
 * Collected the test suite in `test/`
 * Trimmed source comments to what each piece needs

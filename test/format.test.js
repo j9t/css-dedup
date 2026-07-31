@@ -5,6 +5,7 @@
 
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
+import { stripVTControlCharacters } from 'node:util';
 import path from 'node:path';
 import {
   formatAggressivePreviewLine,
@@ -273,13 +274,16 @@ describe('Report table layout', () => {
   });
 
   test('Keeps columns flush when a highlight is applied', () => {
-    const plain = renderReportTable(['File', 'N'], [['a.css', '1']]);
-    const highlighted = renderReportTable(['File', 'N'], [['a.css', '1']], { rowHighlights: [new Set([1])] });
-    // Padding is computed before any coloring, so cell widths can’t shift; the
-    // ANSI path itself is asserted on by the spawned `runColor()` tests
-    assert.strictEqual(highlighted.length, plain.length);
-    assert.match(highlighted[1], /^a\.css {2}1$/);
-    assert.strictEqual(highlighted[1], plain[1]);
+    const rows = [['a.css', '1']];
+    const plain = renderReportTable(['File', 'N'], rows);
+    const highlighted = renderReportTable(['File', 'N'], rows, { rowHighlights: [new Set([1])] });
+
+    // Padding is computed before any coloring, so the visible layout is the
+    // same either way. Compared with escape codes stripped, since whether
+    // `styleText()` emits any depends on the environment—the ANSI path itself
+    // is asserted on by the spawned `runColor()` tests.
+    assert.deepStrictEqual(highlighted.map(stripVTControlCharacters), plain);
+    assert.match(stripVTControlCharacters(highlighted[1]), /^a\.css {2}1$/);
   });
 
   test('Wraps an over-long cell at the last `/` that fits, rather than widening the table or cutting mid-segment', () => {

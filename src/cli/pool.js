@@ -175,7 +175,7 @@ export function runPool(slots, settings, onOutcome) {
 // is delivered straight away—a `null` arriving mid-job does not queue behind
 // that job. Closing the port there would strand the in-flight result: Its
 // `postMessage()` would land on a closed port and go nowhere, and the main
-// thread's `retire()` would read the silence as a worker that died rather than
+// thread’s `retire()` would read the silence as a worker that died rather than
 // one that was dismissed. So the close waits for the outstanding work.
 if (!isMainThread && workerData?.pool) {
   const { options, fix, quiet } = workerData;

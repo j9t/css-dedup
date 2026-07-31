@@ -124,7 +124,7 @@ async function main() {
 }
 
 main().catch(err => {
-  // A setup failure is the user's to fix, so it gets the same message
+  // A setup failure is the user’s to fix, so it gets the same message
   // every other resolution error gets
   if (err.setupFailed) fail(styleText('red', err.message));
   console.error(err);

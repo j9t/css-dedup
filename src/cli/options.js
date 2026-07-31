@@ -90,12 +90,35 @@ export function parseCliArgs(argv, { fail, showHelp }) {
   return { values, positionals };
 }
 
+// Marks a failure as the user’s to fix (a bad pattern, an unloadable config)
+// rather than a bug, so `bin/css-dedup.js` prints the message instead of a
+// stack trace
+function setupError(message) {
+  const err = new Error(message);
+  err.setupFailed = true;
+  return err;
+}
+
 export async function loadConfig(pathConfig) {
   const pathResolved = resolve(pathConfig ?? 'css-dedup.config.js');
   if (!pathConfig && !existsSync(pathResolved)) return {};
 
-  const { default: config = {} } = await import(pathToFileURL(pathResolved).href);
-  return config;
+  try {
+    const { default: config = {} } = await import(pathToFileURL(pathResolved).href);
+    return config;
+  } catch (err) {
+    throw setupError(`Could not load config file ${pathResolved}: ${err.message}`);
+  }
+}
+
+// `new RegExp()` throws on an invalid pattern; naming the flag and the pattern
+// beats a bare `SyntaxError` from somewhere in argument handling
+function compilePattern(pattern, flag) {
+  try {
+    return new RegExp(pattern, 'i');
+  } catch (err) {
+    throw setupError(`Invalid \`${flag}\` pattern \`${pattern}\`: ${err.message}`);
+  }
 }
 
 // Combines flags and config into the settings the run needs. A `--no-…` flag
@@ -106,7 +129,7 @@ export function buildRunSettings(values, config) {
     options: {
       ignoreSelectors: [
         ...(config.ignoreSelectors ?? []),
-        ...values['ignore-selector'].map(pattern => new RegExp(pattern, 'i')),
+        ...values['ignore-selector'].map(pattern => compilePattern(pattern, '--ignore-selector')),
       ],
       ignoreSelectorsDefaults: values['no-ignore-selectors-defaults'] ? false : (config.ignoreSelectorsDefaults ?? true),
       aggressive: values.aggressive || (config.aggressive ?? false),
@@ -114,7 +137,7 @@ export function buildRunSettings(values, config) {
     },
     ignorePathPatterns: [
       ...(config.ignorePaths ?? []),
-      ...values['ignore-path'].map(pattern => new RegExp(pattern, 'i')),
+      ...values['ignore-path'].map(pattern => compilePattern(pattern, '--ignore-path')),
     ],
     exitZero: values['no-exit-zero'] ? false : values['exit-zero'] || (config.exitZero ?? false),
     flags: { fix: values.fix, quiet: values.quiet },

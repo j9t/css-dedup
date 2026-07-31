@@ -2,7 +2,7 @@
 
 import { styleText } from 'node:util';
 import { computeFilePass, describePassError } from '../src/cli/file-pass.js';
-import { sumBy } from '../src/cli/format.js';
+import { plural, sumBy } from '../src/cli/format.js';
 import { buildRunSettings, loadConfig, parseCliArgs } from '../src/cli/options.js';
 import { runPool, shouldParallelize } from '../src/cli/pool.js';
 import { printOverallSummary, renderTarget } from '../src/cli/render.js';
@@ -61,7 +61,7 @@ async function resolveFiles(positionals, ignorePathPatterns) {
   if (!files.length) {
     const targets = positionals.join(', ');
     if (discovered > 0) {
-      fail(`All ${discovered} \`.css\` file${discovered !== 1 ? 's' : ''} found under ${targets} ${discovered !== 1 ? 'were' : 'was'} excluded by \`--ignore-path\`.`);
+      fail(`All ${discovered} \`.css\` file${plural(discovered)} found under ${targets} ${discovered !== 1 ? 'were' : 'was'} excluded by \`--ignore-path\`/\`ignorePaths\`.`);
     }
     fail(`No \`.css\` files found under ${targets}.`);
   }
@@ -124,6 +124,9 @@ async function main() {
 }
 
 main().catch(err => {
+  // A setup failure is the user's to fix, so it gets the same message
+  // every other resolution error gets
+  if (err.setupFailed) fail(styleText('red', err.message));
   console.error(err);
   process.exit(1);
 });

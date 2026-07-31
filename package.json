@@ -55,7 +55,7 @@
     "lint:fix": "eslint . --fix",
     "prepare": "git config core.hooksPath .githooks || true",
     "start": "node ./bin/css-dedup.js",
-    "test": "npm run test:types && node --test test/*.test.js",
+    "test": "npm run test:types && node --test \"test/**/*.test.js\"",
     "test:types": "tsc"
   },
   "type": "module",

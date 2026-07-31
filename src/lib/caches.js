@@ -4,6 +4,7 @@
 // container it has ever seen—so both top-level entry points reset here first.
 
 import { resetPropertyCache } from './normalization.js';
+import { resetAnonymousLayers } from './scopes.js';
 import { resetSelectorCaches } from './selectors.js';
 import { resetSeparatorCache } from './style.js';
 
@@ -11,4 +12,5 @@ export function resetCaches() {
   resetSelectorCaches();
   resetPropertyCache();
   resetSeparatorCache();
+  resetAnonymousLayers();
 }

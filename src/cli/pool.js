@@ -170,20 +170,38 @@ export function runPool(slots, settings, onOutcome) {
   });
 }
 
-// The worker half: one file per message, payload back. `null` means done.
+// The worker half: one file per message, payload back. `null` means dismissed.
+// The handler is async, so it yields at its first `await` and the next message
+// is delivered straight away—a `null` arriving mid-job does not queue behind
+// that job. Closing the port there would strand the in-flight result: Its
+// `postMessage()` would land on a closed port and go nowhere, and the main
+// thread's `retire()` would read the silence as a worker that died rather than
+// one that was dismissed. So the close waits for the outstanding work.
 if (!isMainThread && workerData?.pool) {
   const { options, fix, quiet } = workerData;
+  let pending = 0;
+  let dismissed = false;
+
+  function closeWhenIdle() {
+    if (dismissed && pending === 0) parentPort.close();
+  }
 
   parentPort.on('message', async job => {
     if (job === null) {
-      parentPort.close();
+      dismissed = true;
+      closeWhenIdle();
       return;
     }
+
+    pending++;
     try {
       const payload = await computeFilePass(job.css, options, { fix, quiet, isStdin: false, label: job.label });
       parentPort.postMessage({ index: job.index, payload });
     } catch (err) {
       parentPort.postMessage({ index: job.index, error: describePassError(err) });
+    } finally {
+      pending--;
+      closeWhenIdle();
     }
   });
 }

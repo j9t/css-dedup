@@ -11,6 +11,14 @@ export function plural(count) {
   return count !== 1 ? 's' : '';
 }
 
+// Byte counts are pinned to one locale: the percentages beside them use
+// `toFixed()`, which always emits a dot decimal separator, so a host locale
+// that groups with dots (`1.234 bytes (-12.3%)`) would read as two different
+// number formats in one sentence
+function formatCount(bytes) {
+  return bytes.toLocaleString('en-US');
+}
+
 function percentOf(bytesAbs, before) {
   return before ? (bytesAbs / before) * 100 : 0;
 }
@@ -26,7 +34,7 @@ function signOf(delta) {
 // (the `--aggressive` bullets, which quote what aggressive mode adds beyond
 // plain `--fix`).
 export function formatByteMagnitude(bytesAbs, before, sign, { more = false } = {}) {
-  return `${bytesAbs.toLocaleString()} ${more ? 'more bytes' : 'bytes'} (${sign}${percentOf(bytesAbs, before).toFixed(1)}%)`;
+  return `${formatCount(bytesAbs)} ${more ? 'more bytes' : 'bytes'} (${sign}${percentOf(bytesAbs, before).toFixed(1)}%)`;
 }
 
 // One bullet’s outcome clause—always still-hypothetical phrasing, since the
@@ -49,7 +57,7 @@ export function formatReduceClause(saved, before, more = false) {
 // result, when `--fix` applies both changes regardless
 export function formatAppliedReduceClause(bytes) {
   const bytesAbs = Math.abs(bytes.saved);
-  const magnitude = `${bytesAbs.toLocaleString()} bytes (${bytes.before.toLocaleString()} → ${bytes.after.toLocaleString()} bytes, ${signOf(bytes.saved)}${percentOf(bytesAbs, bytes.before).toFixed(1)}%)`;
+  const magnitude = `${formatCount(bytesAbs)} bytes (${formatCount(bytes.before)} → ${formatCount(bytes.after)} bytes, ${signOf(bytes.saved)}${percentOf(bytesAbs, bytes.before).toFixed(1)}%)`;
   return `Reduced duplication and ${bytes.saved >= 0 ? `saved ${magnitude}` : `grew by ${magnitude}`}`;
 }
 
@@ -58,7 +66,7 @@ export function formatAppliedReduceClause(bytes) {
 export function formatOverallNet(net, totalBefore) {
   const netAbs = Math.abs(net);
   const sign = signOf(net);
-  return `total: ${sign}${netAbs.toLocaleString()} bytes / ${sign}${percentOf(netAbs, totalBefore).toFixed(1)}%`;
+  return `total: ${sign}${formatCount(netAbs)} bytes / ${sign}${percentOf(netAbs, totalBefore).toFixed(1)}%`;
 }
 
 // Appended to an `--aggressive` bullet: where its own delta lands once
@@ -72,7 +80,7 @@ export function formatAggregateTotalNote(totalSaved, before) {
 // an error: a file’s own summary a few lines up already showed this same byte
 // count against a different (smaller) denominator.
 export function formatBytesShareOfTotal(bytesAbs, totalBefore) {
-  return `${bytesAbs.toLocaleString()} bytes (${percentOf(bytesAbs, totalBefore).toFixed(1)}% overall)`;
+  return `${formatCount(bytesAbs)} bytes (${percentOf(bytesAbs, totalBefore).toFixed(1)}% overall)`;
 }
 
 // A byte magnitude for the report table: decimal KB by default (matching how
@@ -82,7 +90,7 @@ export function formatBytesShareOfTotal(bytesAbs, totalBefore) {
 export function formatSize(bytesAbs) {
   if (bytesAbs >= 1_000_000) return `${(bytesAbs / 1_000_000).toFixed(1)} MB`;
   const kb = (bytesAbs / 1000).toFixed(1);
-  if (kb === '0.0') return `${bytesAbs.toLocaleString()} B`;
+  if (kb === '0.0') return `${formatCount(bytesAbs)} B`;
   return `${kb} KB`;
 }
 

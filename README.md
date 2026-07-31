@@ -258,7 +258,7 @@ Note: This section assumes working with dependencies installed (`npm i`).
 npm test
 ```
 
-Runs the type tests (`tsc`, against `test/types.test.ts`) and then the suites in `test/`, split by area: `analyze.test.js` (selector handling and detection), `dedup.test.js` (consolidation, aggressive mode, `--savings-only`), `cli.test.js` (the command line, exit codes, fixtures, parallel runs), and `plugin.test.js`. Shared fixtures and the CLI spawn helpers live in `test/helpers.js`.
+Runs the type tests (`tsc`, against `test/types.test.ts`) and then the suites in `test/`, split by area: `analyze.test.js` (selector handling and detection), `dedup.test.js` (consolidation, aggressive mode, `--savings-only`), `cli.test.js` (the command line, exit codes, fixtures, parallel runs), `format.test.js` (the byte figures, summary clauses, and report table layout, in process), and `plugin.test.js`. Shared fixtures and the CLI spawn helpers live in `test/helpers.js`.
 
 `npm run lint` (or `lint:fix`) covers the rest.
 
@@ -272,7 +272,7 @@ Times both entry points against a generated 1,500-rule style sheet, or against f
 
 ### Layout
 
-```
+```text
 bin/
   css-dedup.js         Executable entry point—wiring only
 

@@ -19,6 +19,12 @@ describe('Selectors', () => {
     assert.deepStrictEqual(splitSelectors('[data-x="a\\"b, c"], .d'), ['[data-x="a\\"b, c"]', '.d']);
     assert.deepStrictEqual(splitSelectors('.a\\,b, .c'), ['.a\\,b', '.c']);
   });
+
+  test('Treats a comma inside a `/* … */` comment as text, not a selector separator', () => {
+    assert.deepStrictEqual(splitSelectors('.a/*,*/.b'), ['.a/*,*/.b']);
+    // A real separator after a comment still splits
+    assert.deepStrictEqual(splitSelectors('a/*x*/,b'), ['a/*x*/', 'b']);
+  });
 });
 
 describe('Selectors—mutually exclusive', () => {

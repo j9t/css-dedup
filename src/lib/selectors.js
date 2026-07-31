@@ -34,10 +34,26 @@ function computeSelectorList(selectorList) {
   let depth = 0;
   let quote = null;
   let escaped = false;
+  let comment = false;
+  let commentStart = -1;
   let current = '';
 
   for (let i = 0; i < selectorList.length; i++) {
     const char = selectorList[i];
+
+    // Inside a comment nothing is syntax: `.a/*,*/.b` is one selector, and the
+    // comment can hold commas, quotes, and brackets just as freely
+    if (comment) {
+      current += char;
+      if (char === '/' && selectorList[i - 1] === '*' && i - 1 > commentStart) comment = false;
+      continue;
+    }
+    if (!quote && !escaped && char === '/' && selectorList[i + 1] === '*') {
+      comment = true;
+      commentStart = i;
+      current += char;
+      continue;
+    }
 
     // A backslash-escaped character is content, never syntax—`\"` doesn’t
     // close a quote, `\,` doesn’t separate selectors

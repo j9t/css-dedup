@@ -58,21 +58,44 @@ export const findingsRow = n => new RegExp(`\\n${n} \\(\\d+\\) `);
 export const RE_SYNTAX_ERROR = /Unknown word/;
 export const RE_SYNTAX_ERROR_UNCLOSED = /Unclosed block/;
 
-export function run(args, spawnOptions = {}) {
-  const result = spawnSync('node', [scriptPath, ...args], { encoding: 'utf-8', timeout: 30_000, ...spawnOptions });
+// The one spawn both helpers below go through. A failed spawn (or a timeout)
+// leaves `stdout`/`stderr` null and reports the cause on `result.error`—
+// defaulted to empty strings here so a caller doesn’t get a confusing throw
+// from string handling instead of the actual failure.
+function spawnCli(args, { env, ...spawnOptions } = {}) {
+  const result = spawnSync('node', [scriptPath, ...args], {
+    encoding: 'utf-8',
+    timeout: 30_000,
+    ...(env ? { env } : {}),
+    ...spawnOptions,
+  });
   return {
-    stdout: stripVTControlCharacters(result.stdout),
-    stderr: stripVTControlCharacters(result.stderr),
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
     status: result.status,
+    error: result.error,
+  };
+}
+
+export function run(args, spawnOptions = {}) {
+  const { stdout, stderr, status, error } = spawnCli(args, spawnOptions);
+  return {
+    stdout: stripVTControlCharacters(stdout),
+    stderr: stripVTControlCharacters(stderr),
+    status,
+    error,
   };
 }
 
 // `run()` strips color codes—`node:util`’s `styleText` skips them itself
 // once STDOUT isn’t a TTY, which `spawnSync` never gives it—so highlighting
 // tests force color on and read the raw (unstripped) output instead
-export function runColor(args) {
-  const result = spawnSync('node', [scriptPath, ...args], { encoding: 'utf-8', timeout: 30_000, env: { ...process.env, FORCE_COLOR: '1' } });
-  return { stdout: result.stdout, status: result.status };
+export function runColor(args, spawnOptions = {}) {
+  const { stdout, status, error } = spawnCli(args, {
+    ...spawnOptions,
+    env: { ...process.env, FORCE_COLOR: '1', ...spawnOptions.env },
+  });
+  return { stdout, status, error };
 }
 // Built from a computed character code, not a literal control character
 // (which `no-control-regex` flags even inside a `new RegExp()` string), to

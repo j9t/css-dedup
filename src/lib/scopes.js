@@ -18,8 +18,16 @@ export function ownSelectors(selector) {
 // An anonymous `@layer {}` block is its own cascade layer—unlike two
 // same-name `@layer x {}` blocks, which share one—so each gets a unique label
 // and never matches another scope
-const layersAnonymous = new WeakMap();
+let layersAnonymous = new WeakMap();
 let layersAnonymousCount = 0;
+
+// Called from `resetCaches()`, so every run numbers anonymous layers from 1—
+// otherwise one report run’s several passes would each label the same block
+// differently
+export function resetAnonymousLayers() {
+  layersAnonymous = new WeakMap();
+  layersAnonymousCount = 0;
+}
 
 function atRuleScopeSegment(node) {
   if (node.name.toLowerCase() === 'layer' && !node.params.trim()) {
@@ -33,9 +41,7 @@ function atRuleScopeSegment(node) {
 // `.card` nesting host at the root and one inside `@media print` stay
 // distinct. Whitespace is normalized, case is not (`@layer` names and
 // selectors can be case-sensitive).
-export function describeScope(container) {
-  if (container.type === 'root') return 'root';
-
+function scopeSegments(container) {
   const chain = [];
   let node = container;
   while (node && node.type !== 'root') {
@@ -44,7 +50,23 @@ export function describeScope(container) {
       : atRuleScopeSegment(node));
     node = node.parent;
   }
-  return chain.join(' > ');
+  return chain;
+}
+
+export function describeScope(container) {
+  if (container.type === 'root') return 'root';
+  return scopeSegments(container).join(' > ');
+}
+
+// The identity two scopes are grouped by. Not the display label, which joins
+// the ancestor chain with ` > `, which a child combinator can forge—a rule
+// `.b` nested in `.a` and a root-level rule `.a > .b` both read as `.a > .b`,
+// and merging those two boundaries would report duplicates across unrelated
+// scopes. `JSON.stringify` over the segment array can’t be spelled by
+// the segments.
+export function scopeKey(container) {
+  if (container.type === 'root') return 'root';
+  return JSON.stringify(scopeSegments(container));
 }
 
 function compareSourceOrder(a, b) {
@@ -70,7 +92,7 @@ export function collectScopes(root) {
   const scopes = [];
   walkContainers(root, container => {
     const rules = container.nodes.filter(node => node.type === 'rule');
-    if (rules.length) scopes.push({ rules, label: describeScope(container) });
+    if (rules.length) scopes.push({ rules, label: describeScope(container), key: scopeKey(container) });
   });
   return scopes;
 }
@@ -87,27 +109,27 @@ export function collectScopes(root) {
 // scope entirely, can matter for the merge without that check ever seeing it.
 // Hence `analyzeRoot()` uses this and `consolidateRoot()` doesn’t, except in
 // aggressive mode, which accepts the risk.
-function mergeScopesByLabel(scopes) {
-  const byLabel = new Map();
+function mergeScopesByKey(scopes) {
+  const byKey = new Map();
   const order = [];
 
   for (const scope of scopes) {
-    if (!byLabel.has(scope.label)) {
-      byLabel.set(scope.label, { label: scope.label, rules: [] });
-      order.push(scope.label);
+    if (!byKey.has(scope.key)) {
+      byKey.set(scope.key, { key: scope.key, label: scope.label, rules: [] });
+      order.push(scope.key);
     }
-    byLabel.get(scope.label).rules.push(...scope.rules);
+    byKey.get(scope.key).rules.push(...scope.rules);
   }
 
-  for (const label of order) {
-    byLabel.get(label).rules.sort(compareSourceOrder);
+  for (const key of order) {
+    byKey.get(key).rules.sort(compareSourceOrder);
   }
 
-  return order.map(label => byLabel.get(label));
+  return order.map(key => byKey.get(key));
 }
 
 export function collectMergedScopes(root) {
-  return mergeScopesByLabel(collectScopes(root));
+  return mergeScopesByKey(collectScopes(root));
 }
 
 // At-rules holding declarations directly, with no selector (`@font-face`,

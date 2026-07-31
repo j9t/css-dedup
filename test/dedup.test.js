@@ -1,10 +1,18 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { analyze, dedup } from '../src/index.js';
+import { normalizeValue } from '../src/lib/normalization.js';
 import { selectorsLikelyDisjoint } from '../src/lib/selectors.js';
 import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive } from './helpers.js';
 
 describe('Deduplication', () => {
+  test('Treats a comma inside a `/* … */` comment as text when sorting `min()` arguments', () => {
+    // Without comment tracking the sort reorders across the comment and
+    // produces a mangled `min(*/,1px,2px/*)` key
+    assert.strictEqual(normalizeValue('width', 'min(2px/*,*/,1px)'), 'min(1px,2px/*,*/)');
+    assert.strictEqual(normalizeValue('width', 'min(2px,1px)'), 'min(1px,2px)');
+  });
+
   test('Merges a duplicate declaration into the selector list of the last rule', () => {
     const { css, applied, skipped } = dedup('.a { color: red; }\n.b { color: red; }\n');
     assert.strictEqual(applied.length, 1);

@@ -10,6 +10,14 @@ const DIRS_IGNORED = new Set(['node_modules']);
 // Concurrency cap for `prefetchContents()`
 const CONCURRENCY_READ = 8;
 
+// Total bytes the prefetch may hold at once. `CONCURRENCY_READ` bounds how many
+// reads are in flight, not how much is retained—without this, a run over a
+// large corpus holds every file’s text from the first read to the last render.
+// Past the budget, targets are left unresolved and read at processing time
+// instead. Up to `CONCURRENCY_READ` reads may already be in flight when the
+// budget runs out, so the ceiling is approximate.
+const PREFETCH_BUDGET_BYTES = 64 * 1024 * 1024;
+
 // A path relative to the working directory with forward slashes, regardless of
 // host OS—shared by `--ignore-path` matching and the all-files table’s
 // File-column disambiguation
@@ -70,31 +78,40 @@ export async function expandTargets(targets, ignorePathPatterns) {
     else expanded.push(pathResolved);
   }
 
-  if (!ignorePathPatterns.length) return { files: expanded, discovered: expanded.length };
+  // A path reachable twice—named directly and again through a directory, or
+  // simply repeated—is one file. Deduplicated before the count, so `discovered`
+  // speaks for real files rather than argument spellings.
+  const unique = [...new Set(expanded)];
+  if (!ignorePathPatterns.length) return { files: unique, discovered: unique.length };
 
-  const files = expanded.filter(file => (
+  const files = unique.filter(file => (
     file === '-' || !ignorePathPatterns.some(pattern => pattern.test(toPortablePath(file)))
   ));
-  return { files, discovered: expanded.length };
+  return { files, discovered: unique.length };
 }
 
-// Reads every non-STDIN target concurrently, ahead of the per-file processing
+// Reads non-STDIN targets concurrently, ahead of the per-file processing
 // loop—so disk I/O for file N+1 overlaps with the CPU work for file N, instead
 // of each file’s read waiting behind the previous file’s full report. Outcomes
 // are captured rather than thrown, so a read failure still surfaces through
 // the existing per-file error message, one file at a time, in the original
-// order.
-export async function prefetchContents(files) {
+// order. Entries past the byte budget are left unset—`readTarget()` reads
+// those on demand, so the `{ css }` / `{ err }` contract is unchanged for
+// everything a caller actually gets back.
+export async function prefetchContents(files, budgetBytes = PREFETCH_BUDGET_BYTES) {
   const contents = new Array(files.length);
   let next = 0;
+  let remaining = budgetBytes;
 
   async function worker() {
-    while (next < files.length) {
+    while (next < files.length && remaining > 0) {
       const index = next++;
       const file = files[index];
       if (file === '-') continue;
       try {
-        contents[index] = { css: await readFile(resolve(file), 'utf8') };
+        const css = await readFile(resolve(file), 'utf8');
+        remaining -= Buffer.byteLength(css, 'utf8');
+        contents[index] = { css };
       } catch (err) {
         contents[index] = { err };
       }

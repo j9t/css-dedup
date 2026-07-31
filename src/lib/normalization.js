@@ -93,9 +93,25 @@ const REPETITION_PAIR_PROPS = new Set([
 function splitTopLevel(text, separator, keepEmpty) {
   const parts = [];
   let depth = 0;
+  let comment = false;
   let current = '';
 
-  for (const char of text) {
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    // A separator inside a comment is text: `min(2px/*,*/,1px)` has two
+    // arguments, not three, and sorting across the comment would mangle it
+    if (comment) {
+      current += char;
+      if (char === '/' && text[i - 1] === '*') comment = false;
+      continue;
+    }
+    if (char === '/' && text[i + 1] === '*') {
+      comment = true;
+      current += char;
+      continue;
+    }
+
     if (char === '(') depth++;
     if (char === ')') depth = Math.max(0, depth - 1);
 

@@ -191,12 +191,18 @@ export function runPool(slots, settings, onOutcome) {
 }
 
 // The worker half: one file per message, payload back. `null` means dismissed.
+//
 // The handler is async, so it yields at its first `await` and the next message
 // is delivered straight away—a `null` arriving mid-job does not queue behind
-// that job. Closing the port there would strand the in-flight result: Its
-// `postMessage()` would land on a closed port and go nowhere, and the main
-// thread’s `retire()` would read the silence as a worker that died rather than
-// one that was dismissed. So the close waits for the outstanding work.
+// that job, however much the dispatch side would like it to. Closing the port
+// right there would strand the in-flight result, whose `postMessage()` would
+// then land on a closed port and silently go nowhere.
+//
+// No run observes that today: `null` only reaches a busy worker from
+// `settle()`, which has already resolved or rejected and cleared `workers`, so
+// `retire()` and the `exit` guard both fall through. Waiting is still what the
+// dispatch side means by “dismissed, not terminated,” and it keeps the
+// invariant local instead of resting on the caller never changing.
 if (!isMainThread && workerData?.pool) {
   const { options, fix, quiet } = workerData;
   let pending = 0;

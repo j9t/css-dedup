@@ -1,32 +1,44 @@
-// Splits a selector list on top-level commas only, respecting commas nested
-// inside `:is(a, b)`, `[attr="a,b"]`, and similar constructs. Memoized on the
-// same per-run terms as `subjectIdentities` below—the same handful of
-// selector strings get split repeatedly within a run (eligibility filtering,
-// merge-safety scans, occurrence reporting), but selector text is unbounded
-// across runs.
+import { memoized } from './util.js';
+
+// One depth/quote/escape-aware scan of a selector list, answering both
+// questions anything here asks of it: where its top-level commas are, and
+// whether the first is followed by whitespace. Memoized per run (see
+// `src/caches.js`)—the same handful of selector strings get split repeatedly
+// within a run (eligibility filtering, merge-safety scans, occurrence
+// reporting), but selector text is unbounded across runs.
 //
 // The cached array is shared between callers, so anything handing it to the
-// outside world (`Occurrence.selectors`, `AppliedChange.selectors`) copies
-// it first—see `index.js`.
+// outside world (`Occurrence.selectors`, `AppliedChange.selectors`) copies it
+// first—see `scopes.js`.
 const splitCache = new Map();
 
-export function splitSelectors(selectorList) {
-  const cached = splitCache.get(selectorList);
-  if (cached) return cached;
-
-  const computed = computeSplitSelectors(selectorList);
-  splitCache.set(selectorList, computed);
-  return computed;
+function scanSelectorList(selectorList) {
+  return memoized(splitCache, selectorList, computeSelectorList);
 }
 
-function computeSplitSelectors(selectorList) {
+export function splitSelectors(selectorList) {
+  return scanSelectorList(selectorList).selectors;
+}
+
+// Whether the list’s top-level commas are followed by whitespace (`.a, .b`) or
+// not (`.a,.b`, as a minifier writes it)—judged by the first one alone, on the
+// assumption that one selector list doesn’t mix conventions. `null` when
+// there’s no top-level comma to judge by.
+export function hasSpacedTopLevelComma(selectorList) {
+  return scanSelectorList(selectorList).spacedComma;
+}
+
+function computeSelectorList(selectorList) {
   const selectors = [];
+  let spacedComma = null;
   let depth = 0;
   let quote = null;
   let escaped = false;
   let current = '';
 
-  for (const char of selectorList) {
+  for (let i = 0; i < selectorList.length; i++) {
+    const char = selectorList[i];
+
     // A backslash-escaped character is content, never syntax—`\"` doesn’t
     // close a quote, `\,` doesn’t separate selectors
     if (escaped) {
@@ -53,12 +65,13 @@ function computeSplitSelectors(selectorList) {
     }
 
     if (char === '(' || char === '[') depth++;
-    // Clamped at “0” rather than allowed to go negative—an unmatched closing
-    // bracket in malformed input would otherwise make depth negative, and a
-    // later, genuinely top-level comma would then be misread as nested
+    // Clamped at 0 rather than allowed to go negative—an unmatched closing
+    // bracket in malformed input would otherwise make a later, genuinely
+    // top-level comma read as nested
     if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
 
     if (char === ',' && depth === 0) {
+      spacedComma ??= /\s/.test(selectorList[i + 1] ?? '');
       selectors.push(current.trim());
       current = '';
       continue;
@@ -69,35 +82,7 @@ function computeSplitSelectors(selectorList) {
 
   if (current.trim()) selectors.push(current.trim());
 
-  return selectors;
-}
-
-// Whether a selector list’s top-level commas are followed by whitespace
-// (`.a, .b`) or not (`.a,.b`, as a minifier writes it)—checked against the
-// first top-level comma only, on the assumption that one selector list
-// doesn’t mix conventions. “null” when there’s no top-level comma to judge
-// by. Reuses the same depth/quote/escape-aware scan as `splitSelectors()`
-// above, so a comma nested inside `:is(a,b)`/`[attr="a,b"]` is never
-// mistaken for the list’s own separator.
-export function hasSpacedTopLevelComma(selectorList) {
-  let depth = 0;
-  let quote = null;
-  let escaped = false;
-
-  for (let i = 0; i < selectorList.length; i++) {
-    const char = selectorList[i];
-
-    if (escaped) { escaped = false; continue; }
-    if (char === '\\') { escaped = true; continue; }
-    if (quote) { if (char === quote) quote = null; continue; }
-    if (char === '"' || char === '\'') { quote = char; continue; }
-    if (char === '(' || char === '[') depth++;
-    if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
-
-    if (char === ',' && depth === 0) return /\s/.test(selectorList[i + 1] ?? '');
-  }
-
-  return null;
+  return { selectors, spacedComma };
 }
 
 // Matches one `[attr]`, `[attr=value]`, `[attr~=value]`, `[attr|=value]`,
@@ -107,11 +92,9 @@ export function hasSpacedTopLevelComma(selectorList) {
 // (including nested inside `:is()`/`:not()`)
 const RE_ATTRIBUTE_SELECTOR = /\[\s*([a-zA-Z_-][\w-]*)\s*(?:([~|^$*]?=)\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|((?:\\.|[^\s\]\\])+))\s*([iIsS])?\s*)?\]/g;
 
-// Resolves CSS character escapes (`\61` → `a`, `\"` → `"`; one whitespace
-// character after a hex escape is part of the escape) so two spellings of
-// the same attribute value compare equal—and, more importantly, are never
-// treated as different values, which would wrongly prove two selectors
-// mutually exclusive
+// Resolves CSS character escapes (`\61` → `a`), so two spellings of one
+// attribute value are never treated as different—which would wrongly prove two
+// selectors mutually exclusive
 const RE_CSS_ESCAPE = /\\([0-9a-f]{1,6})[ \t\n\r\f]?|\\(.)/gi;
 
 function unescapeCssValue(value) {
@@ -202,34 +185,19 @@ function scanSelector(selector) {
 // A type selector at the start of a compound (`div`, `input`—never `*`)
 const RE_TYPE_SELECTOR = /^[a-zA-Z][\w-]*/;
 
-// The identity tokens—type, IDs, classes—of a selector’s subject compound
-// (its rightmost one). Returns “null” when the compound can’t be read
-// confidently: An escape could hide a `.`/`#` behind content, and a
-// selector-taking pseudo-class (`:is()`, `:not()`, `:where()`, …) can smuggle
-// in arbitrary further identity—both fall back to “can’t tell” rather than
-// risk a wrong disjointness call.
-//
-// Memoized, and scoped to one consolidation run (see
-// `resetSelectorCaches()`): The merge-safety scan asks about the same
-// selectors over and over within a run, but a long-lived process (a PostCSS
-// watch build, say) must not accumulate every selector—think generated or
-// hashed class names—it has ever seen.
+// The identity tokens—type, IDs, classes—of a selector’s subject compound (its
+// rightmost one). `null` when the compound can’t be read confidently: an
+// escape could hide a `.`/`#` behind content, and a selector-taking
+// pseudo-class can smuggle in arbitrary further identity.
 const subjectIdentities = new Map();
 
-// Called at the start of each top-level `analyzeRoot()`/`dedupRoot()` run—
-// `subjectIdentity()` is reached only from the latter, but `splitSelectors()`
-// from both, so both have to bound their caches
 export function resetSelectorCaches() {
   subjectIdentities.clear();
   splitCache.clear();
 }
 
 function subjectIdentity(selector) {
-  if (subjectIdentities.has(selector)) return subjectIdentities.get(selector);
-
-  const identity = computeSubjectIdentity(selector);
-  subjectIdentities.set(selector, identity);
-  return identity;
+  return memoized(subjectIdentities, selector, computeSubjectIdentity);
 }
 
 function computeSubjectIdentity(selector) {
@@ -254,7 +222,7 @@ function computeSubjectIdentity(selector) {
 }
 
 // No allocation—this runs per selector pair on the aggressive merge-safety
-// hot path; iterating the smaller set keeps the lookups on the cheap side
+// hot path
 function setsDisjoint(a, b) {
   const [small, large] = a.size <= b.size ? [a, b] : [b, a];
   for (const member of small) {
@@ -264,13 +232,12 @@ function setsDisjoint(a, b) {
 }
 
 // “True” if the two selectors’ subject compounds carry conflicting identity:
-// different type selectors, different IDs, or non-empty class sets with no
-// class in common. The type and ID cases are close to provable (one element
-// has one tag and one ID); The class case is the aggressive-mode heuristic—
-// `.card` and `.btn:hover` are assumed to target different elements, which
-// BEM-style naming makes almost always true in practice, but which nothing
-// stops a `class="card btn"` element from violating. Not consulted outside
-// aggressive mode.
+// different types, different IDs, or non-empty class sets with no class in
+// common. The type and ID cases are close to provable (one element has one tag
+// and one ID); the class case is the aggressive-mode heuristic—`.card` and
+// `.btn:hover` are assumed to target different elements, which BEM-style
+// naming makes almost always true, but which a `class="card btn"` element
+// violates. Not consulted outside aggressive mode.
 export function selectorsLikelyDisjoint(a, b) {
   const identityA = subjectIdentity(a.trim());
   const identityB = subjectIdentity(b.trim());
@@ -283,17 +250,11 @@ export function selectorsLikelyDisjoint(a, b) {
   return false;
 }
 
-// The “an attribute can only hold one value” argument requires the two
-// differing attribute selectors to be evaluated against the same element in
-// any hypothetical joint match. That’s only guaranteed when the attribute’s
-// compound binds deterministically relative to the subject—the compound is
-// the subject, or every combinator between it and the subject is `>` (one
-// parent) or `+` (one preceding sibling)—or when the compound can only ever
-// match one element per document (`html`, `:root`). A descendant or `~`
-// combinator to its right binds existentially instead: In
-// `.x[data-v="1"] p` vs. `.x[data-v="2"] p`, a `p` nested inside two `.x`
-// wrappers with different values matches both selectors, so those aren’t
-// exclusive, however different the attribute values are.
+// Whether the attribute’s compound binds deterministically relative to the
+// subject—the compound *is* the subject, or every combinator between them is
+// `>` or `+`—or can only ever match one element per document (`html`,
+// `:root`). A descendant or `~` combinator binds existentially instead, which
+// is what makes `.x[data-v="1"] p` and `.x[data-v="2"] p` non-exclusive.
 function attributeBindsSameElement(selector, scan, match) {
   // Inside `:is()`/`:not()`/etc., none of the reasoning below applies
   if (scan.parenDepths[match.index] > 0) return false;
@@ -308,25 +269,16 @@ function attributeBindsSameElement(selector, scan, match) {
   return /^(?:html|:root)(?![\w-])/i.test(compoundPrefix);
 }
 
-// “True” if no element can ever match both selectors—checked narrowly, for
-// exactly one shape: The two selectors are identical except that at least
-// one exact-match attribute selector (`[attr=value]`, never `~=`/`|=`/`^=`/
-// `$=`/`*=`, since those allow overlap—`class="da de"` matches both
-// `[class~="da"]` and `[class~="de"]`) constrains the same attribute to two
-// different values on what is provably the same element (see
-// `attributeBindsSameElement()` above). An attribute can only ever hold one
-// value, so `html[lang="da"] a` and `html[lang="de"] a` can never match the
-// same element—`html` is unique per document. Without that same-element
-// guarantee, the value difference proves nothing: `.x[data-v="1"] p` and
-// `.x[data-v="2"] p` both match a `p` nested inside two differently-valued
-// `.x` wrappers.
+// “True” if no element can ever match both selectors. Proves exactly one
+// shape: the two are identical except that an exact-match attribute selector
+// (`[attr=value]`, never `~=`/`|=`/`^=`/`$=`/`*=`, which allow overlap)
+// constrains the same attribute to two different values on what is provably
+// the same element—so `html[lang="da"] a` and `html[lang="de"] a` can never
+// both match.
 //
-// Deliberately narrow: every other difference between the two selectors—a
-// different attribute name, operator, case-sensitivity flag, or values that
-// differ only in case—falls back to “can’t prove it,” not “assume
-// exclusive.” A false negative here just leaves a safe merge for manual
-// review, same as the rest of CSS Dedup’s merge-safety checks; a false positive
-// would let a merge change the cascade.
+// Every other difference falls back to “can’t prove it,” not “assume
+// exclusive”: a false negative just leaves a safe merge for manual review, a
+// false positive would change the cascade.
 export function selectorsAreMutuallyExclusive(a, b) {
   const selectorA = a.trim();
   const selectorB = b.trim();

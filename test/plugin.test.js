@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import postcss from 'postcss';
-import cssdedup from './plugin.js';
+import cssdedup from '../src/plugin.js';
 
 // The merged-rule shape several tests assert on
 const RE_MERGED_AB = /\.a,\s*\.b\s*{\s*color: red;\s*}/;

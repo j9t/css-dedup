@@ -1,7 +1,6 @@
-// The CSS named colors (CSS Color Module Level 4), mapped to their six-digit hex
-// equivalents. Used only to canonicalize a value for comparison—output always
-// keeps a spelling that already exists in the source, so CSS Dedup never rewrites
-// `white` to `#ffffff` (or vice versa) on its own.
+// The CSS named colors (Color Module Level 4), mapped to six-digit hex. Used
+// only to canonicalize for comparison—output always keeps a spelling that
+// already exists in the source.
 const NAMED_COLORS = {
   aliceblue: 'f0f8ff', antiquewhite: 'faebd7', aqua: '00ffff', aquamarine: '7fffd4',
   azure: 'f0ffff', beige: 'f5f5dc', bisque: 'ffe4c4', black: '000000',
@@ -46,10 +45,8 @@ const RE_NAMED_COLOR = new RegExp(`\\b(?:${Object.keys(NAMED_COLORS).join('|')})
 
 const RE_HEX_COLOR = /#([0-9a-f]+)\b/g;
 
-// `rgb()`/`rgba()` with no nested function call inside—`[^()]*` deliberately
-// refuses to match once a `calc()` or `var()` (already a placeholder by the
-// time this runs, but its parentheses remain) shows up in the arguments,
-// leaving those values alone
+// `rgb()`/`rgba()` with no nested function call—`[^()]*` deliberately refuses
+// to match once a `calc()` shows up in the arguments, leaving those alone
 const RE_RGB_FUNCTION = /\brgba?\(([^()]*)\)/g;
 
 // Same shape as `RE_RGB_FUNCTION`—only consulted in aggressive mode,
@@ -90,24 +87,19 @@ function formatChannels(channels, alpha) {
   return `rgba(${channels.join(',')},${alpha})`;
 }
 
-// Canonicalizes one `rgb()`/`rgba()` argument list—legacy comma and modern
-// space syntax alike (whitespace/comma/slash spacing has already been
-// normalized by the time this runs)—when the channels are plain 0–255
-// integers. Percentage or otherwise non-integer channels are left alone:
-// `50%` of 255 is 127.5, and how that rounds is the browser’s business, not
-// a textual equivalence. Aggressive mode accepts the rounding and resolves
-// those channels, too (`Math.round`, matching what current browsers do),
-// clamping out-of-range channels the way the spec does (`rgb(300 0 0)`
-// renders as pure red).
+// Canonicalizes one `rgb()`/`rgba()` argument list, legacy comma and modern
+// space syntax alike, when the channels are plain 0–255 integers. Percentage
+// channels are left alone: `50%` of 255 is 127.5, and how that rounds is the
+// browser’s business, not a textual equivalence. Aggressive mode accepts the
+// rounding and resolves those too, clamping the way the spec does.
 function canonicalizeRgb(args, aggressive) {
   const parts = args.trim().split(/[\s,/]+/);
   if (parts.length < 3 || parts.length > 4) return null;
 
-  // Legacy comma syntax requires all three channels to be the same type—a
-  // mixed `rgb(50%, 100, 20)` is invalid CSS that browsers drop, so it must
-  // never compare equal to a valid color (the merge keeps the shortest
-  // spelling, which could be the broken one); the modern space syntax
-  // allows mixing
+  // Legacy comma syntax requires all three channels to be one type: a mixed
+  // `rgb(50%, 100, 20)` is invalid CSS browsers drop, and must never compare
+  // equal to a valid color (the merge keeps the shortest spelling, which could
+  // be the broken one)
   if (args.includes(',') && new Set(parts.slice(0, 3).map(part => part.endsWith('%'))).size > 1) return null;
 
   const channels = parts.slice(0, 3).map(part => {
@@ -168,10 +160,8 @@ function canonicalizeHsl(args) {
   if (parts.length < 3 || parts.length > 4) return null;
 
   // Legacy comma syntax requires percentage saturation/lightness—a unitless
-  // `hsl(120,50,50)` is invalid CSS that browsers drop, so it must never
-  // compare equal to a valid color (the merge keeps the shortest spelling,
-  // which could be the broken one); only the modern space syntax allows the
-  // bare-number spelling
+  // `hsl(120,50,50)` is invalid CSS, and must never compare equal to a valid
+  // color (same reason as `canonicalizeRgb()` above)
   if (args.includes(',') && (!parts[1].endsWith('%') || !parts[2].endsWith('%'))) return null;
 
   const hue = parseHue(parts[0]);
@@ -185,15 +175,12 @@ function canonicalizeHsl(args) {
   return formatChannels(hslToRgb(hue, saturation, lightness), alpha);
 }
 
-// Folds equivalent color spellings onto one canonical form for comparison:
-// `white`, `#fff`, `#ffffff`, `#ffffffff`, `rgb(255, 255, 255)`, and
-// `rgb(255 255 255)` all become `#ffffff`; `transparent` and
-// `rgba(0, 0, 0, 0)` meet at `transparent`. Expects the value to already be
-// lowercased with collapsed whitespace (so it must not run for
-// case-sensitive value properties, where `red` could be a counter or
-// keyframes name rather than a color). Only lossless textual equivalences by
-// default; aggressive mode adds the rounding-based ones (`hsl()`, percentage
-// `rgb()` channels).
+// Folds equivalent color spellings onto one canonical form: `white`, `#fff`,
+// `#ffffff`, and `rgb(255 255 255)` all become `#ffffff`; `transparent` and
+// `rgba(0, 0, 0, 0)` meet at `transparent`. Expects an already-lowercased
+// value with collapsed whitespace, so it must not run for case-sensitive value
+// properties. Lossless equivalences only by default; aggressive mode adds the
+// rounding-based ones.
 export function normalizeColors(value, aggressive = false) {
   let result = value.replace(RE_RGB_FUNCTION, (match, args) => canonicalizeRgb(args, aggressive) ?? match);
   if (aggressive) result = result.replace(RE_HSL_FUNCTION, (match, args) => canonicalizeHsl(args) ?? match);

@@ -4,6 +4,22 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.1] - 2026-07-31
+
+### Fixed
+
+* Removed a dead fallback in the exact decimal scaling used for `<time>`/`<angle>` canonicalization (`|| '0'` could never apply)
+
+### Changed
+
+* Split the engine and the CLI into focused modules
+* Moved everything but the executable out of `bin/`
+* Replaced the merge strategies' shared closures with an explicit run context, so each strategy can be read (and tested) on its own
+* Consolidated repeated logic
+* Collected the test suite in `test/`
+* Trimmed source comments to what each piece needs
+* Added a “Working on CSS Dedup” section to the README covering tests, benchmarks, and module layout
+
 ## [1.10.0] - 2026-07-28
 
 ### Added

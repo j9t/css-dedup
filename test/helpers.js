@@ -93,7 +93,7 @@ export function run(args, spawnOptions = {}) {
 export function runColor(args, spawnOptions = {}) {
   const { stdout, status, error } = spawnCli(args, {
     ...spawnOptions,
-    env: { ...process.env, FORCE_COLOR: '1', ...spawnOptions.env },
+    env: { ...process.env, ...spawnOptions.env, FORCE_COLOR: '1' },
   });
   return { stdout, status, error };
 }

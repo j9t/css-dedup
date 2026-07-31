@@ -108,10 +108,18 @@ export async function prefetchContents(files, budgetBytes = PREFETCH_BUDGET_BYTE
       const index = next++;
       const file = files[index];
       if (file === '-') continue;
+
+      const pathResolved = resolve(file);
       try {
-        const css = await readFile(resolve(file), 'utf8');
-        remaining -= Buffer.byteLength(css, 'utf8');
-        contents[index] = { css };
+        // The size is reserved before the read, not subtracted after it: A file
+        // larger than what is left would otherwise be loaded in full before the
+        // budget noticed, which is exactly the case the budget exists for. A
+        // file that does not fit is left unresolved for `readTarget()`, and the
+        // budget stays available for smaller ones behind it.
+        const { size } = await stat(pathResolved);
+        if (size > remaining) continue;
+        remaining -= size;
+        contents[index] = { css: await readFile(pathResolved, 'utf8') };
       } catch (err) {
         contents[index] = { err };
       }

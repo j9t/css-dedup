@@ -250,6 +250,18 @@ function sortMinMaxArguments(value) {
     let depth = 1;
     let cursor = argsStart;
     while (cursor < value.length && depth > 0) {
+      // A `)` inside a comment does not close the call—stepping over the whole
+      // span keeps `min(2px/*)*/,1px)` one call, so its arguments still sort
+      // and the reconstruction cannot straddle the comment
+      if (value[cursor] === '/' && value[cursor + 1] === '*') {
+        const commentEnd = value.indexOf('*/', cursor + 2);
+        if (commentEnd === -1) {
+          cursor = value.length;
+          break;
+        }
+        cursor = commentEnd + 2;
+        continue;
+      }
       if (value[cursor] === '(') depth++;
       else if (value[cursor] === ')') depth--;
       cursor++;

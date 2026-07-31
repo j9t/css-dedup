@@ -6,6 +6,18 @@ import { selectorsLikelyDisjoint } from '../src/lib/selectors.js';
 import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive } from './helpers.js';
 
 describe('Deduplication', () => {
+  test('Treats a `)` inside a `/* … */` comment as text when scanning a `min()` call', () => {
+    // The comment hides a `)`; without stepping over the span the depth scan
+    // ends the call early, the arguments never sort, and the reconstruction
+    // straddles the comment
+    assert.strictEqual(normalizeValue('width', 'min(2px/*)*/,1px)'), 'min(1px,2px/*)*/)');
+    assert.strictEqual(normalizeValue('width', 'max(2px,1px/*)*/)'), 'max(1px/*)*/,2px)');
+
+    // …so the two spellings still meet as one duplicate
+    const findings = analyze('.a { width: min(2px/*)*/,1px); }\n.b { width: min(1px,2px/*)*/); }').findings;
+    assert.strictEqual(findings.length, 1);
+  });
+
   test('Treats a comma inside a `/* … */` comment as text when sorting `min()` arguments', () => {
     // Without comment tracking the sort reorders across the comment and
     // produces a mangled `min(*/,1px,2px/*)` key

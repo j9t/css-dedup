@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+* Fixed scopes being grouped by their display label, where a child combinator could forge the separator—a rule `.b` nested in `.a` and a top-level `.a > .b` both read as `.a > .b`, and duplicates were reported across the two unrelated boundaries
+* Fixed anonymous `@layer` blocks being numbered from a counter that never reset, so the same style sheet got different labels from each pass of one run
+* Fixed `/* … */` comments in a selector list being read as syntax, splitting `.a/*,*/.b` into two selectors
+* Fixed `/* … */` comments in a value being read as separators, which let the `min()`/`max()` argument sort reorder across one and mangle the comparison key
+* Fixed `ignoreSelectors` patterns carrying the `g` or `y` flag matching only every other selector, since `test()` advances `lastIndex`
+* Fixed byte counts following the host locale while the percentages beside them always use a dot, so one figure could read as two number formats
+* Fixed the same file being processed—and, with `--fix`, rewritten—twice when reachable through more than one argument
+* Fixed an invalid `--ignore-selector`/`--ignore-path` pattern, or an unloadable config file, exiting with a stack trace instead of a message naming the flag, pattern, or path
+* Fixed the all-excluded message crediting `--ignore-path` alone, when `ignorePaths` from the config file excludes files the same way
 * Removed a dead fallback in the exact decimal scaling used for `<time>`/`<angle>` canonicalization (`|| '0'` could never apply)
 
 ### Added
@@ -22,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 * Consolidated repeated logic
 * Collected the test suite in `test/`
 * Trimmed source comments to what each piece needs
+* Made a dismissed worker wait for its in-flight file before closing its port
+* Bounded the read-ahead by a total byte budget
 * Added a “Working on CSS Dedup” section to the README covering tests, benchmarks, and module layout
 
 ## [1.10.0] - 2026-07-28

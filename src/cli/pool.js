@@ -5,6 +5,7 @@
 // This file is both the pool and the worker script it starts (see
 // `isMainThread` at the bottom), so the two halves can’t drift apart.
 
+import { readFile } from 'node:fs/promises';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { availableParallelism } from 'node:os';
 import { computeFilePass, describePassError } from './file-pass.js';
@@ -41,6 +42,20 @@ export function shouldParallelize(fileCount, totalSize) {
 function workerEnv() {
   if (!process.stdout.isTTY || process.env.TERM === 'dumb') return process.env;
   return { ...process.env, FORCE_COLOR: process.env.FORCE_COLOR ?? '1' };
+}
+
+// A slot arrives either with its content (prefetched on the main thread) or
+// with only its label, when it fell past the prefetch budget. Reading it here
+// keeps a large run’s memory bounded and spreads that I/O across the pool.
+// Read failures stay distinguishable from processing failures, so an
+// unreadable file reports the same way it does on the sequential path.
+async function loadSlot(slot) {
+  if (slot.css !== undefined) return { css: slot.css };
+  try {
+    return { css: await readFile(slot.label, 'utf8') };
+  } catch (err) {
+    return { readError: { message: err.message } };
+  }
 }
 
 // Runs every slot across the pool, handing each result to
@@ -124,9 +139,14 @@ export function runPool(slots, settings, onOutcome) {
 
     async function runRemainingInline(indexes) {
       for (const index of indexes) {
-        const { css, label } = slots[index];
+        const slot = slots[index];
+        const loaded = await loadSlot(slot);
+        if (loaded.readError) {
+          ready.set(index, { readError: loaded.readError });
+          continue;
+        }
         try {
-          const payload = await computeFilePass(css, settings.options, { fix: settings.fix, quiet: settings.quiet, isStdin: false, label });
+          const payload = await computeFilePass(loaded.css, settings.options, { fix: settings.fix, quiet: settings.quiet, isStdin: false, label: slot.label });
           ready.set(index, { payload });
         } catch (err) {
           ready.set(index, { error: describePassError(err) });
@@ -195,7 +215,12 @@ if (!isMainThread && workerData?.pool) {
 
     pending++;
     try {
-      const payload = await computeFilePass(job.css, options, { fix, quiet, isStdin: false, label: job.label });
+      const loaded = await loadSlot(job);
+      if (loaded.readError) {
+        parentPort.postMessage({ index: job.index, readError: loaded.readError });
+        return;
+      }
+      const payload = await computeFilePass(loaded.css, options, { fix, quiet, isStdin: false, label: job.label });
       parentPort.postMessage({ index: job.index, payload });
     } catch (err) {
       parentPort.postMessage({ index: job.index, error: describePassError(err) });

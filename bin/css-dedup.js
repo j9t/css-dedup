@@ -96,8 +96,9 @@ async function main() {
   if (parallel) {
     const slots = files.map((file, index) => {
       const preread = prefetched[index];
-      if (preread.err) return { outcome: { readError: preread.err } };
-      return { css: preread.css, label: targetLabel(file) };
+      if (preread?.err) return { outcome: { readError: preread.err } };
+      const label = targetLabel(file);
+      return preread ? { css: preread.css, label } : { label };
     });
 
     try {

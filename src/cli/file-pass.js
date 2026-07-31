@@ -3,8 +3,8 @@
 // same pass runs on the main thread or on a worker (see `pool.js`).
 
 import { writeFile } from 'node:fs/promises';
-import { analyze, dedup } from '../src/index.js';
-import { declarationKey } from '../src/normalization.js';
+import { analyze, dedup } from '../index.js';
+import { declarationKey } from '../lib/normalization.js';
 
 // The opposite-mode consolidation of the same source—a second, discarded pass
 // serving as the aggressive preview on default runs, and as the default-mode
@@ -13,12 +13,10 @@ function oppositePass(css, targetOptions) {
   return dedup(css, { ...targetOptions, aggressive: !targetOptions.aggressive });
 }
 
-// A skipped group’s key as the aggressive pass would spell it: Aggressive
-// normalization can rewrite the default spelling (`hsl()` onto hex,
-// `word-wrap` onto `overflow-wrap`), so matching the default spelling alone
-// would hint at groups the aggressive pass also skips. Selector-list keys
-// (blocked same-selector folds) carry no `prop: value` shape and pass
-// through unchanged.
+// A skipped group’s key as the aggressive pass would spell it: aggressive
+// normalization can rewrite it (`word-wrap` onto `overflow-wrap`), so matching
+// the default spelling alone would hint at groups aggressive also skips.
+// Selector-list keys carry no `prop: value` shape and pass through.
 export function aggressiveKeySpelling(key) {
   const important = key.endsWith(' !important');
   const base = important ? key.slice(0, -' !important'.length) : key;
@@ -56,13 +54,9 @@ function slimPass(pass) {
   return { bytes: pass.bytes, unavailable: pass.applied.length === 0 };
 }
 
-// Mirrors `dedupRoot()`’s `savingsOnly` gate (`src/index.js`) against an
-// already-computed plain pass, instead of running `dedup()` a second time
-// with `savingsOnly: true` just to reapply a rule that only ever looks at
-// the first pass’s own `bytes.saved`: a non-negative result is kept as-is
-// (the engine grafts its clone’s changes onto the real root unchanged),
-// a negative one is replaced with the untouched-file outcome, `applied`
-// emptied to match what actually happened (nothing)
+// Mirrors `dedupRoot()`’s `savingsOnly` gate against an already-computed plain
+// pass, rather than running `dedup()` again just to reapply a rule that only
+// looks at the first pass’s own `bytes.saved`
 function applySavingsOnlyGate(pass) {
   if (pass.bytes.saved >= 0) return pass;
   return {
@@ -71,12 +65,14 @@ function applySavingsOnlyGate(pass) {
   };
 }
 
-// The four passes the report table compares side-by-side, regardless of
-// which flags this run was actually invoked with—`--aggressive` and
-// `--savings-only` describe table columns here, not run modes. Only two
-// actually run `dedup()`; the `-s` variants are derived from those in JS
-// (see `applySavingsOnlyGate()`), since a second full consolidation pass
-// would just reproduce the first one’s `bytes` before the gate looks at them.
+// The report table’s four savings columns, in the order they’re rendered.
+// Named once here, where they’re produced, so the consumers in `report.js`
+// can’t drift out of sync with them.
+export const PASS_KEYS = ['passDefault', 'passDefaultS', 'passAgg', 'passAggS'];
+
+// Only two of the four actually run `dedup()`; the `-s` variants are derived
+// from those, since a second full pass would just reproduce the first one’s
+// `bytes` before the gate looks at them.
 function computeReportPasses(css, targetOptions) {
   const passDefault = dedup(css, { ...targetOptions, aggressive: false, savingsOnly: false });
   const passAgg = dedup(css, { ...targetOptions, aggressive: true, savingsOnly: false });
@@ -99,12 +95,10 @@ async function computeFixPass(css, targetOptions, { isStdin, label }) {
   // the declined outcome under `withheld`
   const { css: output, applied, skipped, bytes, withheld, sourceMapStale } = dedup(css, targetOptions);
 
-  // Whether anything actually rode on the flag—measured by comparing
-  // output against a discarded default-mode pass, never by entry counts:
-  // One aggressive cross-block or alias fold can absorb what the default
-  // pass would have done in more, separate merges, so a count delta can be
-  // zero or negative on a run whose merges were entirely aggressive-only.
-  // The count survives only as the message’s detail, where it’s positive.
+  // Whether anything actually rode on the flag—measured by comparing output,
+  // never by entry counts: one aggressive fold can absorb what the default
+  // pass would have done in several separate merges, so a count delta can be
+  // zero or negative on an entirely aggressive-only run
   let aggressiveDiffers = false;
   let aggressiveOnly = 0;
   if (targetOptions.aggressive && applied.length) {
@@ -134,15 +128,10 @@ async function computeFixPass(css, targetOptions, { isStdin, label }) {
   };
 }
 
-// Report mode always compares the default and aggressive variants side by
-// side (see the summary table `css-dedup.js` renders)—`--aggressive`/
-// `--savings-only` name table columns here, not a mode to switch into (bare
-// `--aggressive` without `--fix` is rejected at startup for exactly that
-// reason). The four `dedup()` combinations this needs are deferred past the
-// all-clean shortcut just below, though: For the common case of scanning a
-// directory of already-clean files, there’s nothing for them to find, so
-// running them at all would just be four wasted consolidation passes over a
-// style sheet already known to have no duplicates.
+// The four `dedup()` combinations are deferred past the all-clean shortcut
+// below: scanning a directory of already-clean files is the common case, and
+// there’s nothing for them to find in a style sheet already known to have no
+// duplicates.
 function computeReportPass(css, targetOptions, { quiet }) {
   const findingsDefault = analyze(css, { ...targetOptions, aggressive: false }).findings;
   const findingsAgg = analyze(css, { ...targetOptions, aggressive: true }).findings;

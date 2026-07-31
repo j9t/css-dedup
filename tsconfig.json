@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "include": [
-    "src/index.test.ts"
+    "test/types.test.ts"
   ],
   "compilerOptions": {
     "module": "nodenext",

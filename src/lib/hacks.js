@@ -9,8 +9,14 @@ export const DEFAULT_IGNORE_PATTERNS = [
   /\*\s*\+\s*html/i,           // IE7 star-plus-html hack
 ];
 
+// `lastIndex` is reset per pattern: A caller-supplied `ignoreSelectors` entry
+// may carry the `g` or `y` flag, and `test()` advances that cursor, so the same
+// selector would otherwise match only on every other call
 export function isIgnoredSelector(selector, patterns = DEFAULT_IGNORE_PATTERNS) {
-  return patterns.some(pattern => pattern.test(selector));
+  return patterns.some(pattern => {
+    pattern.lastIndex = 0;
+    return pattern.test(selector);
+  });
 }
 
 export function resolveIgnorePatterns({ ignoreSelectors = [], ignoreSelectorsDefaults = true } = {}) {

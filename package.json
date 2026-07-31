@@ -28,10 +28,7 @@
   },
   "files": [
     "bin",
-    "!bin/css-dedup.test.js",
-    "src",
-    "!src/index.test.ts",
-    "!src/plugin.test.js"
+    "src"
   ],
   "funding": "https://github.com/j9t/css-dedup?sponsor=1",
   "homepage": "https://github.com/j9t/css-dedup",
@@ -58,10 +55,10 @@
     "lint:fix": "eslint . --fix",
     "prepare": "git config core.hooksPath .githooks || true",
     "start": "node ./bin/css-dedup.js",
-    "test": "npm run test:types && node --test bin/css-dedup.test.js src/plugin.test.js",
+    "test": "npm run test:types && node --test \"test/**/*.test.js\"",
     "test:types": "tsc"
   },
   "type": "module",
   "types": "src/index.d.ts",
-  "version": "1.10.0"
+  "version": "1.10.1"
 }

@@ -248,6 +248,69 @@ What aggressive mode deliberately does _not_ do: drop same-rule overrides with d
 
 The byte economics don’t change with the flag—aggressive mode just unlocks more merges, each carrying the same trade-off between the declaration removed and the selector-list bytes added. Cross-block merges usually save, since they remove whole rules or blocks; declaration-only merges between rules with long selectors can grow the file, so `--aggressive` can also tip a style sheet further into growth. Either way, report mode’s table shows both variants side-by-side (the `-f -a`/`-f -a -s` columns), so that trade-off is visible before you decide.
 
+## Working on CSS Dedup
+
+Note: This section assumes working with dependencies installed (`npm i`).
+
+### Tests
+
+```shell
+npm test
+```
+
+Runs the type tests (`tsc`, against `test/types.test.ts`) and then the suites in `test/`, split by area: `analyze.test.js` (selector handling and detection), `dedup.test.js` (consolidation, aggressive mode, `--savings-only`), `cli.test.js` (the command line, exit codes, fixtures, parallel runs), `format.test.js` (the byte figures, summary clauses, and report table layout, in process), and `plugin.test.js`. Shared fixtures and the CLI spawn helpers live in `test/helpers.js`.
+
+`npm run lint` (or `lint:fix`) covers the rest.
+
+### Benchmarks
+
+```shell
+npm run benchmark
+```
+
+Times both entry points against a generated 1,500-rule style sheet, or against files or directories passed as arguments. Alongside each timing it prints what the pass actually did (declarations applied, groups skipped, bytes saved)—those numbers are the guard rail, since a speedup that changes any of them is a behavior change rather than a speedup. Only compare figures taken against the same input.
+
+### Layout
+
+```text
+bin/
+  css-dedup.js         Executable entry point—wiring only
+
+src/
+  index.js             Public API (re-exports only)
+  plugin.js            PostCSS plugin wrapper
+  analyze.js           Read-only detection (step 5 above)
+  consolidate.js       The `savingsOnly` gate and the fixed-point loop
+  merge.js             The merge strategies (step 6 above)
+
+  lib/                 Engine internals
+    scopes.js          What counts as one DRY boundary (step 2)
+    style.js           Reading the file’s own formatting conventions
+    normalization.js   Declaration equivalence (step 4)
+    colors.js          Color equivalence
+    selectors.js       Selector splitting, disjointness proofs
+    shorthands.js      Shorthand/longhand overlap
+    hacks.js           The default selector ignore list (step 3)
+    caches.js          Per-run memoization lifecycle
+    util.js            Shared helpers
+
+  cli/                 CLI internals
+    options.js         Flags, config file, run settings
+    targets.js         File discovery and reading
+    file-pass.js       One file’s work, as a structured-cloneable payload
+    pool.js            Worker pool (and the worker script itself)
+    render.js          Everything that reaches the terminal
+    report.js          The report table: data and layout
+    format.js          Byte figures and their prose
+
+test/
+  fixtures/            Example style sheets each behavior is exercised against
+```
+
+The step numbers refer to [How It Works](#how-it-works) above, which is where the behavior itself is described—the modules follow that order. `bin/` holds only the executable, matching the sibling tools; everything the CLI does lives under `src/cli/`.
+
+Memoization is per run throughout: The selector, property, and separator caches are reset at the start of every `analyzeRoot()`/`dedupRoot()` call, so a long-lived process (a PostCSS watch build) doesn’t accumulate every selector it has ever seen.
+
 ***
 
 You might like some of my other work:

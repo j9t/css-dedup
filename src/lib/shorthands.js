@@ -1,10 +1,8 @@
-// Maps each shorthand property to the longhands it sets—physical and
-// logical alike, but not physical ↔ logical pairs (e.g., `margin-left` vs
+// Each shorthand property mapped to the longhands it sets—physical and logical
+// alike, but never physical ↔ logical pairs (`margin-left` vs.
 // `margin-inline-start`): which physical side a logical longhand resolves to
-// depends on the element’s writing mode/direction, which isn’t knowable from
-// static CSS, so that pairing is deliberately left unmapped. Not exhaustive—
-// covers the shorthands common enough to matter for the merge-safety check
-// below; extend as needed.
+// depends on writing mode, which static CSS can’t tell. Not exhaustive; extend
+// as needed.
 export const SHORTHAND_LONGHANDS = {
   margin: [
     'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
@@ -89,8 +87,7 @@ export const SHORTHAND_LONGHANDS = {
 };
 
 // Each shorthand’s expansion, including its own name—built once at module
-// load rather than per call, since `propertiesOverlap()` below sits on the
-// merge-safety hot path and ran once per declaration per scanned rule
+// load, since `propertiesOverlap()` sits on the merge-safety hot path
 const EXPANSIONS = new Map(
   Object.entries(SHORTHAND_LONGHANDS).map(([prop, longhands]) => [prop, new Set([prop, ...longhands])]),
 );
@@ -104,10 +101,9 @@ const RELATED_PROPS = new Set([
   ...Object.values(SHORTHAND_LONGHANDS).flat(),
 ]);
 
-// Keyed by first property, then second—nested rather than by a joined
-// string, so a lookup allocates nothing. Bounded by `RELATED_PROPS` (a fixed
-// vocabulary), so unlike the per-run caches elsewhere this one never needs
-// clearing.
+// Keyed by first property, then second—nested rather than joined into one
+// string, so a lookup allocates nothing. Bounded by `RELATED_PROPS`, a fixed
+// vocabulary, so unlike the per-run caches elsewhere it never needs clearing.
 const overlapCache = new Map();
 
 function computeOverlap(a, b) {

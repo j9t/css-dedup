@@ -8,9 +8,9 @@
  */
 
 import postcss from 'postcss';
-import { analyze, analyzeRoot, dedup, dedupRoot } from './index.js';
-import type { AnalyzeResult, DedupResult } from './index.js';
-import cssdedup from './plugin.js';
+import { analyze, analyzeRoot, dedup, dedupRoot } from '../src/index.js';
+import type { AnalyzeResult, DedupResult } from '../src/index.js';
+import cssdedup from '../src/plugin.js';
 
 // `analyze` accepts a CSS string and an options object, and returns `{ findings }`
 const analyzeResult: AnalyzeResult = analyze('.a { color: red; color: red; }', {

@@ -168,7 +168,7 @@ let totalMs = 0;
 
 for (const { label, css } of targets) {
   const kb = (Buffer.byteLength(css, 'utf8') / 1024).toFixed(0);
-  console.log(`\n${label} — ${kb} KB`);
+  console.log(`\n${label}—${kb} KB`);
 
   let rows;
   try {

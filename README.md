@@ -70,6 +70,8 @@ npx css-dedup [options] <file…>
 
 Pass one or more files—each is analyzed (and, with `--fix`, rewritten) independently. A directory is searched recursively for .css files (skipping node_modules and dotfolders); the result is unrolled into that same per-file list, so mixing files and directories works, too. Pass `-` instead of a file to read CSS from STDIN (can’t be combined with other file arguments); in `--fix` mode this prints the consolidated CSS to STDOUT, rather than writing a file, so it composes in a pipeline (status/summary output moves to STDERR in that case, keeping STDOUT pure CSS).
 
+The input is CSS. A preprocessor source named as an argument (.scss, .sass, .less, .styl) is skipped. Run CSS Dedup on the compiled style sheet instead—duplication in a preprocessor source is often deliberate (one mixin used in ten places), it only becomes real duplication after compilation, and the byte figures the report is built around describe what actually ships. The reason for skipping rather than trying: Constructs like `@include`, `@extend`, `#{…}`, and `@if` decide what a rule finally contains, which is exactly what the merge-safety checks would need to see to know whether moving a declaration across rules is safe.
+
 | Option | Description |
 | --- | --- |
 | `--fix`, `-f` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |

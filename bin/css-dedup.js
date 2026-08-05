@@ -63,7 +63,7 @@ async function resolveFiles(positionals, ignorePathPatterns) {
   // ever forgives findings. Reported before the per-file output starts, since
   // the remaining targets still process normally.
   for (const file of unsupported) {
-    console.error(styleText('red', `Skipped ${file}: not a \`.css\` file—CSS Dedup analyzes CSS, so point it at the compiled style sheet rather than at a Sass or Less source.`));
+    console.error(styleText('red', `Skipped ${file}: not a \`.css\` file—CSS Dedup analyzes CSS, so point it at the compiled style sheet rather than at a preprocessor source.`));
   }
   if (unsupported.length) process.exitCode = 1;
 

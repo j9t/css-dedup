@@ -621,6 +621,23 @@ describe('CLI', () => {
     }
   });
 
+  test('`--ignore-path` excludes a preprocessor source before it is reported as skipped', () => {
+    const dirTemp = makeTempDir('temp_preprocessor_ignore_path');
+    const fileScss = path.join(dirTemp, 'theme.scss');
+    const fileCss = path.join(dirTemp, 'main.css');
+    fs.writeFileSync(fileScss, scssParsable);
+    fs.writeFileSync(fileCss, '.a { color: red; }\n');
+
+    try {
+      const { stdout, stderr, status } = run(['-p', 'theme\\.scss$', fileScss, fileCss]);
+      assert.ok(!stderr.includes('not a `.css` file'));
+      assert.ok(!stdout.includes('theme.scss'));
+      assert.strictEqual(status, 0);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
   test('Accepts a named file without an extension, which is no preprocessor source', () => {
     const dirTemp = makeTempDir('temp_no_extension');
     const file = path.join(dirTemp, 'styles');

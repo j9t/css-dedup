@@ -73,7 +73,9 @@ async function collectCssFiles(dirPath) {
 // “nothing under these targets” from “everything under these targets got
 // excluded”—two situations deserving two different error messages. Preprocessor
 // sources come back under `unsupported`, kept out of `discovered` so neither
-// message counts a file this function already declined.
+// message counts a file this function already declined, and filtered by
+// `ignorePathPatterns` the same way `files` is: An excluded path is excluded
+// whatever its extension, and has nothing to be reported about.
 export async function expandTargets(targets, ignorePathPatterns) {
   const expanded = [];
   const declined = [];
@@ -95,13 +97,16 @@ export async function expandTargets(targets, ignorePathPatterns) {
   // simply repeated—is one file. Deduplicated before the count, so `discovered`
   // speaks for real files rather than argument spellings.
   const unique = [...new Set(expanded)];
-  const unsupported = [...new Set(declined)];
-  if (!ignorePathPatterns.length) return { files: unique, discovered: unique.length, unsupported };
+  const declinedUnique = [...new Set(declined)];
+  if (!ignorePathPatterns.length) return { files: unique, discovered: unique.length, unsupported: declinedUnique };
 
-  const files = unique.filter(file => (
-    file === '-' || !ignorePathPatterns.some(pattern => pattern.test(toPortablePath(file)))
-  ));
-  return { files, discovered: unique.length, unsupported };
+  // `-` never reaches `declined`, so only `files` needs the STDIN exception
+  const ignored = file => ignorePathPatterns.some(pattern => pattern.test(toPortablePath(file)));
+  return {
+    files: unique.filter(file => file === '-' || !ignored(file)),
+    discovered: unique.length,
+    unsupported: declinedUnique.filter(file => !ignored(file)),
+  };
 }
 
 // Reads non-STDIN targets concurrently, ahead of the per-file processing

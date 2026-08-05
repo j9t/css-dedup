@@ -4,6 +4,12 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-08-05
+
+### Changed
+
+* Skipped preprocessor sources (`.scss`, `.sass`, `.less`, `.styl`) named as a CLI argument, with a note and a non-zero exit
+
 ## [1.10.1] - 2026-07-31
 
 ### Fixed

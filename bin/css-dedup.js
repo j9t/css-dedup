@@ -51,12 +51,21 @@ async function resolveFiles(positionals, ignorePathPatterns) {
   // `stat()`/`readdir()` aren’t wrapped inside `expandTargets()`, so a missing
   // path or unreadable directory would otherwise surface as a raw stack trace
   // instead of the clean, styled message every other resolution error gets
-  let files, discovered;
+  let files, discovered, unsupported;
   try {
-    ({ files, discovered } = await expandTargets(positionals, ignorePathPatterns));
+    ({ files, discovered, unsupported } = await expandTargets(positionals, ignorePathPatterns));
   } catch (err) {
     fail(styleText('red', `Could not resolve ${positionals.join(', ')}: ${err.message}`));
   }
+
+  // A named file the run can’t speak for, so it fails the run the way an
+  // unreadable or unparsable one does—out of `--exit-zero`’s reach, which only
+  // ever forgives findings. Reported before the per-file output starts, since
+  // the remaining targets still process normally.
+  for (const file of unsupported) {
+    console.error(styleText('red', `Skipped ${file}: not a \`.css\` file—CSS Dedup analyzes CSS, so point it at the compiled style sheet rather than at a Sass or Less source.`));
+  }
+  if (unsupported.length) process.exitCode = 1;
 
   if (!files.length) {
     const targets = positionals.join(', ');

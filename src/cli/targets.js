@@ -7,6 +7,15 @@ import { resolve, relative, join, extname, sep } from 'node:path';
 // Directories skipped when recursing into a target directory
 const DIRS_IGNORED = new Set(['node_modules']);
 
+// Preprocessor sources, skipped when named directly as an argument (a
+// directory scan never reaches them—it collects `.css` only). Most of their
+// syntax fails the standard parser anyway, but the subset that parses—nesting
+// alongside `@include`/`@extend`—would be consolidated as if those at-rules
+// contributed no declarations, and `--fix` would write that back. A denylist
+// rather than a `.css` allowlist, so an extension-less path (a process
+// substitution, say) still works.
+const EXTENSIONS_PREPROCESSOR = new Set(['.less', '.sass', '.scss', '.styl']);
+
 // Concurrency cap for `prefetchContents()`
 const CONCURRENCY_READ = 8;
 
@@ -62,9 +71,12 @@ async function collectCssFiles(dirPath) {
 //
 // Returns `discovered` alongside the filtered `files` so the caller can tell
 // “nothing under these targets” from “everything under these targets got
-// excluded”—two situations deserving two different error messages.
+// excluded”—two situations deserving two different error messages. Preprocessor
+// sources come back under `unsupported`, kept out of `discovered` so neither
+// message counts a file this function already declined.
 export async function expandTargets(targets, ignorePathPatterns) {
   const expanded = [];
+  const declined = [];
 
   for (const target of targets) {
     if (target === '-') {
@@ -75,6 +87,7 @@ export async function expandTargets(targets, ignorePathPatterns) {
     const pathResolved = resolve(target);
     const stats = await stat(pathResolved);
     if (stats.isDirectory()) expanded.push(...(await collectCssFiles(pathResolved)).sort());
+    else if (EXTENSIONS_PREPROCESSOR.has(extname(pathResolved).toLowerCase())) declined.push(pathResolved);
     else expanded.push(pathResolved);
   }
 
@@ -82,12 +95,13 @@ export async function expandTargets(targets, ignorePathPatterns) {
   // simply repeated—is one file. Deduplicated before the count, so `discovered`
   // speaks for real files rather than argument spellings.
   const unique = [...new Set(expanded)];
-  if (!ignorePathPatterns.length) return { files: unique, discovered: unique.length };
+  const unsupported = [...new Set(declined)];
+  if (!ignorePathPatterns.length) return { files: unique, discovered: unique.length, unsupported };
 
   const files = unique.filter(file => (
     file === '-' || !ignorePathPatterns.some(pattern => pattern.test(toPortablePath(file)))
   ));
-  return { files, discovered: unique.length };
+  return { files, discovered: unique.length, unsupported };
 }
 
 // Reads non-STDIN targets concurrently, ahead of the per-file processing

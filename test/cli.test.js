@@ -533,13 +533,17 @@ describe('CLI', () => {
     fs.writeFileSync(path.join(dirTemp, 'sub', 'node_modules', 'ignored.css'), '.z { color: red; }\n.y { color: red; }\n');
     fs.writeFileSync(path.join(dirTemp, 'sub', '.hidden', 'ignored.css'), '.x { color: red; }\n.w { color: red; }\n');
     fs.writeFileSync(path.join(dirTemp, 'readme.txt'), 'not css');
+    fs.writeFileSync(path.join(dirTemp, 'theme.scss'), '.d { color: red; }\n.e { color: red; }\n');
 
     try {
-      const { stdout, status } = run([dirTemp]);
+      const { stdout, stderr, status } = run([dirTemp]);
       assert.ok(stdout.includes(path.join(dirTemp, 'one.css')));
       assert.ok(stdout.includes(path.join(dirTemp, 'sub', 'two.css')));
       assert.ok(!stdout.includes('node_modules'));
       assert.ok(!stdout.includes('.hidden'));
+      // Never collected, so never worth a skip message either
+      assert.ok(!stdout.includes('theme.scss'));
+      assert.ok(!stderr.includes('theme.scss'));
       assert.strictEqual(status, 1);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -553,6 +557,79 @@ describe('CLI', () => {
       const { stderr, status } = run([dirTemp]);
       assert.ok(stderr.includes('No `.css` files found'));
       assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  // The SCSS subset the standard parser accepts—nesting alongside at-rules it
+  // reads as generic—which is why an extension check has to catch it: No
+  // syntax error stands in for one
+  const scssParsable = [
+    '.a { color: red; @include reset; color: blue; &:hover { color: green; } }',
+    '.b { @extend .a; color: red; }',
+    '.c { color: red; }',
+    '',
+  ].join('\n');
+
+  test('Skips a named preprocessor source rather than consolidating it, leaving the file untouched', () => {
+    const dirTemp = makeTempDir('temp_preprocessor');
+    const file = path.join(dirTemp, 'theme.scss');
+    fs.writeFileSync(file, scssParsable);
+
+    try {
+      const { stderr, status } = run(['--fix', file]);
+      assert.ok(stderr.includes(`Skipped ${file}`));
+      assert.ok(stderr.includes('not a `.css` file'));
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), scssParsable);
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('A skipped preprocessor source does not stop a `.css` file named alongside it', () => {
+    const dirTemp = makeTempDir('temp_preprocessor_multi');
+    const fileScss = path.join(dirTemp, 'theme.scss');
+    const fileCss = path.join(dirTemp, 'main.css');
+    fs.writeFileSync(fileScss, scssParsable);
+    fs.writeFileSync(fileCss, '.a { color: red; }\n.b { color: red; }\n');
+
+    try {
+      const { stdout, stderr, status } = run([fileScss, fileCss]);
+      assert.ok(stderr.includes('not a `.css` file'));
+      assert.ok(stdout.includes(fileCss));
+      assert.match(stdout, findingsRow(1));
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--exit-zero` does not forgive a skipped preprocessor source', () => {
+    const dirTemp = makeTempDir('temp_preprocessor_exit_zero');
+    const fileScss = path.join(dirTemp, 'theme.scss');
+    const fileCss = path.join(dirTemp, 'main.css');
+    fs.writeFileSync(fileScss, scssParsable);
+    fs.writeFileSync(fileCss, '.a { color: red; }\n');
+
+    try {
+      const { status } = run(['--exit-zero', fileScss, fileCss]);
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Accepts a named file without an extension, which is no preprocessor source', () => {
+    const dirTemp = makeTempDir('temp_no_extension');
+    const file = path.join(dirTemp, 'styles');
+    fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n');
+
+    try {
+      const { stdout, stderr } = run([file]);
+      assert.ok(!stderr.includes('not a `.css` file'));
+      assert.match(stdout, findingsRow(1));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

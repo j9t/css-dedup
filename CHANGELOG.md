@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-* Switched to analyzing the current directory when no file is given, instead of printing help and exiting “1”
+* Switched to analyzing the current directory when no file is given, instead of printing help and exiting `1`
 * Changed to ask for confirmation before `--fix` rewrites a working directory nobody named; an explicit target (`css-dedup --fix .`) runs unprompted
 
 ## [1.11.0] - 2026-08-05
@@ -115,8 +115,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-* Added `--exit-zero`/`-z` (and the `exitZero` config option) to exit “0” even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`, so a build pipeline doesn’t gate on them
-  - A file that fails to read or parse still exits “1” regardless of the flag.
+* Added `--exit-zero`/`-z` (and the `exitZero` config option) to exit `0` even when findings are skipped as unsafe to auto-merge or withheld by `--savings-only`, so a build pipeline doesn’t gate on them
+  - A file that fails to read or parse still exits `1` regardless of the flag.
 * Added `--no-exit-zero`/`-e` to override `exitZero: true` from a config file for a run
 
 ## [1.5.0] - 2026-07-22

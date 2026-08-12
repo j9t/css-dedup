@@ -93,9 +93,7 @@ export function parseCliArgs(argv, { fail, showHelp }) {
   return { values, positionals: implicitTarget ? ['.'] : positionals, implicitTarget };
 }
 
-// Marks a failure as the user’s to fix (a bad pattern, an unloadable config)
-// rather than a bug, so `bin/css-dedup.js` prints the message instead of a
-// stack trace
+// Marks a failure as the user’s to fix rather than a bug
 function setupError(message) {
   const err = new Error(message);
   err.setupFailed = true;

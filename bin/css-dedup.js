@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createInterface } from 'node:readline';
 import { styleText } from 'node:util';
 import { computeFilePass, describePassError } from '../src/cli/file-pass.js';
 import { plural, sumBy } from '../src/cli/format.js';
@@ -20,6 +21,35 @@ function fail(message, code = 1) {
 function showHelp(text, code) {
   console.log(text);
   process.exit(code);
+}
+
+// `--fix` rewrites in place, which is the user’s call to make—but a run that
+// names no target picks the whole working directory, and that is easy to hit
+// from the wrong folder. Only the implicit tree is confirmed; an explicit
+// `css-dedup --fix .` says the same thing out loud and passes straight through.
+async function confirmImplicitFix() {
+  const cwd = process.cwd();
+
+  // Nothing can answer, and defaulting either way would be a guess: proceeding
+  // rewrites a tree nobody named, aborting turns a scripted run into a silent
+  // no-op. Naming the path in the script settles it.
+  if (!process.stdin.isTTY) {
+    fail(styleText('red', `Refusing \`--fix\` without a target—it would rewrite every \`.css\` file under ${cwd}. Name the path (\`css-dedup --fix .\`) to confirm.`));
+  }
+
+  process.stderr.write(
+    `${styleText('yellow', `\`--fix\` rewrites files in place—without a target, that is every \`.css\` file under ${cwd}. If you want to compare results and be able to revert, do this under version control.`)}\n` +
+    'Do you want to continue? [y/N] '
+  );
+
+  const rl = createInterface({ input: process.stdin });
+  const answer = await new Promise(resolve => {
+    rl.once('line', line => resolve(line.trim().toLowerCase()));
+    rl.once('close', () => resolve(''));
+  });
+  rl.close();
+
+  if (answer !== 'y') fail('Consolidation aborted.', 0);
 }
 
 // One target’s pass on this thread, in the shape a worker sends back
@@ -79,9 +109,11 @@ async function resolveFiles(positionals, ignorePathPatterns) {
 }
 
 async function main() {
-  const { values, positionals } = parseCliArgs(process.argv.slice(2), { fail, showHelp });
+  const { values, positionals, implicitTarget } = parseCliArgs(process.argv.slice(2), { fail, showHelp });
   const config = await loadConfig(values.config);
   const { options, ignorePathPatterns, exitZero, flags } = buildRunSettings(values, config);
+
+  if (flags.fix && implicitTarget) await confirmImplicitFix();
 
   const files = await resolveFiles(positionals, ignorePathPatterns);
   const multi = files.length > 1;

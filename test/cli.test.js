@@ -14,10 +14,52 @@ describe('CLI', () => {
     assert.strictEqual(status, 0);
   });
 
-  test('Shows help and exits non-zero when no file is given', () => {
-    const { stdout, status } = run([]);
-    assert.ok(stdout.includes('Usage:'));
-    assert.strictEqual(status, 1);
+  test('Analyzes the working directory when no file is given', () => {
+    const dirTemp = makeTempDir('temp_implicit_target');
+    fs.writeFileSync(path.join(dirTemp, 'implicit.css'), '.a { color: red; }\n.b { color: red; }\n');
+
+    try {
+      // Exit 1 is the finding, not a failure—`stderr` stays empty
+      const { stdout, stderr, status } = run([], { cwd: dirTemp });
+      assert.ok(stdout.includes('implicit.css'));
+      assert.ok(stdout.includes('duplicate'));
+      assert.strictEqual(stderr, '');
+      assert.strictEqual(status, 1);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Refuses `--fix` without a target when nothing can answer the prompt', () => {
+    const dirTemp = makeTempDir('temp_implicit_fix');
+    const file = path.join(dirTemp, 'implicit.css');
+    const css = '.a { color: red; }\n.b { color: red; }\n';
+    fs.writeFileSync(file, css);
+
+    try {
+      const { stderr, status } = run(['--fix'], { cwd: dirTemp });
+      assert.ok(stderr.includes('Refusing `--fix` without a target'));
+      assert.strictEqual(status, 1);
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), css, 'File should be untouched');
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Runs `--fix` without a prompt when the target is named explicitly', () => {
+    const dirTemp = makeTempDir('temp_explicit_fix');
+    const file = path.join(dirTemp, 'explicit.css');
+    fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n');
+
+    try {
+      const { stderr, status } = run(['--fix', '.'], { cwd: dirTemp });
+      assert.ok(!stderr.includes('Refusing'));
+      assert.ok(!stderr.includes('Do you want to continue?'));
+      assert.strictEqual(status, 0);
+      assert.match(fs.readFileSync(file, 'utf8'), RE_MERGED_AB);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
   });
 
   test('Excludes a selector via `-i` (short for `--ignore-selector`)', () => {

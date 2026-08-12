@@ -4,6 +4,12 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.1] - 2026-08-13
+
+### Changed
+
+* Renamed the positional argument to `path` in the help output and the README, matching that it takes files as well as directories
+
 ## [1.12.0] - 2026-08-12
 
 ### Changed

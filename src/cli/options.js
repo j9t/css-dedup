@@ -22,12 +22,12 @@ const OPTIONS_CONFIG = {
   help: { type: 'boolean', short: 'h', default: false },
 };
 
-const HELP = `Usage: css-dedup [options] [file…]
+const HELP = `Usage: css-dedup [options] [path…]
 
 Find (and optionally consolidate) duplicate CSS declarations.
 
 Arguments:
-  file  One or more CSS files or directories to analyze, defaulting to the current directory (directories are searched recursively for .css files, skipping node_modules and dotfolders); pass \`-\` to read from STDIN instead. Preprocessor sources (.scss, .sass, .less, .styl) are skipped—run CSS Dedup on the compiled style sheet.
+  path  One or more CSS files or directories to analyze, defaulting to the current directory (directories are searched recursively for .css files, skipping node_modules and dotfolders); pass \`-\` to read from STDIN instead. Preprocessor sources (.scss, .sass, .less, .styl) are skipped—run CSS Dedup on the compiled style sheet.
 
 Options:
   -f, --fix                        Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)

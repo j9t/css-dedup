@@ -4,6 +4,13 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-08-12
+
+### Changed
+
+* Switched to analyzing the current directory when no file is given, instead of printing help and exiting “1”
+* Changed to ask for confirmation before `--fix` rewrites a working directory nobody named; an explicit target (`css-dedup --fix .`) runs unprompted
+
 ## [1.11.0] - 2026-08-05
 
 ### Changed

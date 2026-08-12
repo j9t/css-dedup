@@ -63,8 +63,8 @@ export const RE_SYNTAX_ERROR_UNCLOSED = /Unclosed block/;
 // leaves `stdout`/`stderr` null and reports the cause on `result.error`—
 // defaulted to empty strings here so a caller doesn’t get a confusing throw
 // from string handling instead of the actual failure.
-function spawnCli(args, { env, ...spawnOptions } = {}) {
-  const result = spawnSync('node', [scriptPath, ...args], {
+function spawnCli(args, { env, nodeArgs = [], ...spawnOptions } = {}) {
+  const result = spawnSync('node', [...nodeArgs, scriptPath, ...args], {
     encoding: 'utf-8',
     timeout: 30_000,
     ...(env ? { env } : {}),
@@ -86,6 +86,16 @@ export function run(args, spawnOptions = {}) {
     status,
     error,
   };
+}
+
+// `--fix` only prompts when STDIN is a TTY, which `spawnSync` never provides.
+// The preload flips that one flag, leaving STDIN the ordinary pipe `input`
+// writes the answer into—so the prompt is exercised without the CLI needing a
+// test-only escape hatch of its own. Pass `''` for `input` to answer with EOF.
+const PRELOAD_TTY = 'data:text/javascript,process.stdin.isTTY = true;';
+
+export function runTty(args, input, spawnOptions = {}) {
+  return run(args, { ...spawnOptions, input, nodeArgs: ['--import', PRELOAD_TTY] });
 }
 
 // `run()` strips color codes—`node:util`’s `styleText` skips them itself

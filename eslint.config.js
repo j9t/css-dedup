@@ -20,7 +20,7 @@ export default [
       'no-var': 'error',
       'prefer-const': 'error',
       curly: ['error', 'multi-line'],
-      eqeqeq: ['error', 'always'],
+      eqeqeq: ['error', 'smart'],
     }
   }
 ];

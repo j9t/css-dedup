@@ -844,6 +844,6 @@ describe('Savings only', () => {
     const shrinkingAlone = '.p { margin: 0; padding: 0; }\n.q { margin: 0; top: 0; }\n.r { margin: 0; left: 0; }\n';
     const alone = dedup(shrinkingAlone).css;
     const mixed = dedup(cssMixed, { savingsOnly: true }).css;
-    assert.ok(mixed.endsWith(alone.trimStart()) || mixed.includes(alone.trim()));
+    assert.ok(mixed.includes(alone.trim()), `the shrinking cluster should consolidate exactly as it does on its own, but got:\n${mixed}`);
   });
 });

@@ -50,6 +50,26 @@ export const cssMixed = [
   '',
 ].join('\n');
 
+// A growing merge on a *nesting host*, plus a shrinking one among the rules
+// nested inside it. Declining the outer merge must leave the nested rules the
+// inner scope already holds references to intact, not swap in copies.
+export const cssNestedHost = [
+  '.very-long-selector-name-one {',
+  '  color: red;',
+  '',
+  '  &:hover {',
+  '    top: 0;',
+  '  }',
+  '',
+  '  &:focus {',
+  '    top: 0;',
+  '  }',
+  '}',
+  '',
+  '.b { color: red; }',
+  '',
+].join('\n');
+
 // Only mergeable in aggressive mode (canonicalizing the `<angle>` values is
 // aggressive-only), and—unlike `cssGrowingAggressive`—the merge shrinks the
 // file: Each rule holds only the one shared declaration, so folding them

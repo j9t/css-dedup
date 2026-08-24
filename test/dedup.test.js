@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { analyze, dedup } from '../src/index.js';
 import { normalizeValue } from '../src/lib/normalization.js';
 import { selectorsLikelyDisjoint } from '../src/lib/selectors.js';
-import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive, cssMixed } from './helpers.js';
+import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive, cssMixed, cssNestedHost } from './helpers.js';
 
 describe('Deduplication', () => {
   test('Treats a `)` inside a `/* … */` comment as text when scanning a `min()` call', () => {
@@ -802,6 +802,40 @@ describe('Savings only', () => {
     const { withheld, applied } = dedup(css, { savingsOnly: true });
     assert.ok(applied.length > 0);
     assert.strictEqual(withheld, undefined);
+  });
+
+  test('Declining a merge on a nesting host still merges the rules nested inside it', () => {
+    // The inner scope is collected before the outer merge runs, so a rollback
+    // that replaced `.a`’s children with copies would leave that scope
+    // merging a subtree no longer attached to the style sheet
+    const { css: output, applied, bytes } = dedup(cssNestedHost, { savingsOnly: true });
+
+    assert.match(output, /&:hover,\s*&:focus\s*{\s*top: 0;\s*}/);
+    assert.match(output, /\.very-long-selector-name-one\s*{\s*color: red;/);
+    assert.doesNotMatch(output, /\.very-long-selector-name-one,/);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(bytes.saved, Buffer.byteLength(cssNestedHost, 'utf8') - Buffer.byteLength(output, 'utf8'));
+    assert.ok(bytes.saved > 0);
+  });
+
+  test('Weighs each safe run of a blocked group on its own', () => {
+    // `background` is blocked in the middle, leaving two independent runs: a
+    // shrinking one (short selectors) and a growing one (long selectors).
+    // Gating them together would let either drag the other along.
+    const css = [
+      '.s1 { background: red; }',
+      '.s2 { background: red; }',
+      '.mid { background: blue; }',
+      '.a-very-long-selector-name-here { background: red; color: #fff; }',
+      '.another-very-long-selector-name { background: red; color: #000; }',
+      '',
+    ].join('\n');
+
+    const { css: output, bytes, withheld } = dedup(css, { savingsOnly: true });
+    assert.match(output, /\.s1,\s*\.s2\s*{\s*background: red;\s*}/);
+    assert.doesNotMatch(output, /\.a-very-long-selector-name-here,/);
+    assert.ok(bytes.saved > 0);
+    assert.strictEqual(withheld.count, 1);
   });
 
   test('Declining a merge leaves the merges around it byte-identical to an ungated run', () => {

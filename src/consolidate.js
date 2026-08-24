@@ -16,6 +16,7 @@ import {
   ownSelectors,
 } from './lib/scopes.js';
 import { usesMultilineSelectors, usesSpacedCommas } from './lib/style.js';
+import { resetByteCache } from './lib/transaction.js';
 
 // Conditional group rules whose empty block is inert. `@layer` is deliberately
 // absent: a layer’s position in the layer order is set by its first
@@ -61,8 +62,6 @@ function createContext(root, options, settle) {
     savingsOnly: options.savingsOnly ?? false,
     root,
     settle,
-    // Running size of the style sheet, carried between clusters (see `gated()`)
-    bytesNow: null,
     declined: [],
   };
 }
@@ -86,6 +85,10 @@ function runPass(root, ctx) {
     ctx.applied.push(...removeRedundantDuplicates(ctx, atrule, describeScope(atrule), [atRuleLabel(atrule)]));
   }
   for (const scope of scopes) foldSameSelectorRules(ctx, scope);
+
+  // The phases above rewrite rules the gate would otherwise measure against a
+  // stale cache; from here on the gate maintains it itself
+  resetByteCache(root);
   for (const scope of scopes) mergeDuplicateGroups(ctx, scope);
 }
 
@@ -126,9 +129,6 @@ function consolidateRoot(root, options = {}) {
     appliedCount = ctx.applied.length;
     ctx.skipped.length = 0;
     ctx.declined.length = 0;
-    // The phases before the gated merges change the style sheet, so the
-    // running size has to be taken afresh each pass
-    ctx.bytesNow = null;
     runPass(root, ctx);
   }
 

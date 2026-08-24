@@ -11,7 +11,7 @@ import { splitSelectors, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint 
 import { propertiesOverlap } from './lib/shorthands.js';
 import { insertAfter, joinSelectors, typicalSeparator } from './lib/style.js';
 import { declsOf, pushTo } from './lib/util.js';
-import { byteLength, rollback, snapshot } from './lib/transaction.js';
+import { costSince, rollback, snapshot } from './lib/transaction.js';
 
 // All occurrences of a key are equivalent by our own normalization rules, so
 // the merge keeps whichever raw spelling is shortest rather than whatever the
@@ -306,15 +306,17 @@ export function mergePartialGroup(ctx, scope, group, reason) {
     runs.at(-1).push(distinctRules[i]);
   }
 
+  // A blocking rule separates the runs, so each touches a disjoint set of
+  // rules and carries its own byte outcome—`savingsOnly` weighs them one by one
   for (const runRules of runs) {
     if (runRules.length < 2) continue;
     const runSet = new Set(runRules);
-    mergeSoloGroup(ctx, scope, {
+    gated(ctx, scope, [key], runRules, () => mergeSoloGroup(ctx, scope, {
       key,
       occurrences: occurrences.filter(occ => runSet.has(occ.rule)),
       distinctRules: runRules,
       propNormalized,
-    });
+    }));
   }
 
   // Whatever merged above resurfaces as a smaller group on the next
@@ -641,7 +643,7 @@ function clusterGroups(groups) {
 // Only declaration merges are gated. The other two strategies don’t cost
 // bytes: Collapsing a repeat within one rule removes text and adds none, and
 // folding two same-selector rules removes a whole selector and its braces.
-function gated(ctx, scope, cluster, apply) {
+function gated(ctx, scope, keys, rules, apply) {
   if (!ctx.savingsOnly) {
     apply();
     return;
@@ -653,30 +655,20 @@ function gated(ctx, scope, cluster, apply) {
   // first cluster of a pass—the phases before it are the ones that can leave a
   // block behind.
   ctx.settle();
-  // The style sheet only changes here between clusters, so the size measured
-  // after one accepted merge is the size the next one starts from: one
-  // stringify per cluster rather than a fresh before-and-after pair. Reset to
-  // `null` at the start of every pass, where the earlier phases have run.
-  ctx.bytesNow ??= byteLength(ctx.root);
 
-  const rules = [...new Set(cluster.flatMap(group => group.distinctRules))];
-  const snap = snapshot(scope, rules);
+  const snap = snapshot(ctx.root, scope, [...new Set(rules)]);
   const appliedBefore = ctx.applied.length;
 
   apply();
   ctx.settle();
 
-  const after = byteLength(ctx.root);
-  const cost = after - ctx.bytesNow;
-  if (cost <= 0) {
-    ctx.bytesNow = after;
-    return;
-  }
+  const cost = costSince(snap);
+  if (cost <= 0) return;
 
   rollback(snap, scope);
   // `skipped` is left as it stands—whatever the safety checks concluded about
   // this cluster is still true, and still worth reporting
-  ctx.declined.push({ scope: scope.label, keys: cluster.map(group => group.key), count: ctx.applied.length - appliedBefore, cost });
+  ctx.declined.push({ scope: scope.label, keys, count: ctx.applied.length - appliedBefore, cost });
   ctx.applied.length = appliedBefore;
 }
 
@@ -709,7 +701,7 @@ export function mergeDuplicateGroups(ctx, scope) {
     }
 
     if (!outsideBlocker) {
-      gated(ctx, scope, cluster, () => {
+      gated(ctx, scope, cluster.map(group => group.key), [...clusterRules], () => {
         if (cluster.length === 1) mergeSoloGroup(ctx, scope, cluster[0]);
         else mergeCluster(ctx, scope, cluster);
       });
@@ -721,11 +713,12 @@ export function mergeDuplicateGroups(ctx, scope) {
     const reason = `intervening ${propDescription} declaration in \`${blocking.rule.selector}\` (line ${blocking.rule.source?.start?.line})`;
 
     if (cluster.length === 1) {
-      gated(ctx, scope, cluster, () => mergePartialGroup(ctx, scope, group, reason));
+      mergePartialGroup(ctx, scope, group, reason);
       continue;
     }
 
-    gated(ctx, scope, cluster, () => {
+    // Entangled members share rules, so their runs can only be weighed as one
+    gated(ctx, scope, cluster.map(member => member.key), [...clusterRules], () => {
       for (const member of cluster) mergeClusterGroupRuns(ctx, scope, member);
     });
 

@@ -54,33 +54,20 @@ function slimPass(pass) {
   return { bytes: pass.bytes, unavailable: pass.applied.length === 0 };
 }
 
-// Mirrors `dedupRoot()`’s `savingsOnly` gate against an already-computed plain
-// pass, rather than running `dedup()` again just to reapply a rule that only
-// looks at the first pass’s own `bytes.saved`
-function applySavingsOnlyGate(pass) {
-  if (pass.bytes.saved >= 0) return pass;
-  return {
-    bytes: { before: pass.bytes.before, after: pass.bytes.before, saved: 0 },
-    applied: [],
-  };
-}
-
 // The report table’s four savings columns, in the order they’re rendered.
 // Named once here, where they’re produced, so the consumers in `report.js`
 // can’t drift out of sync with them.
 export const PASS_KEYS = ['passDefault', 'passDefaultS', 'passAgg', 'passAggS'];
 
-// Only two of the four actually run `dedup()`; the `-s` variants are derived
-// from those, since a second full pass would just reproduce the first one’s
-// `bytes` before the gate looks at them.
+// All four run `dedup()`. The `-s` variants can’t be derived from the ungated
+// ones: The gate decides per merge, so a file mixing merges that save with
+// merges that cost lands somewhere neither ungated figure predicts.
 function computeReportPasses(css, targetOptions) {
-  const passDefault = dedup(css, { ...targetOptions, aggressive: false, savingsOnly: false });
-  const passAgg = dedup(css, { ...targetOptions, aggressive: true, savingsOnly: false });
   return {
-    passDefault,
-    passDefaultS: applySavingsOnlyGate(passDefault),
-    passAgg,
-    passAggS: applySavingsOnlyGate(passAgg),
+    passDefault: dedup(css, { ...targetOptions, aggressive: false, savingsOnly: false }),
+    passDefaultS: dedup(css, { ...targetOptions, aggressive: false, savingsOnly: true }),
+    passAgg: dedup(css, { ...targetOptions, aggressive: true, savingsOnly: false }),
+    passAggS: dedup(css, { ...targetOptions, aggressive: true, savingsOnly: true }),
   };
 }
 

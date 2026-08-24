@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-* Changed `--savings-only` (`savingsOnly`) to decide per merge instead of per file, so a style sheet keeps the consolidations that save bytes even when others would lead to gains
+* Changed `--savings-only` (`savingsOnly`) to decide per merge instead of per file, so a style sheet keeps the consolidations that save bytes even when others in it would cost more than those save
   - Adjusted `withheld: { count, bytes }` to report the merges that were declined and what applying them, too, would have cost, rather than the whole file’s consolidation
 
 ## [1.12.1] - 2026-08-13

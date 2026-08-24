@@ -5,7 +5,7 @@ import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { poolSize, shouldParallelize } from '../src/cli/pool.js';
 import { dedup } from '../src/index.js';
-import { BEST_CELL, RE_MERGED_AB, RE_MERGED_AC, RE_PAYOFF_FIX, RE_SYNTAX_ERROR, RE_SYNTAX_ERROR_UNCLOSED, RE_WITHHELD_ONE, cssGrowing, cssGrowingAggressive, cssShrinkingAggressive, dirTest, findingsRow, fixturesDir, makeTempDir, run, runColor, runTty } from './helpers.js';
+import { BEST_CELL, RE_MERGED_AB, RE_MERGED_AC, RE_PAYOFF_FIX, RE_SYNTAX_ERROR, RE_SYNTAX_ERROR_UNCLOSED, RE_WITHHELD_ONE, cssGrowing, cssGrowingAggressive, cssMixed, cssShrinkingAggressive, dirTest, findingsRow, fixturesDir, makeTempDir, run, runColor, runTty } from './helpers.js';
 
 describe('CLI', () => {
   test('Shows help with `--help`', () => {
@@ -214,8 +214,48 @@ describe('CLI', () => {
       assert.ok(detailIndex < countsIndex);
       // The counts line—the run’s conclusion—must be among the last things
       // printed, not stranded above the skipped-group detail
-      assert.ok(stdout.includes('more declarations in aggressive mode'));
+      assert.match(stdout, /\d+ more declarations? in aggressive mode/);
       assert.match(stdout, /\* 0 declarations consolidated, 1 withheld:.*\n\* 1 finding skipped \(considered unsafe to auto-merge\)/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--fix --savings-only` keeps the merges that pay for themselves and reports the rest as withheld', () => {
+    const dirTemp = makeTempDir('temp_savings_partial');
+    const file = path.join(dirTemp, 'mixed.css');
+    fs.writeFileSync(file, cssMixed);
+
+    try {
+      const { stdout } = run(['--fix', '--savings-only', file]);
+      // The outcome line states what was consolidated, not that the file was
+      // left untouched—the gate decides per merge
+      assert.match(stdout, /\* \d+ declarations? consolidated: Reduced duplication and saved \d+ bytes \(\d+ → \d+ bytes, -\d+\.\d%\)/);
+      assert.doesNotMatch(stdout, /left this file untouched/);
+      assert.match(stdout, /\* 1 further merge withheld by `savingsOnly`—applying it too would grow by \d+ bytes \(\+\d+\.\d%\)/);
+
+      const output = fs.readFileSync(file, 'utf8');
+      assert.match(output, /\.p,\s*\.q,\s*\.r\s*{\s*margin: 0;\s*}/);
+      assert.match(output, /\.b\s*{\s*color: red;\s*}/);
+      assert.ok(Buffer.byteLength(output, 'utf8') < Buffer.byteLength(cssMixed, 'utf8'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('`--fix --savings-only` distinguishes a partly consolidated file from an untouched one in the overall summary', () => {
+    const dirTemp = makeTempDir('temp_multi_summary_partial');
+    const filePartial = path.join(dirTemp, 'partial.css');
+    const fileGrow = path.join(dirTemp, 'grow.css');
+    fs.writeFileSync(filePartial, cssMixed);
+    fs.writeFileSync(fileGrow, cssGrowing);
+
+    try {
+      const { stdout } = run(['--fix', '--savings-only', filePartial, fileGrow]);
+      assert.match(stdout, /\* 1 file left untouched by `--savings-only`/);
+      assert.match(stdout, /\* 1 file had further merges withheld by `--savings-only`—applying those too would have added \d+ bytes \(\d+\.\d% overall\) in total/);
+      assert.strictEqual(fs.readFileSync(fileGrow, 'utf8'), cssGrowing);
+      assert.notStrictEqual(fs.readFileSync(filePartial, 'utf8'), cssMixed);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

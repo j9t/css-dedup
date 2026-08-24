@@ -11,6 +11,7 @@ import { splitSelectors, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint 
 import { propertiesOverlap } from './lib/shorthands.js';
 import { insertAfter, joinSelectors, typicalSeparator } from './lib/style.js';
 import { declsOf, pushTo } from './lib/util.js';
+import { costSince, recordInsertion, rollback, snapshot } from './lib/transaction.js';
 
 // All occurrences of a key are equivalent by our own normalization rules, so
 // the merge keeps whichever raw spelling is shortest rather than whatever the
@@ -251,6 +252,7 @@ export function mergeSoloGroup(ctx, scope, group) {
   if (targetBeforeExtras) {
     beforeResidual = makeResidual(target, targetOriginalSelector, targetBeforeExtras);
     target.before(beforeResidual);
+    recordInsertion(beforeResidual);
     target.raws.before = interPieceSeparator;
   }
 
@@ -262,6 +264,7 @@ export function mergeSoloGroup(ctx, scope, group) {
 
     const residual = makeResidual(target, rule === target ? targetOriginalSelector : rule.selector, extras);
     insertAfter(insertPoint, residual, interPieceSeparator);
+    recordInsertion(residual);
     insertPoint = residual;
     afterResiduals.push(residual);
   }
@@ -305,15 +308,17 @@ export function mergePartialGroup(ctx, scope, group, reason) {
     runs.at(-1).push(distinctRules[i]);
   }
 
+  // A blocking rule separates the runs, so each touches a disjoint set of
+  // rules and carries its own byte outcome—`savingsOnly` weighs them one by one
   for (const runRules of runs) {
     if (runRules.length < 2) continue;
     const runSet = new Set(runRules);
-    mergeSoloGroup(ctx, scope, {
+    gated(ctx, scope, [key], runRules, () => mergeSoloGroup(ctx, scope, {
       key,
       occurrences: occurrences.filter(occ => runSet.has(occ.rule)),
       distinctRules: runRules,
       propNormalized,
-    });
+    }));
   }
 
   // Whatever merged above resurfaces as a smaller group on the next
@@ -431,6 +436,7 @@ function mergeClusterGroupRuns(ctx, scope, group) {
     if (lastDecl.value !== value) lastDecl.value = value;
     mergedRule.append(lastDecl);
     lastRule.after(mergedRule);
+    recordInsertion(mergedRule);
     scope.rules.splice(scope.rules.indexOf(lastRule) + 1, 0, mergedRule);
 
     // The clone inherited `lastRule`’s own `raws.before`—right if `lastRule`
@@ -535,8 +541,10 @@ function splitStarHub(ctx, scope, cluster, hub) {
   if (trailingGap.length) finalRules.push(makeResidual(hub, hubOriginalSelector, trailingGap));
 
   hub.before(finalRules[0]);
+  recordInsertion(finalRules[0]);
   for (let i = 1; i < finalRules.length; i++) {
     insertAfter(finalRules[i - 1], finalRules[i], interPieceSeparator);
+    recordInsertion(finalRules[i]);
   }
   hub.remove();
 
@@ -632,6 +640,41 @@ function clusterGroups(groups) {
   return [...clusters.values()];
 }
 
+// The `savingsOnly` gate, applied per cluster. Clusters are exactly the units
+// that can be decided independently—union-find has already put every group
+// sharing a rule into the same one—so accepting one and declining another
+// cannot leave a half-applied merge behind.
+//
+// Only declaration merges are gated. The other two strategies don’t cost
+// bytes: Collapsing a repeat within one rule removes text and adds none, and
+// folding two same-selector rules removes a whole selector and its braces.
+function gated(ctx, scope, keys, rules, apply) {
+  if (!ctx.savingsOnly) {
+    apply();
+    return;
+  }
+
+  // Measurements are taken with emptied conditional blocks already cleared
+  // away, so a block drained by an *earlier* cluster is not counted as this
+  // one’s saving. `settle()` is idempotent, so this only ever does work on the
+  // first cluster of a pass—the phases before it are the ones that can leave a
+  // block behind.
+  ctx.settle();
+
+  const snap = snapshot(ctx.root, scope, [...new Set(rules)]);
+  const appliedBefore = ctx.applied.length;
+
+  apply();
+  const cost = costSince(snap, ctx.settle());
+  if (cost <= 0) return;
+
+  rollback(snap, scope);
+  // `skipped` is left as it stands—whatever the safety checks concluded about
+  // this cluster is still true, and still worth reporting
+  ctx.declined.push({ scope: scope.label, keys, count: ctx.applied.length - appliedBefore, cost });
+  ctx.applied.length = appliedBefore;
+}
+
 export function mergeDuplicateGroups(ctx, scope) {
   const byKey = new Map();
   for (const rule of eligibleRules(scope, ctx.ignorePatterns)) {
@@ -661,8 +704,10 @@ export function mergeDuplicateGroups(ctx, scope) {
     }
 
     if (!outsideBlocker) {
-      if (cluster.length === 1) mergeSoloGroup(ctx, scope, cluster[0]);
-      else mergeCluster(ctx, scope, cluster);
+      gated(ctx, scope, cluster.map(group => group.key), [...clusterRules], () => {
+        if (cluster.length === 1) mergeSoloGroup(ctx, scope, cluster[0]);
+        else mergeCluster(ctx, scope, cluster);
+      });
       continue;
     }
 
@@ -675,8 +720,12 @@ export function mergeDuplicateGroups(ctx, scope) {
       continue;
     }
 
+    // Entangled members share rules, so their runs can only be weighed as one
+    gated(ctx, scope, cluster.map(member => member.key), [...clusterRules], () => {
+      for (const member of cluster) mergeClusterGroupRuns(ctx, scope, member);
+    });
+
     for (const member of cluster) {
-      mergeClusterGroupRuns(ctx, scope, member);
       ctx.skipped.push({
         scope: scope.label,
         key: member.key,

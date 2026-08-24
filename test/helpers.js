@@ -37,6 +37,74 @@ export const cssGrowingAggressive = [
   '',
 ].join('\n');
 
+// One cluster that grows the file (the long selector list costs more than the
+// removed `color` saves) and one that shrinks it (three short selectors share
+// `margin`), in a single style sheet. Clusters are independent, so a per-merge
+// gate applies the second and declines the first.
+export const cssMixed = [
+  '.very-long-selector-name-one { color: red; font-weight: bold; }',
+  '.b { color: red; }',
+  '.p { margin: 0; padding: 0; }',
+  '.q { margin: 0; top: 0; }',
+  '.r { margin: 0; left: 0; }',
+  '',
+].join('\n');
+
+// A growing merge on a *nesting host*, plus a shrinking one among the rules
+// nested inside it. Declining the outer merge must leave the nested rules the
+// inner scope already holds references to intact, not swap in copies.
+export const cssNestedHost = [
+  '.very-long-selector-name-one {',
+  '  color: red;',
+  '',
+  '  &:hover {',
+  '    top: 0;',
+  '  }',
+  '',
+  '  &:focus {',
+  '    top: 0;',
+  '  }',
+  '}',
+  '',
+  '.b { color: red; }',
+  '',
+].join('\n');
+
+// An entangled cluster: Three duplicate groups all sharing the hub rule, so
+// they can only be merged as one coordinated whole. The selectors are long
+// enough that the whole thing costs bytes, so `savingsOnly` must decline it
+// together—and its identity-preserving rollback has to survive the several
+// replacement rules the split creates.
+export const cssEntangledGrowing = [
+  '.hub-selector-that-is-long-here { color: red; top: 0; left: 0; }',
+  '.spoke-selector-number-one-here { color: red; }',
+  '.spoke-selector-number-two-here { top: 0; }',
+  '.spoke-selector-number-six-here { left: 0; }',
+  '',
+].join('\n');
+
+// The same shape where the merge pays off: Identical rules fold whole, so the
+// coordinated merge removes rules instead of lengthening selector lists
+export const cssEntangledShrinking = [
+  '.a-really-quite-long-selector-one { color: red; top: 0; }',
+  '.a-really-quite-long-selector-two { color: red; top: 0; }',
+  '.a-really-quite-long-selector-six { color: red; top: 0; }',
+  '',
+].join('\n');
+
+// A declined merge that first empties the *two* leading root rules: PostCSS
+// hands each removed first child’s `raws.before` to its successor, so the blank
+// line before `.mid` travels down the chain and has to be handed back on
+// rollback—byte for byte, or the file comes out reformatted.
+export const cssTwoLeadingRemovals = [
+  '.a { color: red; }',
+  '.b { color: red; }',
+  '',
+  '.mid { top: 0; }',
+  '.c-with-an-extremely-long-selector-name { color: red; padding: 0; }',
+  '',
+].join('\n');
+
 // Only mergeable in aggressive mode (canonicalizing the `<angle>` values is
 // aggressive-only), and—unlike `cssGrowingAggressive`—the merge shrinks the
 // file: Each rule holds only the one shared declaration, so folding them

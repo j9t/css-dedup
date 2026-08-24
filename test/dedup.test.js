@@ -3,7 +3,8 @@ import assert from 'node:assert';
 import { analyze, dedup } from '../src/index.js';
 import { normalizeValue } from '../src/lib/normalization.js';
 import { selectorsLikelyDisjoint } from '../src/lib/selectors.js';
-import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive } from './helpers.js';
+import { measuredByteTotal } from '../src/lib/transaction.js';
+import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive, cssEntangledGrowing, cssEntangledShrinking, cssMixed, cssNestedHost, cssTwoLeadingRemovals } from './helpers.js';
 
 describe('Deduplication', () => {
   test('Treats a `)` inside a `/* … */` comment as text when scanning a `min()` call', () => {
@@ -756,5 +757,173 @@ describe('Savings only', () => {
     const { css: output, withheld } = dedup(css, { aggressive: true, savingsOnly: true });
     assert.strictEqual(output, css);
     assert.strictEqual(withheld.count, 1);
+  });
+
+  test('Applies the merges that pay for themselves and declines only the ones that don\u2019t', () => {
+    const { css: output, applied, bytes, withheld } = dedup(cssMixed, { savingsOnly: true });
+
+    // The shrinking cluster merges…
+    assert.ok(applied.length > 0);
+    assert.match(output, /\.p,\s*\.q,\s*\.r\s*{\s*margin: 0;\s*}/);
+    // …while the growing one stays exactly as it was written
+    assert.match(output, /\.very-long-selector-name-one\s*{\s*color: red;\s*font-weight: bold;\s*}/);
+    assert.match(output, /\.b\s*{\s*color: red;\s*}/);
+    assert.doesNotMatch(output, /\.very-long-selector-name-one,/);
+
+    assert.strictEqual(withheld.count, 1);
+    assert.ok(withheld.bytes.saved < 0, 'the declined merge is reported with what it would have cost');
+    assert.ok(bytes.saved > 0, 'the run as a whole still shrinks the style sheet');
+    assert.strictEqual(bytes.after, Buffer.byteLength(output, 'utf8'));
+  });
+
+  test('Never grows the style sheet, whichever mix of merges a file offers', () => {
+    const cases = [cssGrowing, cssGrowingAggressive, cssMixed, '.a { color: red; }\n.b { color: red; }\n'];
+    for (const aggressive of [false, true]) {
+      for (const css of cases) {
+        const { css: output, bytes } = dedup(css, { savingsOnly: true, aggressive });
+        assert.ok(
+          Buffer.byteLength(output, 'utf8') <= Buffer.byteLength(css, 'utf8'),
+          `\`savingsOnly\` grew a style sheet (aggressive: ${aggressive})`
+        );
+        assert.ok(bytes.saved >= 0);
+      }
+    }
+  });
+
+  test('Leaves a file untouched when every merge it offers would grow it', () => {
+    const { css: output, applied, bytes, withheld } = dedup(cssGrowing, { savingsOnly: true });
+    assert.strictEqual(output, cssGrowing);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(bytes.saved, 0);
+    assert.strictEqual(withheld.count, 1);
+  });
+
+  test('Reports no `withheld` when every merge pays for itself', () => {
+    const css = '.a { color: red; top: 0; }\n.b { color: red; left: 0; }\n.c { color: red; right: 0; }\n';
+    const { withheld, applied } = dedup(css, { savingsOnly: true });
+    assert.ok(applied.length > 0);
+    assert.strictEqual(withheld, undefined);
+  });
+
+  test('Declining a merge on a nesting host still merges the rules nested inside it', () => {
+    // The inner scope is collected before the outer merge runs, so a rollback
+    // that replaced `.a`’s children with copies would leave that scope
+    // merging a subtree no longer attached to the style sheet
+    const { css: output, applied, bytes } = dedup(cssNestedHost, { savingsOnly: true });
+
+    assert.match(output, /&:hover,\s*&:focus\s*{\s*top: 0;\s*}/);
+    assert.match(output, /\.very-long-selector-name-one\s*{\s*color: red;/);
+    assert.doesNotMatch(output, /\.very-long-selector-name-one,/);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(bytes.saved, Buffer.byteLength(cssNestedHost, 'utf8') - Buffer.byteLength(output, 'utf8'));
+    assert.ok(bytes.saved > 0);
+  });
+
+  test('Weighs each safe run of a blocked group on its own', () => {
+    // `background` is blocked in the middle, leaving two independent runs: a
+    // shrinking one (short selectors) and a growing one (long selectors).
+    // Gating them together would let either drag the other along.
+    const css = [
+      '.s1 { background: red; }',
+      '.s2 { background: red; }',
+      '.mid { background: blue; }',
+      '.a-very-long-selector-name-here { background: red; color: #fff; }',
+      '.another-very-long-selector-name { background: red; color: #000; }',
+      '',
+    ].join('\n');
+
+    const { css: output, bytes, withheld } = dedup(css, { savingsOnly: true });
+    assert.match(output, /\.s1,\s*\.s2\s*{\s*background: red;\s*}/);
+    assert.doesNotMatch(output, /\.a-very-long-selector-name-here,/);
+    assert.ok(bytes.saved > 0);
+    assert.strictEqual(withheld.count, 1);
+  });
+
+  test('Declines an entangled cluster as a whole, leaving the style sheet untouched', () => {
+    // Its groups all share the hub rule, so they merge as one coordinated
+    // whole or not at all—and that whole grows the file
+    const ungated = dedup(cssEntangledGrowing);
+    assert.ok(ungated.bytes.saved < 0, 'fixture should grow the file when ungated');
+
+    const { css: output, applied, skipped, bytes, withheld } = dedup(cssEntangledGrowing, { savingsOnly: true });
+    assert.strictEqual(output, cssEntangledGrowing);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(bytes.saved, 0);
+    assert.strictEqual(withheld.count, ungated.applied.length);
+    assert.strictEqual(withheld.bytes.saved, ungated.bytes.saved);
+  });
+
+  test('Applies an entangled cluster that pays for itself, exactly as an ungated run does', () => {
+    const ungated = dedup(cssEntangledShrinking);
+    assert.ok(ungated.bytes.saved > 0);
+
+    const gated = dedup(cssEntangledShrinking, { savingsOnly: true });
+    assert.strictEqual(gated.css, ungated.css);
+    assert.strictEqual(gated.applied.length, ungated.applied.length);
+    assert.strictEqual(gated.withheld, undefined);
+  });
+
+  test('Restores leading whitespace when a declined merge emptied two rules at the top of the file', () => {
+    const ungated = dedup(cssTwoLeadingRemovals);
+    assert.ok(ungated.bytes.saved < 0, 'fixture should grow the file when ungated');
+    // The merge empties both leading rules before it is undone
+    assert.ok(!ungated.css.startsWith('.a {') && !ungated.css.includes('\n.b {'));
+
+    for (const aggressive of [false, true]) {
+      const { css: output, applied, bytes } = dedup(cssTwoLeadingRemovals, { savingsOnly: true, aggressive });
+      assert.strictEqual(output, cssTwoLeadingRemovals, `output should be restored byte for byte (aggressive: ${aggressive})`);
+      assert.strictEqual(applied.length, 0);
+      assert.strictEqual(bytes.saved, 0);
+    }
+  });
+
+  test('Prices a merge from the rules it touches, not from the whole style sheet', () => {
+    // Doubling the number of duplicate groups should roughly double the work
+    // the gate does. If pricing one merge re-serializes everything around it,
+    // the work grows with the file instead—which is how three separate
+    // quadratic regressions in this accounting first showed up.
+    const build = (groups, indent) => {
+      let css = '';
+      for (let index = 0; index < groups; index++) {
+        const one = `.a${index}`.padEnd(28, 'x');
+        const two = `.b${index}`.padEnd(28, 'y');
+        css += `${indent}${one} { color: #${index % 900 + 100}; z-index: ${index}; }\n`;
+        css += `${indent}${two} { color: #${index % 900 + 100}; top: ${index}px; }\n`;
+      }
+      return css;
+    };
+    // Both at the root and inside one shared block, where every group's
+    // enclosing subtree is the whole rest of the file
+    const shapes = {
+      root: groups => build(groups, ''),
+      block: groups => `@media (min-width: 40em) {\n${build(groups, '  ')}}\n`,
+    };
+
+    for (const [shape, make] of Object.entries(shapes)) {
+      const work = groups => {
+        const before = measuredByteTotal();
+        dedup(make(groups), { savingsOnly: true });
+        return measuredByteTotal() - before;
+      };
+      const small = work(50);
+      const large = work(200);
+      // Four times the groups, so linear pricing lands near four times the
+      // work; the bound is loose enough for the fixed-point loop's extra
+      // passes, and far under the sixteen-fold a quadratic pass would cost
+      assert.ok(
+        large < small * 8,
+        `pricing scales with the file rather than the merge (${shape}): ${small} → ${large} bytes measured`
+      );
+    }
+  });
+
+  test('Declining a merge leaves the merges around it byte-identical to an ungated run', () => {
+    // The gate must not perturb what it does not decline: The shrinking
+    // cluster has to come out exactly as it would on its own
+    const shrinkingAlone = '.p { margin: 0; padding: 0; }\n.q { margin: 0; top: 0; }\n.r { margin: 0; left: 0; }\n';
+    const alone = dedup(shrinkingAlone).css;
+    const mixed = dedup(cssMixed, { savingsOnly: true }).css;
+    assert.ok(mixed.includes(alone.trim()), `the shrinking cluster should consolidate exactly as it does on its own, but got:\n${mixed}`);
   });
 });

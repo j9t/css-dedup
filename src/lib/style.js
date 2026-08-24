@@ -18,6 +18,13 @@ export function resetSeparatorCache() {
   separatorCache = new WeakMap();
 }
 
+// A speculative merge that gets rolled back may already have had its
+// separator computed—off a container holding residuals that no longer exist.
+// Dropping the entry lets the next caller tally the restored tree.
+export function forgetSeparator(container) {
+  separatorCache.delete(container);
+}
+
 // The gap most sibling nodes carry—the container’s prevailing “normal”
 // separation between rules. A majority vote, not just whichever neighbor is
 // handy, since that neighbor can be the anomaly. A gap straight after a

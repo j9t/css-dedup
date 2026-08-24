@@ -252,6 +252,7 @@ export function mergeSoloGroup(ctx, scope, group) {
   if (targetBeforeExtras) {
     beforeResidual = makeResidual(target, targetOriginalSelector, targetBeforeExtras);
     target.before(beforeResidual);
+    recordInsertion(beforeResidual);
     target.raws.before = interPieceSeparator;
   }
 
@@ -540,6 +541,7 @@ function splitStarHub(ctx, scope, cluster, hub) {
   if (trailingGap.length) finalRules.push(makeResidual(hub, hubOriginalSelector, trailingGap));
 
   hub.before(finalRules[0]);
+  recordInsertion(finalRules[0]);
   for (let i = 1; i < finalRules.length; i++) {
     insertAfter(finalRules[i - 1], finalRules[i], interPieceSeparator);
     recordInsertion(finalRules[i]);

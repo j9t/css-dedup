@@ -3,7 +3,8 @@ import assert from 'node:assert';
 import { analyze, dedup } from '../src/index.js';
 import { normalizeValue } from '../src/lib/normalization.js';
 import { selectorsLikelyDisjoint } from '../src/lib/selectors.js';
-import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive, cssEntangledGrowing, cssEntangledShrinking, cssMixed, cssNestedHost } from './helpers.js';
+import { measuredByteTotal } from '../src/lib/transaction.js';
+import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive, cssEntangledGrowing, cssEntangledShrinking, cssMixed, cssNestedHost, cssTwoLeadingRemovals } from './helpers.js';
 
 describe('Deduplication', () => {
   test('Treats a `)` inside a `/* … */` comment as text when scanning a `min()` call', () => {
@@ -861,6 +862,60 @@ describe('Savings only', () => {
     assert.strictEqual(gated.css, ungated.css);
     assert.strictEqual(gated.applied.length, ungated.applied.length);
     assert.strictEqual(gated.withheld, undefined);
+  });
+
+  test('Restores leading whitespace when a declined merge emptied two rules at the top of the file', () => {
+    const ungated = dedup(cssTwoLeadingRemovals);
+    assert.ok(ungated.bytes.saved < 0, 'fixture should grow the file when ungated');
+    // The merge empties both leading rules before it is undone
+    assert.ok(!ungated.css.startsWith('.a {') && !ungated.css.includes('\n.b {'));
+
+    for (const aggressive of [false, true]) {
+      const { css: output, applied, bytes } = dedup(cssTwoLeadingRemovals, { savingsOnly: true, aggressive });
+      assert.strictEqual(output, cssTwoLeadingRemovals, `output should be restored byte for byte (aggressive: ${aggressive})`);
+      assert.strictEqual(applied.length, 0);
+      assert.strictEqual(bytes.saved, 0);
+    }
+  });
+
+  test('Prices a merge from the rules it touches, not from the whole style sheet', () => {
+    // Doubling the number of duplicate groups should roughly double the work
+    // the gate does. If pricing one merge re-serializes everything around it,
+    // the work grows with the file instead—which is how three separate
+    // quadratic regressions in this accounting first showed up.
+    const build = (groups, indent) => {
+      let css = '';
+      for (let index = 0; index < groups; index++) {
+        const one = `.a${index}`.padEnd(28, 'x');
+        const two = `.b${index}`.padEnd(28, 'y');
+        css += `${indent}${one} { color: #${index % 900 + 100}; z-index: ${index}; }\n`;
+        css += `${indent}${two} { color: #${index % 900 + 100}; top: ${index}px; }\n`;
+      }
+      return css;
+    };
+    // Both at the root and inside one shared block, where every group's
+    // enclosing subtree is the whole rest of the file
+    const shapes = {
+      root: groups => build(groups, ''),
+      block: groups => `@media (min-width: 40em) {\n${build(groups, '  ')}}\n`,
+    };
+
+    for (const [shape, make] of Object.entries(shapes)) {
+      const work = groups => {
+        const before = measuredByteTotal();
+        dedup(make(groups), { savingsOnly: true });
+        return measuredByteTotal() - before;
+      };
+      const small = work(50);
+      const large = work(200);
+      // Four times the groups, so linear pricing lands near four times the
+      // work; the bound is loose enough for the fixed-point loop's extra
+      // passes, and far under the sixteen-fold a quadratic pass would cost
+      assert.ok(
+        large < small * 8,
+        `pricing scales with the file rather than the merge (${shape}): ${small} → ${large} bytes measured`
+      );
+    }
   });
 
   test('Declining a merge leaves the merges around it byte-identical to an ungated run', () => {

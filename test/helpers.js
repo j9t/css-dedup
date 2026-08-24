@@ -92,6 +92,19 @@ export const cssEntangledShrinking = [
   '',
 ].join('\n');
 
+// A declined merge that first empties the *two* leading root rules: PostCSS
+// hands each removed first child’s `raws.before` to its successor, so the blank
+// line before `.mid` travels down the chain and has to be handed back on
+// rollback—byte for byte, or the file comes out reformatted.
+export const cssTwoLeadingRemovals = [
+  '.a { color: red; }',
+  '.b { color: red; }',
+  '',
+  '.mid { top: 0; }',
+  '.c-with-an-extremely-long-selector-name { color: red; padding: 0; }',
+  '',
+].join('\n');
+
 // Only mergeable in aggressive mode (canonicalizing the `<angle>` values is
 // aggressive-only), and—unlike `cssGrowingAggressive`—the merge shrinks the
 // file: Each rule holds only the one shared declaration, so folding them

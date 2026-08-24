@@ -39,6 +39,14 @@ export function recordInsertion(node) {
   if (insertions) insertions.push(node);
 }
 
+// How much text the gate has serialized to price merges;
+// exported for the scaling test
+let measuredBytes = 0;
+
+export function measuredByteTotal() {
+  return measuredBytes;
+}
+
 function textBytes(text) {
   return text ? Buffer.byteLength(text, 'utf8') : 0;
 }
@@ -46,7 +54,9 @@ function textBytes(text) {
 // `toString()` does not include a node’s own leading whitespace, so it counts
 // separately—the two together are exactly what the node adds to the output
 function measureNode(node) {
-  return textBytes(node.raws.before) + Buffer.byteLength(node.toString(), 'utf8');
+  const bytes = textBytes(node.raws.before) + Buffer.byteLength(node.toString(), 'utf8');
+  measuredBytes += bytes;
+  return bytes;
 }
 
 function cachedBytes(node) {
@@ -64,13 +74,26 @@ function remeasure(node) {
   return bytes;
 }
 
-// The leading root children whose spacing a removal can rewrite: the run that
-// could be removed, plus the first node that would outlive it
-function captureFront(root) {
+// The root-level subtrees this merge could remove: its rules, or the blocks
+// holding them, which `settle()` clears away once drained
+function removableAtRoot(root, rules) {
+  const removable = new Set();
+  for (const rule of rules) {
+    let node = rule;
+    while (node.parent && node.parent !== root) node = node.parent;
+    if (node.parent === root) removable.add(node);
+  }
+  return removable;
+}
+
+// The leading root children whose spacing a removal can rewrite. PostCSS hands
+// each removed first child’s `raws.before` down the line, so a run of removals
+// at the front reaches the first child that outlives them—no further.
+function captureFront(root, removable) {
   const front = new Map();
   for (const node of root.nodes) {
     front.set(node, node.raws.before);
-    if (front.size > 1) break;
+    if (!removable.has(node)) break;
   }
   return front;
 }
@@ -151,7 +174,7 @@ export function snapshot(root, scope, rules) {
     // a node this merge never touched can still change size. That override
     // lives on `Root` alone—a nested container just splices—so only the root’s
     // own leading children need recording.
-    frontBefores: captureFront(root),
+    frontBefores: captureFront(root, removableAtRoot(root, rules)),
     // Residual rules are appended here as merges create them, so the array
     // itself is state a rollback has to restore
     scopeRules: scope.rules.slice(),

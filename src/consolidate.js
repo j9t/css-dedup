@@ -24,20 +24,25 @@ import { resetByteCache } from './lib/transaction.js';
 // the cascade.
 const INERT_WHEN_EMPTY_ATRULES = new Set(['media', 'supports', 'container']);
 
-// Aggressive mode’s cross-block merges can drain the earlier of two
-// same-condition blocks completely. This removes such blocks—only ones this
-// run emptied, and only where emptiness is provably inert. The walk collects
-// candidates parents-first, so the reverse pass sees each inner block before
-// its parent and a parent emptied by its child’s removal is caught in the same
-// sweep.
-function removeEmptiedConditionBlocks(root, initiallyEmpty) {
+// Every block aggressive mode could later find emptied, innermost first—so one
+// sweep sees each inner block before its parent, and a parent emptied by its
+// child’s removal is caught in the same pass. Collected once per run.
+function collectConditionBlocks(root) {
   const candidates = [];
   root.walkAtRules(atrule => {
     if (INERT_WHEN_EMPTY_ATRULES.has(atrule.name.toLowerCase())) candidates.push(atrule);
   });
+  return candidates.reverse();
+}
 
+// Aggressive mode’s cross-block merges can drain the earlier of two
+// same-condition blocks completely. This removes such blocks—only ones this
+// run emptied, and only where emptiness is provably inert.
+function removeEmptiedConditionBlocks(candidates, initiallyEmpty) {
   const removed = [];
-  for (const atrule of candidates.reverse()) {
+  for (const atrule of candidates) {
+    // Gone already, in this sweep or an earlier one
+    if (!atrule.parent) continue;
     if (atrule.nodes && !atrule.nodes.length && !initiallyEmpty.has(atrule)) {
       // Measured before it goes: standing empty, all that’s left of it is the
       // wrapper the `savingsOnly` gate needs to price
@@ -111,16 +116,18 @@ function consolidateRoot(root, options = {}) {
   // removes what this run emptied
   const initiallyEmpty = new Set();
   const aggressive = options.aggressive ?? false;
+  const conditionBlocks = aggressive ? collectConditionBlocks(root) : [];
   if (aggressive) {
-    root.walkAtRules(atrule => {
+    for (const atrule of conditionBlocks) {
       if (atrule.nodes && !atrule.nodes.length) initiallyEmpty.add(atrule);
-    });
+    }
   }
 
   // Bringing the style sheet to the state it would ship in. Idempotent, so the
   // gate can call it around every merge it weighs and the run can call it once
-  // more at the end.
-  const settle = () => (aggressive ? removeEmptiedConditionBlocks(root, initiallyEmpty) : []);
+  // more at the end—which is why the candidate list is gathered once rather
+  // than re-walked on each of those calls.
+  const settle = () => (aggressive ? removeEmptiedConditionBlocks(conditionBlocks, initiallyEmpty) : []);
   const ctx = createContext(root, options, settle);
 
   // One merge can unblock or create another: a fresh merged rule may twin with

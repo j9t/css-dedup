@@ -17,36 +17,36 @@ function affectedContainers(rules) {
   return [...containers];
 }
 
-export function byteLength(root) {
-  return Buffer.byteLength(root.toString(), 'utf8');
-}
-
-// Measuring a merge by re-serializing the whole style sheet costs the file’s
-// size per cluster, which on a sheet made of many small duplicate groups turns
-// the gate quadratic. A merge only ever changes the top-level subtrees its own
-// rules sit in, though, so only those need measuring—everything else cancels
-// between the before and after sums.
-//
-// Byte counts are cached per node and invalidated by re-measuring exactly the
-// subtrees a merge touched. `raws.before` belongs to the node, so a sibling
-// moving never changes a neighbor’s contribution.
+// A merge is priced from the few rules it actually rewrites,
+// and everything around them cancels out untouched
 let byteCache = new WeakMap();
-// Which nodes were already root children when the pass began, so a residual a
-// merge inserts can be told apart from a rule that was always there
-let knownRootChildren = new WeakSet();
+// Nodes already in the tree when the pass began, so a rule a merge inserts can
+// be told from one that was always there
+let knownNodes = new WeakSet();
+// Where the merge strategies report the rules they insert. Finding those any
+// other way means scanning a container, which is the cost this exists to
+// avoid—but the accounting below still reconciles against the container’s
+// child count, so a strategy that forgets to report is slow, never wrong.
+let insertions = null;
 
 export function resetByteCache(root) {
   byteCache = new WeakMap();
-  knownRootChildren = new WeakSet();
-  for (const node of root.nodes) knownRootChildren.add(node);
+  knownNodes = new WeakSet();
+  root.walk(node => knownNodes.add(node));
+}
+
+export function recordInsertion(node) {
+  if (insertions) insertions.push(node);
 }
 
 function textBytes(text) {
   return text ? Buffer.byteLength(text, 'utf8') : 0;
 }
 
+// `toString()` does not include a node’s own leading whitespace, so it counts
+// separately—the two together are exactly what the node adds to the output
 function measureNode(node) {
-  return Buffer.byteLength((node.raws.before ?? '') + node.toString(), 'utf8');
+  return textBytes(node.raws.before) + Buffer.byteLength(node.toString(), 'utf8');
 }
 
 function cachedBytes(node) {
@@ -64,26 +64,13 @@ function remeasure(node) {
   return bytes;
 }
 
-// The root-level ancestors of the rules a merge touches—the subtrees whose
-// serialization it can change
-function topLevelRegion(root, rules) {
-  const region = new Set();
-  for (const rule of rules) {
-    let node = rule;
-    while (node.parent && node.parent !== root) node = node.parent;
-    if (node.parent === root) region.add(node);
-  }
-  return region;
-}
-
-// The leading run of root children this merge could remove, plus the first one
-// it could not—the only nodes whose leading whitespace PostCSS can rewrite
-function captureFront(root, region) {
+// The leading root children whose spacing a removal can rewrite: the run that
+// could be removed, plus the first node that would outlive it
+function captureFront(root) {
   const front = new Map();
-  if (!root.nodes.length || !region.has(root.nodes[0])) return front;
   for (const node of root.nodes) {
     front.set(node, node.raws.before);
-    if (!region.has(node)) break;
+    if (front.size > 1) break;
   }
   return front;
 }
@@ -127,34 +114,44 @@ function restoreNode(entry) {
 }
 
 /**
- * Everything needed to put a scope back exactly as it stands right now.
- * Cheap enough to take per cluster—it walks one cluster’s rules, not the
- * style sheet.
+ * Everything needed to put a scope back exactly as it stands right now, and to
+ * price what happens in between. Cheap enough to take per cluster—it walks one
+ * cluster’s rules, not the style sheet.
  */
 export function snapshot(root, scope, rules) {
-  const region = topLevelRegion(root, rules);
-  // Per node, not just the sum: A rollback has to put these back into the
+  // Per rule, not just the sum: a rollback has to put these back into the
   // cache, or the speculative measurement would outlive the tree it described
-  const regionBefore = new Map();
-  let regionBytes = 0;
-  for (const node of region) {
-    const bytes = cachedBytes(node);
-    regionBefore.set(node, bytes);
-    regionBytes += bytes;
+  const ruleBefore = new Map();
+  let ruleBytes = 0;
+  for (const rule of rules) {
+    const bytes = cachedBytes(rule);
+    ruleBefore.set(rule, bytes);
+    ruleBytes += bytes;
   }
+
+  // Where each rule started, and the child counts of those containers, so the
+  // reconciliation below can tell a genuine gap from an expected one
+  const ruleParent = new Map();
+  const counts = new Map();
+  for (const rule of rules) {
+    if (!rule.parent) continue;
+    ruleParent.set(rule, rule.parent);
+    counts.set(rule.parent, rule.parent.nodes.length);
+  }
+
+  insertions = [];
 
   return {
     root,
-    region,
-    regionBefore,
-    regionBytes,
-    rootLength: root.nodes.length,
-    // PostCSS hands a removed first child's `raws.before` to its successor, so
-    // a node this merge never touched can still change size. Only a removal at
-    // the very front can do that, and only region subtrees are ever removed—so
-    // recording the leading run of them, plus the one node that could be
-    // promoted past it, is enough to measure and undo.
-    frontBefores: captureFront(root, region),
+    ruleBefore,
+    ruleBytes,
+    ruleParent,
+    counts,
+    // PostCSS hands a removed first child’s `raws.before` to its successor, so
+    // a node this merge never touched can still change size. That override
+    // lives on `Root` alone—a nested container just splices—so only the root’s
+    // own leading children need recording.
+    frontBefores: captureFront(root),
     // Residual rules are appended here as merges create them, so the array
     // itself is state a rollback has to restore
     scopeRules: scope.rules.slice(),
@@ -163,48 +160,76 @@ export function snapshot(root, scope, rules) {
   };
 }
 
+// Rules the merge reported inserting, plus—only where a container’s child
+// count disagrees with what those reports account for—whatever else turned up
+// in it. The scan is the safety net: It makes an unreported insertion cost a
+// container walk rather than a wrong answer.
+function insertedNodes(snap) {
+  const found = new Set();
+  const perContainer = new Map();
+
+  for (const node of insertions) {
+    if (!node.parent || knownNodes.has(node) || found.has(node)) continue;
+    found.add(node);
+    perContainer.set(node.parent, (perContainer.get(node.parent) ?? 0) + 1);
+  }
+
+  for (const [container, before] of snap.counts) {
+    // A container the merge removed outright is priced as a whole, not by its
+    // children
+    if (!container.parent && container !== snap.root) continue;
+
+    let gone = 0;
+    for (const [rule, parent] of snap.ruleParent) {
+      if (parent === container && rule.parent !== container) gone++;
+    }
+    if (container.nodes.length === before - gone + (perContainer.get(container) ?? 0)) continue;
+
+    for (const node of container.nodes) {
+      if (!knownNodes.has(node)) found.add(node);
+    }
+  }
+
+  return [...found];
+}
+
 /**
  * What the merge just performed cost, in bytes of the whole style sheet.
  * Negative means it paid for itself.
  */
-export function costSince(snap) {
-  const { root, region, frontBefores } = snap;
+export function costSince(snap, removedContainers) {
+  const { root, ruleBefore, frontBefores } = snap;
   let after = 0;
-  let detached = 0;
 
-  // Only region subtrees can have changed, so they are the only ones worth
-  // re-measuring; a removed one contributes nothing and its old size stays
-  // counted in `regionBytes`
-  for (const node of region) {
-    if (node.parent === root) after += remeasure(node);
-    else detached++;
+  // A rule the merge removed contributes nothing, and its old size stays
+  // counted in `ruleBytes`
+  for (const rule of ruleBefore.keys()) {
+    if (rule.parent) after += remeasure(rule);
   }
 
-  // Anything else at root level is a residual this merge created. Counting
-  // gives that away without a scan: only when the arithmetic doesn’t add up is
-  // there something new to look for.
-  snap.inserted = null;
-  if (root.nodes.length !== snap.rootLength - detached) {
-    snap.inserted = [];
-    for (const node of root.nodes) {
-      if (region.has(node) || knownRootChildren.has(node)) continue;
-      after += remeasure(node);
-      knownRootChildren.add(node);
-      snap.inserted.push(node);
-    }
+  snap.inserted = insertedNodes(snap);
+  for (const node of snap.inserted) {
+    after += remeasure(node);
+    knownNodes.add(node);
   }
+  insertions = null;
+
+  // A conditional block `settle()` cleared away. Its rules are already
+  // accounted for above; what goes with it is the block’s own wrapper, which
+  // is all that is left to measure now that it stands empty.
+  let wrappers = 0;
+  for (const container of removedContainers) wrappers += measureNode(container);
 
   // A node whose leading whitespace PostCSS rewrote when it promoted a new
-  // first child. Region nodes are excluded: their re-measurement above already
-  // reflects the new spacing.
+  // first child, and that nothing above has re-measured
   let respaced = 0;
   for (const [node, before] of frontBefores) {
-    if (region.has(node) || node.parent !== root || before === node.raws.before) continue;
+    if (ruleBefore.has(node) || node.parent !== root || before === node.raws.before) continue;
     respaced += textBytes(node.raws.before) - textBytes(before);
     byteCache.delete(node);
   }
 
-  return after - snap.regionBytes + respaced;
+  return after - snap.ruleBytes - wrappers + respaced;
 }
 
 // Restores the child lists first (which un-removes emptied rules and drops
@@ -214,9 +239,9 @@ export function costSince(snap) {
 // live across a rollback.
 export function rollback(snap, scope) {
   // The speculative pass remeasured these; put the real figures back
-  for (const [node, bytes] of snap.regionBefore) byteCache.set(node, bytes);
+  for (const [node, bytes] of snap.ruleBefore) byteCache.set(node, bytes);
   // Residuals it inserted are about to be dropped—they were never really here
-  if (snap.inserted) for (const node of snap.inserted) knownRootChildren.delete(node);
+  if (snap.inserted) for (const node of snap.inserted) knownNodes.delete(node);
 
   // …and undo any re-spacing PostCSS did when it promoted a new first child
   for (const [node, before] of snap.frontBefores) {

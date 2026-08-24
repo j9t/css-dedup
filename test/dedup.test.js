@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { analyze, dedup } from '../src/index.js';
 import { normalizeValue } from '../src/lib/normalization.js';
 import { selectorsLikelyDisjoint } from '../src/lib/selectors.js';
-import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive, cssMixed, cssNestedHost } from './helpers.js';
+import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive, cssEntangledGrowing, cssEntangledShrinking, cssMixed, cssNestedHost } from './helpers.js';
 
 describe('Deduplication', () => {
   test('Treats a `)` inside a `/* … */` comment as text when scanning a `min()` call', () => {
@@ -836,6 +836,31 @@ describe('Savings only', () => {
     assert.doesNotMatch(output, /\.a-very-long-selector-name-here,/);
     assert.ok(bytes.saved > 0);
     assert.strictEqual(withheld.count, 1);
+  });
+
+  test('Declines an entangled cluster as a whole, leaving the style sheet untouched', () => {
+    // Its groups all share the hub rule, so they merge as one coordinated
+    // whole or not at all—and that whole grows the file
+    const ungated = dedup(cssEntangledGrowing);
+    assert.ok(ungated.bytes.saved < 0, 'fixture should grow the file when ungated');
+
+    const { css: output, applied, skipped, bytes, withheld } = dedup(cssEntangledGrowing, { savingsOnly: true });
+    assert.strictEqual(output, cssEntangledGrowing);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(skipped.length, 0);
+    assert.strictEqual(bytes.saved, 0);
+    assert.strictEqual(withheld.count, ungated.applied.length);
+    assert.strictEqual(withheld.bytes.saved, ungated.bytes.saved);
+  });
+
+  test('Applies an entangled cluster that pays for itself, exactly as an ungated run does', () => {
+    const ungated = dedup(cssEntangledShrinking);
+    assert.ok(ungated.bytes.saved > 0);
+
+    const gated = dedup(cssEntangledShrinking, { savingsOnly: true });
+    assert.strictEqual(gated.css, ungated.css);
+    assert.strictEqual(gated.applied.length, ungated.applied.length);
+    assert.strictEqual(gated.withheld, undefined);
   });
 
   test('Declining a merge leaves the merges around it byte-identical to an ungated run', () => {

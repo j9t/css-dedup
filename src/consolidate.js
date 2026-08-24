@@ -36,9 +36,16 @@ function removeEmptiedConditionBlocks(root, initiallyEmpty) {
     if (INERT_WHEN_EMPTY_ATRULES.has(atrule.name.toLowerCase())) candidates.push(atrule);
   });
 
+  const removed = [];
   for (const atrule of candidates.reverse()) {
-    if (atrule.nodes && !atrule.nodes.length && !initiallyEmpty.has(atrule)) atrule.remove();
+    if (atrule.nodes && !atrule.nodes.length && !initiallyEmpty.has(atrule)) {
+      // Measured before it goes: standing empty, all that’s left of it is the
+      // wrapper the `savingsOnly` gate needs to price
+      removed.push(atrule);
+      atrule.remove();
+    }
   }
+  return removed;
 }
 
 // Everything the merge strategies need from this run. The normalization mode
@@ -113,9 +120,7 @@ function consolidateRoot(root, options = {}) {
   // Bringing the style sheet to the state it would ship in. Idempotent, so the
   // gate can call it around every merge it weighs and the run can call it once
   // more at the end.
-  const settle = () => {
-    if (aggressive) removeEmptiedConditionBlocks(root, initiallyEmpty);
-  };
+  const settle = () => (aggressive ? removeEmptiedConditionBlocks(root, initiallyEmpty) : []);
   const ctx = createContext(root, options, settle);
 
   // One merge can unblock or create another: a fresh merged rule may twin with

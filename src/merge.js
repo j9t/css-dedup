@@ -11,7 +11,7 @@ import { splitSelectors, selectorsAreMutuallyExclusive, selectorsLikelyDisjoint 
 import { propertiesOverlap } from './lib/shorthands.js';
 import { insertAfter, joinSelectors, typicalSeparator } from './lib/style.js';
 import { declsOf, pushTo } from './lib/util.js';
-import { costSince, rollback, snapshot } from './lib/transaction.js';
+import { costSince, recordInsertion, rollback, snapshot } from './lib/transaction.js';
 
 // All occurrences of a key are equivalent by our own normalization rules, so
 // the merge keeps whichever raw spelling is shortest rather than whatever the
@@ -263,6 +263,7 @@ export function mergeSoloGroup(ctx, scope, group) {
 
     const residual = makeResidual(target, rule === target ? targetOriginalSelector : rule.selector, extras);
     insertAfter(insertPoint, residual, interPieceSeparator);
+    recordInsertion(residual);
     insertPoint = residual;
     afterResiduals.push(residual);
   }
@@ -434,6 +435,7 @@ function mergeClusterGroupRuns(ctx, scope, group) {
     if (lastDecl.value !== value) lastDecl.value = value;
     mergedRule.append(lastDecl);
     lastRule.after(mergedRule);
+    recordInsertion(mergedRule);
     scope.rules.splice(scope.rules.indexOf(lastRule) + 1, 0, mergedRule);
 
     // The clone inherited `lastRule`’s own `raws.before`—right if `lastRule`
@@ -540,6 +542,7 @@ function splitStarHub(ctx, scope, cluster, hub) {
   hub.before(finalRules[0]);
   for (let i = 1; i < finalRules.length; i++) {
     insertAfter(finalRules[i - 1], finalRules[i], interPieceSeparator);
+    recordInsertion(finalRules[i]);
   }
   hub.remove();
 
@@ -660,9 +663,7 @@ function gated(ctx, scope, keys, rules, apply) {
   const appliedBefore = ctx.applied.length;
 
   apply();
-  ctx.settle();
-
-  const cost = costSince(snap);
+  const cost = costSince(snap, ctx.settle());
   if (cost <= 0) return;
 
   rollback(snap, scope);

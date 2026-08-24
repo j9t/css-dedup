@@ -70,6 +70,28 @@ export const cssNestedHost = [
   '',
 ].join('\n');
 
+// An entangled cluster: Three duplicate groups all sharing the hub rule, so
+// they can only be merged as one coordinated whole. The selectors are long
+// enough that the whole thing costs bytes, so `savingsOnly` must decline it
+// together—and its identity-preserving rollback has to survive the several
+// replacement rules the split creates.
+export const cssEntangledGrowing = [
+  '.hub-selector-that-is-long-here { color: red; top: 0; left: 0; }',
+  '.spoke-selector-number-one-here { color: red; }',
+  '.spoke-selector-number-two-here { top: 0; }',
+  '.spoke-selector-number-six-here { left: 0; }',
+  '',
+].join('\n');
+
+// The same shape where the merge pays off: Identical rules fold whole, so the
+// coordinated merge removes rules instead of lengthening selector lists
+export const cssEntangledShrinking = [
+  '.a-really-quite-long-selector-one { color: red; top: 0; }',
+  '.a-really-quite-long-selector-two { color: red; top: 0; }',
+  '.a-really-quite-long-selector-six { color: red; top: 0; }',
+  '',
+].join('\n');
+
 // Only mergeable in aggressive mode (canonicalizing the `<angle>` values is
 // aggressive-only), and—unlike `cssGrowingAggressive`—the merge shrinks the
 // file: Each rule holds only the one shared declaration, so folding them

@@ -34,7 +34,7 @@ Findings -f (-a)  Savings with: -f  -f -s           -f -a           -f -a -s
 Legend: -f: --fix, -a: --aggressive, -s: --savings-only
 ```
 
-(A cell reads `n/a` when no findings would be safe to apply, or if `--savings-only` would decline the merge for growing the file.)
+(A cell reads `n/a` when no findings would be safe to apply, or if `--savings-only` would decline every merge on offer for growing the file.)
 
 Running with `--fix` folds `.a` and `.b` into a single rule for the shared declaration:
 
@@ -50,15 +50,15 @@ Running with `--fix` folds `.a` and `.b` into a single rule for the shared decla
 
 ```shell
 $ npx css-dedup --fix default.css
-1 consolidated, 0 skipped
 
-63 → 53 bytes (-10 B, -15.9%)
-Wrote default.css
+Summary:
+* 1 declaration consolidated: Reduced duplication and saved 10 bytes (64 → 54 bytes, -15.6%)
+* Wrote default.css
 ```
 
 Since duplicate declarations cost bytes wherever they live—in the style sheet itself, and (uncompressed) over the wire—the byte counts reflect two payoffs at once: less to maintain, and less to transfer.
 
-The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. CSS Dedup’s two modes call this out, so it’s a decision you can make consciously—it’s worth it if you value using declarations once for maintainability, yet not if you’re optimizing purely for transfer size. (`--fix --savings-only` automates that call: A file whose consolidation would grow it is left untouched.)
+The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. CSS Dedup’s two modes call this out, so it’s a decision you can make consciously—it’s worth it if you value using declarations once for maintainability, yet not if you’re optimizing purely for transfer size. (`--fix --savings-only` automates that call, merge by merge: Every consolidation that would grow the style sheet is left out, and the ones that pay for themselves still apply.)
 
 ## Usage
 
@@ -76,7 +76,7 @@ The input is CSS. A preprocessor source named as an argument (.scss, .sass, .les
 | --- | --- |
 | `--fix`, `-f` | Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for `-`) |
 | `--aggressive`, `-a` | Also apply merges that are probably—but not provably—safe (see [aggressive mode](#aggressive-mode)); only applies together with `--fix`, since report mode’s table already previews both variants automatically |
-| `--savings-only`, `-s` | Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file); only applies together with `--fix`, since report mode doesn’t write |
+| `--savings-only`, `-s` | Leave out each consolidation that would make the file bigger rather than smaller, keeping the ones that save bytes (checked per merge); only applies together with `--fix`, since report mode doesn’t write |
 | `--ignore-selector <pattern>`, `-i` | Regular expression for selectors to exclude from analysis (repeatable) |
 | `--no-ignore-selectors-defaults`, `-n` | Disable the built-in selector hack ignore list |
 | `--ignore-path <pattern>`, `-p` | Regular expression tested against each file’s path, relative to the working directory; a match excludes the file (repeatable) |
@@ -112,7 +112,7 @@ These are the supported options with their defaults (each can be omitted):
 // css-dedup.config.js
 export default {
   aggressive: false,              // set to `true` to also allow probably-safe merges
-  savingsOnly: false,             // set to `true` to skip files whose consolidation would grow them (`--fix` runs only)
+  savingsOnly: false,             // set to `true` to leave out the individual merges that would grow the file (`--fix` runs only)
   ignoreSelectors: [],            // additional selector patterns to exclude, e.g., `[/^\.legacy-/]`
   ignoreSelectorsDefaults: true,  // set to `false` to disable the built-in hack list
   ignorePaths: [],                // file paths to exclude, matched relative to the working directory, e.g., `[/dist\//]`
@@ -141,7 +141,7 @@ Both functions accept an options object:
 {
   from: 'path/to/file.css',         // forwarded to PostCSS; names the file in syntax-error messages
   aggressive: false,                // set to `true` to also allow probably-safe merges
-  savingsOnly: false,               // set to `true` to withhold a consolidation that would grow the style sheet (`dedup()` only)
+  savingsOnly: false,               // set to `true` to withhold each merge that would grow the style sheet (`dedup()` only)
   ignoreSelectors: [/^\.legacy-/],  // additional selector patterns to exclude
   ignoreSelectorsDefaults: true     // set to `false` to disable the built-in hack list
 }
@@ -162,9 +162,9 @@ Both functions accept an options object:
 
 `dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten style sheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the style sheet before and after, since that’s what changes over the wire, not the character count, covering everything `--fix` did as one net figure.
 
-`saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. With `savingsOnly: true`, a consolidation whose net `saved` would be negative is withheld: `css` comes back untouched, `applied` is empty, `bytes` reports no change (that’s what actually happened), and the declined outcome arrives as `withheld: { count, bytes }`—the number of merges and the byte counts the consolidation would have had (`withheld` is absent whenever nothing was withheld). `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
+`saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. With `savingsOnly: true`, each merge that would make `saved` more negative is withheld on its own, leaving the rest in place: `css` comes back with whatever paid for itself applied, `bytes` reports what actually happened, and the declined merges arrive as `withheld: { count, bytes }`—how many, and the byte counts the style sheet would have had with them applied too (`withheld` is absent whenever nothing was withheld). A file offering nothing but growing merges therefore still comes back untouched, with `applied` empty; one that mixes them keeps its savings. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
 
-`dedup()` additionally returns `sourceMapStale: true` when the style sheet passed in carried a `/*# sourceMappingURL=… */` comment _and_ the run actually rewrote it—the CLI’s source map caveat in machine-readable form, so a wrapper can surface it instead of shipping a broken map unnoticed. It’s absent otherwise, including when nothing was applied or the consolidation was withheld, since the style sheet (and hence the map’s accuracy) is then unchanged. `dedupRoot()` doesn’t report it, deliberately: It’s what [the PostCSS plugin](#postcss-plugin) calls, and that path stringifies through PostCSS, which emits a correct map of its own.
+`dedup()` additionally returns `sourceMapStale: true` when the style sheet passed in carried a `/*# sourceMappingURL=… */` comment _and_ the run actually rewrote it—the CLI’s source map caveat in machine-readable form, so a wrapper can surface it instead of shipping a broken map unnoticed. It’s absent otherwise, including when nothing was applied or every merge was withheld, since the style sheet (and hence the map’s accuracy) is then unchanged. `dedupRoot()` doesn’t report it, deliberately: It’s what [the PostCSS plugin](#postcss-plugin) calls, and that path stringifies through PostCSS, which emits a correct map of its own.
 
 ### PostCSS Plugin
 
@@ -183,7 +183,7 @@ const fixed = await postcss([cssdedup({ fix: true })]).process(css, { from: 'def
 console.log(fixed.css);
 ```
 
-The plugin takes the same options as `analyze()`/`dedup()`, plus `fix: true` to switch it into consolidation mode (`aggressive: true` and `savingsOnly: true` work here, too—a withheld consolidation leaves the root untouched and surfaces as a warning). Since CSS Dedup is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it fits well early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may overlap with work those tools do. (CSS Dedup also works as a last step, however, as with applying `--savings-only` optimizations to minified files.)
+The plugin takes the same options as `analyze()`/`dedup()`, plus `fix: true` to switch it into consolidation mode (`aggressive: true` and `savingsOnly: true` work here, too—withheld merges are left out of the root and surface as a warning). Since CSS Dedup is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it fits well early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may overlap with work those tools do. (CSS Dedup also works as a last step, however, as with applying `--savings-only` optimizations to minified files.)
 
 ## How It Works
 
@@ -227,6 +227,7 @@ CSS Dedup:
    - If a merged rule (including the last occurrence itself) also carries a declaration for an overlapping property, that declaration is split out into its own small rule—keeping that occurrence’s own, original selector—placed right after the merged rule, rather than blocking the merge outright: Folding every selector onto one shared declaration block would otherwise hand that overlapping extra to selectors that never had it. Exception: If that extra is itself duplicated elsewhere in the same scope, it’s left alone and the whole merge is skipped instead, since splitting it here would orphan that other duplicate’s own merge.
    - If something does block it, the merge is skipped and reported rather than risking a cascade change. A blocker fences, though—it doesn’t forbid: Occurrences on the same side of it still consolidate among themselves (their own spans are clean, so the same safety argument applies), and the group is reported as skipped either way, since the duplicate keeps existing across the blocker.
    - Consolidation runs to a fixed point: One merge can unblock or create another (a fresh merged rule may repeat an existing rule’s selector list, an emptied rule stops fencing a span), so the passes repeat until nothing changes.
+   - With `--savings-only`, each merge is weighed on its own before it stands: The consolidation is performed, the style sheet measured, and the merge undone again if it turned out to cost bytes. Entangled groups are weighed together, since they can only be applied together; the strategies that can’t cost bytes (collapsing a repeat within one rule, folding two same-selector rules) aren’t weighed at all. Measuring the real thing beats predicting it—a merge that empties a rule or a conditional block saves far more than its declaration arithmetic suggests.
 
 Overall, CSS Dedup is conservative by design and will leave some safe merges for manual review.
 
@@ -282,7 +283,7 @@ src/
   index.js             Public API (re-exports only)
   plugin.js            PostCSS plugin wrapper
   analyze.js           Read-only detection (step 5 above)
-  consolidate.js       The `savingsOnly` gate and the fixed-point loop
+  consolidate.js       The fixed-point loop and the result shape
   merge.js             The merge strategies (step 6 above)
 
   lib/                 Engine internals
@@ -294,6 +295,7 @@ src/
     shorthands.js      Shorthand/longhand overlap
     hacks.js           The default selector ignore list (step 3)
     caches.js          Per-run memoization lifecycle
+    transaction.js     Snapshot/rollback, for weighing one merge’s bytes
     util.js            Shared helpers
 
   cli/                 CLI internals

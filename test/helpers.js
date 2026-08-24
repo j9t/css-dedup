@@ -37,6 +37,19 @@ export const cssGrowingAggressive = [
   '',
 ].join('\n');
 
+// One cluster that grows the file (the long selector list costs more than the
+// removed `color` saves) and one that shrinks it (three short selectors share
+// `margin`), in a single style sheet. Clusters are independent, so a per-merge
+// gate applies the second and declines the first.
+export const cssMixed = [
+  '.very-long-selector-name-one { color: red; font-weight: bold; }',
+  '.b { color: red; }',
+  '.p { margin: 0; padding: 0; }',
+  '.q { margin: 0; top: 0; }',
+  '.r { margin: 0; left: 0; }',
+  '',
+].join('\n');
+
 // Only mergeable in aggressive mode (canonicalizing the `<angle>` values is
 // aggressive-only), and—unlike `cssGrowingAggressive`—the merge shrinks the
 // file: Each rule holds only the one shared declaration, so folding them

@@ -117,8 +117,10 @@ function renderFixPass(payload, { isStdin, label, multi, flags }) {
 
   // The outcome first, then this run’s footnotes on it (growth caveat,
   // aggressive-only warning, where it was written), then the two
-  // forward-looking items (what was skipped, what `--aggressive` adds)
-  if (withheld) {
+  // forward-looking items (what was skipped, what `--aggressive` adds).
+  // The gate decides per merge, so a file can come out partly consolidated—
+  // “left this file untouched” only fits the run where nothing survived it.
+  if (withheld && !applied) {
     log(`* 0 declarations consolidated, ${withheld.count} withheld: \`savingsOnly\` left this file untouched—consolidating would ${formatByteDeltaClause(withheld.bytes.saved, withheld.bytes.before)}`);
   } else {
     log(`* ${applied} declaration${plural(applied)} consolidated${applied ? `: ${formatAppliedReduceClause(bytes)}` : ''}`);
@@ -127,6 +129,9 @@ function renderFixPass(payload, { isStdin, label, multi, flags }) {
   if (applied) {
     if (bytes.saved < 0) {
       log('* Worth it for maintainability (each declaration used once); skip `--fix` here if you care more about transfer size.');
+    }
+    if (withheld) {
+      log(`* ${withheld.count} further merge${plural(withheld.count)} withheld by \`savingsOnly\`—applying ${withheld.count !== 1 ? 'them' : 'it'} too would ${formatByteDeltaClause(withheld.bytes.saved, withheld.bytes.before)}`);
     }
     if (aggressiveDiffers) {
       const share = aggressiveOnly > 0
@@ -267,8 +272,12 @@ function printOverallFixSummary(ok) {
   const shrinkTotal = sumBy(filesShrink, result => result.stats.bytesSaved);
   const growTotal = Math.abs(sumBy(filesGrow, result => result.stats.bytesSaved));
 
-  const withheldFiles = ok.filter(result => result.stats.withheldCount > 0);
+  // Split by what the gate left behind—a file where nothing survived it, and
+  // one that kept the merges that paid for themselves, warrant different words
+  const withheldFiles = ok.filter(result => result.stats.withheldCount > 0 && !result.stats.applied);
   const withheldGrowthTotal = sumBy(withheldFiles, result => result.stats.withheldGrowth);
+  const partialFiles = ok.filter(result => result.stats.withheldCount > 0 && result.stats.applied);
+  const partialGrowthTotal = sumBy(partialFiles, result => result.stats.withheldGrowth);
 
   const aggFiles = ok.filter(result => result.stats.aggDiffers);
   const aggFilesShrink = aggFiles.filter(result => result.stats.aggExtraSaved > 0);
@@ -298,6 +307,9 @@ function printOverallFixSummary(ok) {
   }
   if (withheldFiles.length) {
     console.log(`* ${withheldFiles.length} file${plural(withheldFiles.length)} left untouched by \`--savings-only\`—consolidating would have made ${withheldFiles.length !== 1 ? 'them' : 'it'} ${formatBytesShareOfTotal(withheldGrowthTotal, totalBeforeAll)} bigger in total`);
+  }
+  if (partialFiles.length) {
+    console.log(`* ${partialFiles.length} file${plural(partialFiles.length)} had further merges withheld by \`--savings-only\`—applying those too would have added ${formatBytesShareOfTotal(partialGrowthTotal, totalBeforeAll)} in total`);
   }
 
   if (!aggFiles.length) return;

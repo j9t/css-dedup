@@ -4,6 +4,17 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-08-24
+
+### Fixed
+
+* Corrected the `--fix` example output in the README
+
+### Changed
+
+* Changed `--savings-only` (`savingsOnly`) to decide per merge instead of per file, so a style sheet keeps the consolidations that save bytes even when others would lead to gains
+  - Adjusted `withheld: { count, bytes }` to report the merges that were declined and what applying them, too, would have cost, rather than the whole file’s consolidation
+
 ## [1.12.1] - 2026-08-13
 
 ### Changed

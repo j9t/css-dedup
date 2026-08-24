@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { analyze, dedup } from '../src/index.js';
 import { normalizeValue } from '../src/lib/normalization.js';
 import { selectorsLikelyDisjoint } from '../src/lib/selectors.js';
-import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive } from './helpers.js';
+import { RE_MERGED_AB, RE_MERGED_AC, cssGrowing, cssGrowingAggressive, cssMixed } from './helpers.js';
 
 describe('Deduplication', () => {
   test('Treats a `)` inside a `/* … */` comment as text when scanning a `min()` call', () => {
@@ -756,5 +756,60 @@ describe('Savings only', () => {
     const { css: output, withheld } = dedup(css, { aggressive: true, savingsOnly: true });
     assert.strictEqual(output, css);
     assert.strictEqual(withheld.count, 1);
+  });
+
+  test('Applies the merges that pay for themselves and declines only the ones that don\u2019t', () => {
+    const { css: output, applied, bytes, withheld } = dedup(cssMixed, { savingsOnly: true });
+
+    // The shrinking cluster merges…
+    assert.ok(applied.length > 0);
+    assert.match(output, /\.p,\s*\.q,\s*\.r\s*{\s*margin: 0;\s*}/);
+    // …while the growing one stays exactly as it was written
+    assert.match(output, /\.very-long-selector-name-one\s*{\s*color: red;\s*font-weight: bold;\s*}/);
+    assert.match(output, /\.b\s*{\s*color: red;\s*}/);
+    assert.doesNotMatch(output, /\.very-long-selector-name-one,/);
+
+    assert.strictEqual(withheld.count, 1);
+    assert.ok(withheld.bytes.saved < 0, 'the declined merge is reported with what it would have cost');
+    assert.ok(bytes.saved > 0, 'the run as a whole still shrinks the style sheet');
+    assert.strictEqual(bytes.after, Buffer.byteLength(output, 'utf8'));
+  });
+
+  test('Never grows the style sheet, whichever mix of merges a file offers', () => {
+    const cases = [cssGrowing, cssGrowingAggressive, cssMixed, '.a { color: red; }\n.b { color: red; }\n'];
+    for (const aggressive of [false, true]) {
+      for (const css of cases) {
+        const { css: output, bytes } = dedup(css, { savingsOnly: true, aggressive });
+        assert.ok(
+          Buffer.byteLength(output, 'utf8') <= Buffer.byteLength(css, 'utf8'),
+          `\`savingsOnly\` grew a style sheet (aggressive: ${aggressive})`
+        );
+        assert.ok(bytes.saved >= 0);
+      }
+    }
+  });
+
+  test('Leaves a file untouched when every merge it offers would grow it', () => {
+    const { css: output, applied, bytes, withheld } = dedup(cssGrowing, { savingsOnly: true });
+    assert.strictEqual(output, cssGrowing);
+    assert.strictEqual(applied.length, 0);
+    assert.strictEqual(bytes.saved, 0);
+    assert.strictEqual(withheld.count, 1);
+  });
+
+  test('Reports no `withheld` when every merge pays for itself', () => {
+    const css = '.a { color: red; top: 0; }\n.b { color: red; left: 0; }\n.c { color: red; right: 0; }\n';
+    const { withheld, applied } = dedup(css, { savingsOnly: true });
+    assert.ok(applied.length > 0);
+    assert.strictEqual(withheld, undefined);
+  });
+
+  test('Declining a merge leaves the merges around it byte-identical to an ungated run', () => {
+    // The gate must not perturb what it does not decline: The shrinking
+    // cluster has to come out exactly as it would on its own
+    const shrinkingAlone = '.p { margin: 0; padding: 0; }\n.q { margin: 0; top: 0; }\n.r { margin: 0; left: 0; }\n';
+    const alone = dedup(shrinkingAlone).css;
+    const mixed = dedup(cssMixed, { savingsOnly: true }).css;
+    assert.ok(mixed.endsWith(alone.trimStart()) || mixed.includes(alone.trim()));
   });
 });

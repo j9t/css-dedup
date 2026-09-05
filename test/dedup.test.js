@@ -759,7 +759,7 @@ describe('Savings only', () => {
     assert.strictEqual(withheld.count, 1);
   });
 
-  test('Applies the merges that pay for themselves and declines only the ones that don\u2019t', () => {
+  test('Applies the merges that pay for themselves and declines only the ones that don’t', () => {
     const { css: output, applied, bytes, withheld } = dedup(cssMixed, { savingsOnly: true });
 
     // The shrinking cluster merges…

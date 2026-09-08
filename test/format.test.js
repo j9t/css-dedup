@@ -125,6 +125,11 @@ describe('Summary clauses', () => {
     assert.match(formatAggressivePreviewLine(0, 100, 1000, 50), /^\* Further consolidation in aggressive mode: /);
   });
 
+  test('Carries `--savings-only` into the command the aggressive preview suggests', () => {
+    assert.match(formatAggressivePreviewLine(1, 100, 1000, 50), /with `--fix --aggressive`/);
+    assert.match(formatAggressivePreviewLine(1, 100, 1000, 50, true), /with `--fix --aggressive --savings-only`/);
+  });
+
   test('Quotes the combined total, not just its own delta, in the aggressive preview’s trailing note', () => {
     // 50 already saved by `--fix`, 100 more from aggressive → 150 combined
     assert.match(formatAggressivePreviewLine(1, 100, 1000, 50), /\(total: -150 bytes \/ -15\.0%\)$/);

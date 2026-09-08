@@ -111,6 +111,17 @@ export const cssTwoLeadingRemovals = [
 // removes a whole rule instead of just adding to a selector list
 export const cssShrinkingAggressive = '.a { transform: rotate(90deg); }\n.b { transform: rotate(100grad); }\n';
 
+// Mergeable in both modes, but aggressive pulls a third rule—reachable only by
+// canonicalizing the `<angle>` values—into the cluster, and its long selector
+// costs more than the extra fold saves: Gated, the aggressive re-run comes out
+// behind the gated default pass.
+export const cssAggressiveCostlierMerge = [
+  '.a { transform: rotate(90deg); }',
+  '.b { transform: rotate(90deg); }',
+  '.a-very-long-selector-name-here-indeed { transform: rotate(100grad); color: red; }',
+  '',
+].join('\n');
+
 // Assertion patterns shared across several tests
 export const RE_WITHHELD_ONE = /1 withheld/;
 export const RE_MERGED_AB = /\.a,\s*\.b\s*{\s*color: red;\s*}/;

@@ -2,7 +2,8 @@
 // a structured-cloneable payload for `css-dedup.js` to render. Split out so the
 // same pass runs on the main thread or on a worker (see `pool.js`).
 
-import { writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { analyze, dedup } from '../index.js';
 import { declarationKey } from '../lib/normalization.js';
 
@@ -76,6 +77,31 @@ function computeReportPasses(css, targetOptions) {
   };
 }
 
+// Replace a file only after the complete new content is safely staged beside
+// it. `realpath()` intentionally follows a final symlink: `writeFile()` used
+// to write through one, and replacing the link itself would be surprising.
+// `rename()` is atomic when both paths share a directory/filesystem, so an
+// interruption can leave either version, never a target truncated to zero.
+async function replaceFileAtomically(label, output) {
+  const target = await realpath(label);
+  const source = await stat(target);
+  const stageDir = await mkdtemp(join(dirname(target), `.${basename(target)}.css-dedup-`));
+  const staged = join(stageDir, 'replacement.css');
+
+  try {
+    await writeFile(staged, output);
+    // `writeFile()` creates a fresh file using the process umask. Give the
+    // replacement the target’s mode before it becomes visible in its place.
+    await chmod(staged, source.mode);
+    await rename(staged, target);
+  } finally {
+    // Covers write/chmod/rename failures. A forced process termination cannot
+    // run cleanup, but it can at most leave this private, clearly named stage
+    // directory behind; the original target remains intact until `rename()`.
+    await rm(stageDir, { recursive: true, force: true });
+  }
+}
+
 // `--fix`: consolidate, and write where there’s a file to write. The write
 // happens here, not at render time, so a parallel run does its I/O on the
 // worker. STDIN has no file, so its output rides back on the payload.
@@ -100,7 +126,7 @@ async function computeFixPass(css, targetOptions, { isStdin, label }) {
   }
 
   const wrote = !isStdin && applied.length > 0;
-  if (wrote) await writeFile(label, output);
+  if (wrote) await replaceFileAtomically(label, output);
 
   return {
     mode: 'fix',

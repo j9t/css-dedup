@@ -30,7 +30,7 @@ Arguments:
   path  One or more CSS files or directories to analyze, defaulting to the current directory (directories are searched recursively for .css files, skipping node_modules and dotfolders); pass \`-\` to read from STDIN instead. Preprocessor sources (.scss, .sass, .less, .styl) are skipped—run CSS Dedup on the compiled style sheet.
 
 Options:
-  -f, --fix                        Consolidate declarations that are safe to merge automatically, rewriting each file in place (or printing to STDOUT for \`-\`)
+  -f, --fix                        Consolidate declarations that are safe to merge automatically, atomically replacing each file (or printing to STDOUT for \`-\`)
   -a, --aggressive                 Also apply merges that are probably—but not provably—safe (test afterwards); only applies together with \`--fix\`
   -s, --savings-only               Leave a file untouched when its consolidation would make it bigger, not smaller (checked per file); only applies together with \`--fix\`
   -i, --ignore-selector <pattern>  Regular expression for selectors to exclude from analysis (repeatable)

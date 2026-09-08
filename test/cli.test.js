@@ -62,6 +62,45 @@ describe('CLI', () => {
     }
   });
 
+  const skipFileModeTest = process.platform === 'win32' ? 'POSIX file modes are not available on Windows' : false;
+
+  test('`--fix` atomically replaces a file while preserving its mode', { skip: skipFileModeTest }, () => {
+    const dirTemp = makeTempDir('temp_atomic_fix');
+    const file = path.join(dirTemp, 'executable.css');
+    fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n');
+    fs.chmodSync(file, 0o754);
+
+    try {
+      const { status } = run(['--fix', file]);
+      assert.strictEqual(status, 0);
+      assert.match(fs.readFileSync(file, 'utf8'), RE_MERGED_AB);
+      assert.strictEqual(fs.statSync(file).mode & 0o777, 0o754);
+      assert.deepStrictEqual(fs.readdirSync(dirTemp), ['executable.css']);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  const skipSymlinkFixTest = process.platform === 'win32' ? 'creating symlinks requires extra Windows privileges' : false;
+
+  test('`--fix` follows a symlink target instead of replacing the link', { skip: skipSymlinkFixTest }, () => {
+    const dirTemp = makeTempDir('temp_atomic_fix_symlink');
+    const target = path.join(dirTemp, 'target.css');
+    const link = path.join(dirTemp, 'linked.css');
+    fs.writeFileSync(target, '.a { color: red; }\n.b { color: red; }\n');
+    fs.symlinkSync('target.css', link);
+
+    try {
+      const { status } = run(['--fix', link]);
+      assert.strictEqual(status, 0);
+      assert.ok(fs.lstatSync(link).isSymbolicLink());
+      assert.match(fs.readFileSync(target, 'utf8'), RE_MERGED_AB);
+      assert.strictEqual(fs.readFileSync(link, 'utf8'), fs.readFileSync(target, 'utf8'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
   test('Runs `--fix` without a target once the prompt is answered', () => {
     const dirTemp = makeTempDir('temp_prompt_accept');
     const file = path.join(dirTemp, 'prompted.css');

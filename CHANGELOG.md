@@ -4,6 +4,12 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.2] - 2026-09-08
+
+### Fixed
+
+* Made `--fix` stage a replacement beside each target and atomically rename it into place, so an interrupted write cannot leave a CSS file empty; original file modes are retained, and a symlink argument continues to update its destination rather than replacing the link
+
 ## [1.13.1] - 2026-09-08
 
 ### Fixed

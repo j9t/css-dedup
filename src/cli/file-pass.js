@@ -32,15 +32,20 @@ function skippedWithAggressive(potential) {
 }
 
 // What `--aggressive` would add on top of this run’s real outcome, measured
-// against a discarded opposite-mode pass (`potential`)—shared by `--fix`
-// and report mode, which differ only in which CSS string and `bytes` they
-// compare it against (the written output vs. a discarded dry run)
-function computeAggressivePreview(potential, resultCss, applied, bytes) {
-  const aggDiffers = Boolean(potential && potential.css !== resultCss);
-  if (!aggDiffers) return { aggExtra: 0, aggExtraSaved: 0, aggDiffers: false };
+// against a discarded opposite-mode pass (`potential`) run under the same
+// settings—report mode has its own four passes instead
+function computeAggressivePreview(potential, resultCss, applied, bytes, savingsOnly) {
+  const none = { aggExtra: 0, aggExtraSaved: 0, aggDiffers: false };
+  if (!potential || potential.css === resultCss) return none;
+
+  const aggExtraSaved = potential.bytes.saved - bytes.saved;
+  // Both passes went through the same gate, so an aggressive re-run that saves
+  // less is strictly worse—not a trade to offer a `savingsOnly` run
+  if (savingsOnly && aggExtraSaved < 0) return none;
+
   return {
     aggExtra: potential.applied.length - applied.length,
-    aggExtraSaved: potential.bytes.saved - bytes.saved,
+    aggExtraSaved,
     aggDiffers: true,
   };
 }
@@ -111,7 +116,7 @@ async function computeFixPass(css, targetOptions, { isStdin, label }) {
     aggressiveDiffers,
     aggressiveOnly,
     wrote,
-    ...computeAggressivePreview(potential, output, applied, bytes),
+    ...computeAggressivePreview(potential, output, applied, bytes, targetOptions.savingsOnly),
   };
 }
 

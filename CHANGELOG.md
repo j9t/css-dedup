@@ -4,6 +4,12 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.1] - 2026-09-08
+
+### Fixed
+
+* Corrected the aggressive-mode preview of `--fix` runs using `--savings-only`: It now names the gated command its figures come from (`--fix --aggressive --savings-only`), and is left out where that re-run would save less than the run just did
+
 ## [1.13.0] - 2026-08-24
 
 ### Fixed

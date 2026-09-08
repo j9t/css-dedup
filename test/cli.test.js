@@ -5,7 +5,7 @@ import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { poolSize, shouldParallelize } from '../src/cli/pool.js';
 import { dedup } from '../src/index.js';
-import { BEST_CELL, RE_MERGED_AB, RE_MERGED_AC, RE_PAYOFF_FIX, RE_SYNTAX_ERROR, RE_SYNTAX_ERROR_UNCLOSED, RE_WITHHELD_ONE, cssGrowing, cssGrowingAggressive, cssMixed, cssShrinkingAggressive, dirTest, findingsRow, fixturesDir, makeTempDir, run, runColor, runTty } from './helpers.js';
+import { BEST_CELL, RE_MERGED_AB, RE_MERGED_AC, RE_PAYOFF_FIX, RE_SYNTAX_ERROR, RE_SYNTAX_ERROR_UNCLOSED, RE_WITHHELD_ONE, cssAggressiveCostlierMerge, cssGrowing, cssGrowingAggressive, cssMixed, cssShrinkingAggressive, dirTest, findingsRow, fixturesDir, makeTempDir, run, runColor, runTty } from './helpers.js';
 
 describe('CLI', () => {
   test('Shows help with `--help`', () => {
@@ -373,6 +373,39 @@ describe('CLI', () => {
     }
   });
 
+  test('Suppresses the `--aggressive` preview under `--savings-only` when the gated re-run would save less', () => {
+    const dirTemp = makeTempDir('temp_aggressive_saves_less');
+    const file = path.join(dirTemp, 'less.css');
+    fs.writeFileSync(file, cssAggressiveCostlierMerge);
+
+    try {
+      // Ungated, the trade is real and worth previewing…
+      assert.match(run(['--fix', file]).stdout, /in aggressive mode: Reduce duplication but grow by \d+ more bytes/);
+
+      // …but both passes ran gated here, so the aggressive re-run just saves
+      // less than what was written—no trade a `--savings-only` run wants
+      fs.writeFileSync(file, cssAggressiveCostlierMerge);
+      assert.ok(!run(['--fix', '--savings-only', file]).stdout.includes('in aggressive mode'));
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Repeats `--savings-only` in the command the `--aggressive` preview suggests', () => {
+    const dirTemp = makeTempDir('temp_aggressive_preview_gated');
+    const file = path.join(dirTemp, 'shrink.css');
+    fs.writeFileSync(file, cssShrinkingAggressive);
+
+    try {
+      // The figures come from a gated re-run, so the gate belongs in the
+      // command: `--fix --aggressive` on its own can land somewhere else
+      const { stdout } = run(['--fix', '--savings-only', file]);
+      assert.match(stdout, /in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive --savings-only`/);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
   test('Processes multiple files in one invocation, with a header per file', () => {
     const dirTemp = makeTempDir('temp_multi');
     const fileA = path.join(dirTemp, 'a.css');
@@ -636,6 +669,19 @@ describe('CLI', () => {
       // the base run was report or `--fix` mode
       const RE_AGGRESSIVE_ROLLUP = /\* 2 more declarations in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(total: [-+]\d+ bytes \/ [-+]\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
       assert.match(run(['--fix', fileShrink, fileGrow]).stdout, RE_AGGRESSIVE_ROLLUP);
+    } finally {
+      fs.rmSync(dirTemp, { recursive: true, force: true });
+    }
+  });
+
+  test('Repeats `--savings-only` in the overall summary’s aggressive bullet, too', () => {
+    const dirTemp = makeTempDir('temp_multi_summary_aggressive_gated');
+    fs.writeFileSync(path.join(dirTemp, 'one.css'), cssShrinkingAggressive);
+    fs.writeFileSync(path.join(dirTemp, 'two.css'), cssShrinkingAggressive);
+
+    try {
+      const { stdout } = run(['--fix', '--savings-only', dirTemp]);
+      assert.match(stdout, /in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive --savings-only`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }

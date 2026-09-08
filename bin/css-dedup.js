@@ -125,7 +125,7 @@ async function main() {
     // A blank line between per-file reports, so each file’s closing summary is
     // visually separated from the next file’s header
     if (multi && index > 0) console.log('');
-    results.push(renderTarget(files[index], { multi, flags }, outcome));
+    results.push(renderTarget(files[index], { multi, flags, savingsOnly: options.savingsOnly }, outcome));
   };
 
   // A run big enough to pay for a pool spreads across worker threads; anything
@@ -157,7 +157,7 @@ async function main() {
     await runSequentially(files, options, flags, prefetched, render);
   }
 
-  if (multi) printOverallSummary(results, { fix: flags.fix });
+  if (multi) printOverallSummary(results, { fix: flags.fix, savingsOnly: options.savingsOnly });
 
   // `--exit-zero` never changes what got merged—only what a finding (skipped
   // as unsafe, or withheld by `--savings-only`) does to the exit code. A file

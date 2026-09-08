@@ -5,6 +5,7 @@
 import { styleText } from 'node:util';
 import { aggressiveKeySpelling } from './file-pass.js';
 import {
+  aggressiveFixCommand,
   formatAggregateTotalNote,
   formatAggressivePreviewLine,
   formatAppliedReduceClause,
@@ -98,7 +99,7 @@ function logSkippedDetail(log, skipped, skippedAggressive) {
   log('');
 }
 
-function renderFixPass(payload, { isStdin, label, multi, flags }) {
+function renderFixPass(payload, { isStdin, label, multi, flags, savingsOnly }) {
   const { applied, skipped, skippedAggressive, bytes, withheld, sourceMapStale, aggressiveDiffers, aggressiveOnly, aggExtra, aggExtraSaved, aggDiffers } = payload;
   const log = isStdin ? console.error : console.log;
 
@@ -148,9 +149,9 @@ function renderFixPass(payload, { isStdin, label, multi, flags }) {
   if (skipped.length) {
     log(styleText('yellow', `* ${skipped.length} finding${plural(skipped.length)} skipped (considered unsafe to auto-merge)`));
   }
-  // The opposite-mode pass this was measured against went through the same
-  // `savingsOnly` gate, so a result the re-run would withhold earns no hint
-  if (aggDiffers) log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before, bytes.saved));
+  // The opposite-mode pass this was measured against ran under this run’s own
+  // `savingsOnly` setting, which is why the suggested command repeats the flag
+  if (aggDiffers) log(formatAggressivePreviewLine(aggExtra, aggExtraSaved, bytes.before, bytes.saved, savingsOnly));
 
   return {
     exitFailure: skipped.length > 0 || Boolean(withheld),
@@ -198,7 +199,7 @@ function renderReportPass(payload, { label }) {
 // Prints one target’s report and returns `{ exitFailure, errored, stats }`:
 // whether it counts against the exit code, whether it never produced stats
 // (read/parse failure), and the numbers the overall summary aggregates
-export function renderTarget(file, { multi, flags }, outcome) {
+export function renderTarget(file, { multi, flags, savingsOnly }, outcome) {
   const isStdin = file === '-';
   const label = targetLabel(file);
 
@@ -220,14 +221,14 @@ export function renderTarget(file, { multi, flags }, outcome) {
     return RESULT_ERRORED;
   }
 
-  if (outcome.payload.mode === 'fix') return renderFixPass(outcome.payload, { isStdin, label, multi, flags });
+  if (outcome.payload.mode === 'fix') return renderFixPass(outcome.payload, { isStdin, label, multi, flags, savingsOnly });
   return renderReportPass(outcome.payload, { label });
 }
 
 // Rolls up every file’s `stats` into one closing report, so a terminal showing
 // only the last N lines of a multi-file run doesn’t leave the final file’s own
 // summary looking like it spoke for the whole run
-export function printOverallSummary(results, { fix }) {
+export function printOverallSummary(results, { fix, savingsOnly }) {
   const ok = results.filter(result => result.stats);
   const errored = results.length - ok.length;
   const erroredNote = errored ? ` (${errored} file${plural(errored)} could not be processed; see errors above)` : '';
@@ -239,7 +240,7 @@ export function printOverallSummary(results, { fix }) {
     printOverallReportTable(ok);
     return;
   }
-  printOverallFixSummary(ok);
+  printOverallFixSummary(ok, savingsOnly);
 }
 
 // Report mode’s all-files table is the per-file table again, one row per file
@@ -261,7 +262,7 @@ function printOverallReportTable(ok) {
   console.log(REPORT_LEGEND);
 }
 
-function printOverallFixSummary(ok) {
+function printOverallFixSummary(ok, savingsOnly) {
   // Every percentage below is against this—the combined original size of every
   // successfully processed file—since there’s no single file left to relate a
   // byte count to once the run’s totals are combined
@@ -327,7 +328,7 @@ function printOverallFixSummary(ok) {
     filesGrowLen: aggFilesGrow.length,
     growTotal: aggGrowTotal,
     totalBefore: totalBeforeAll,
-    flag: '--fix --aggressive',
+    flag: aggressiveFixCommand(savingsOnly),
     skipFlag: '--fix --aggressive --savings-only',
     more: true,
     aggregateNote: formatAggregateTotalNote(aggNetAll, totalBeforeAll),

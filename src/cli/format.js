@@ -148,11 +148,17 @@ export function formatOutcomeBullet({ countLabel, tense, filesShrinkLen, shrinkT
   return null;
 }
 
-// The “in aggressive mode” preview bullet, shared by `--fix` and report mode—
-// always still-hypothetical, so always present-tense even inside a `--fix`
-// run. `baseSaved` only spells out the combined total in the trailing note;
-// the main clause quotes `aggExtraSaved` on its own.
-export function formatAggressivePreviewLine(aggExtra, aggExtraSaved, before, baseSaved) {
+// The command an aggressive preview quotes its figures for: The gate rides
+// along, since what was measured is a re-run under this run’s own settings
+export function aggressiveFixCommand(savingsOnly) {
+  return `--fix --aggressive${savingsOnly ? ' --savings-only' : ''}`;
+}
+
+// The “in aggressive mode” preview bullet—always still-hypothetical, so always
+// present-tense even inside a `--fix` run. `baseSaved` only spells out the
+// combined total in the trailing note; the main clause quotes `aggExtraSaved`
+// on its own.
+export function formatAggressivePreviewLine(aggExtra, aggExtraSaved, before, baseSaved, savingsOnly = false) {
   const label = aggExtra > 0 ? `${aggExtra} more declaration${plural(aggExtra)}` : 'Further consolidation';
-  return `* ${label} in aggressive mode: ${formatReduceClause(aggExtraSaved, before, true)} with \`--fix --aggressive\`${formatAggregateTotalNote(baseSaved + aggExtraSaved, before)}`;
+  return `* ${label} in aggressive mode: ${formatReduceClause(aggExtraSaved, before, true)} with \`${aggressiveFixCommand(savingsOnly)}\`${formatAggregateTotalNote(baseSaved + aggExtraSaved, before)}`;
 }

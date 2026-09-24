@@ -9,7 +9,7 @@
   "description": "CSS declaration deduplicator for maintainability and performance optimization",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.9.1",
+    "eslint": "^10.11.0",
     "globals": "^17.12.0",
     "typescript": "^7.0.2"
   },
@@ -60,5 +60,5 @@
   },
   "type": "module",
   "types": "src/index.d.ts",
-  "version": "1.13.2"
+  "version": "1.13.3"
 }

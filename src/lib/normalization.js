@@ -367,7 +367,7 @@ export function normalizeValue(prop, rawValue, aggressive = false) {
   value = normalizeTimeUnits(value);
   if (aggressive) value = normalizeAngleUnits(value);
   // Both unit conversions above emit freshly-scaled decimals (`0.3s` →
-  // `300.0ms`), so the decimal cleanup runs after them—and the `min()`/`max()`
+  // `300.0ms`), so the decimal clean-up runs after them—and the `min()`/`max()`
   // sort after that, so differently-spelled equal arguments sort alike
   value = normalizeDecimals(value);
   value = sortMinMaxArguments(value);

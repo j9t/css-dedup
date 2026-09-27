@@ -112,7 +112,7 @@ function consolidateRoot(root, options = {}) {
   // the wire) is a transfer-size concern.
   const before = Buffer.byteLength(root.toString(), 'utf8');
 
-  // Blocks already empty in the source, so the cleanup at the end only ever
+  // Blocks already empty in the source, so the clean-up at the end only ever
   // removes what this run emptied
   const initiallyEmpty = new Set();
   const aggressive = options.aggressive ?? false;

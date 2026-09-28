@@ -96,7 +96,7 @@ async function replaceFileAtomically(label, output) {
     await rename(staged, target);
   } finally {
     // Covers write/chmod/rename failures. A forced process termination cannot
-    // run clean-up, but it can at most leave this private, clearly named stage
+    // run cleanup, but it can at most leave this private, clearly named stage
     // directory behind; the original target remains intact until `rename()`.
     await rm(stageDir, { recursive: true, force: true });
   }

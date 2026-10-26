@@ -117,10 +117,8 @@ function consolidateRoot(root, options = {}) {
   const initiallyEmpty = new Set();
   const aggressive = options.aggressive ?? false;
   const conditionBlocks = aggressive ? collectConditionBlocks(root) : [];
-  if (aggressive) {
-    for (const atrule of conditionBlocks) {
-      if (atrule.nodes && !atrule.nodes.length) initiallyEmpty.add(atrule);
-    }
+  for (const atrule of conditionBlocks) {
+    if (atrule.nodes && !atrule.nodes.length) initiallyEmpty.add(atrule);
   }
 
   // Bringing the style sheet to the state it would ship in. Idempotent, so the

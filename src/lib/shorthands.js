@@ -3,7 +3,7 @@
 // `margin-inline-start`): which physical side a logical longhand resolves to
 // depends on writing mode, which static CSS can’t tell. Not exhaustive; extend
 // as needed.
-export const SHORTHAND_LONGHANDS = {
+const SHORTHAND_LONGHANDS = {
   margin: [
     'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
     'margin-block', 'margin-block-start', 'margin-block-end',

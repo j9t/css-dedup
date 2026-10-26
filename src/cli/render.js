@@ -157,7 +157,6 @@ function renderFixPass(payload, { isStdin, label, multi, flags, savingsOnly }) {
     exitFailure: skipped.length > 0 || Boolean(withheld),
     errored: false,
     stats: {
-      findings: null,
       applied,
       skipped: skipped.length,
       bytesBefore: bytes.before,
@@ -297,7 +296,6 @@ function printOverallFixSummary(ok, savingsOnly) {
     filesGrowLen: filesGrow.length,
     growTotal,
     totalBefore: totalBeforeAll,
-    skipFlag: '--fix --savings-only',
   });
   if (outcome) {
     for (const line of outcome) console.log(line);

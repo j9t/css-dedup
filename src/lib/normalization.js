@@ -21,14 +21,14 @@ const ZERO_PERCENT_SENSITIVE_PROPS = new Set([
 
 // Collapses a decimal number’s redundant leading/trailing zeros, so `0.5`,
 // `.5`, and `0.50` compare equal, as do `1.0` and `1`
-const RE_DECIMAL = /(-?)(\d*)\.(\d+)/g;
+const RE_DECIMAL = /(\d*)\.(\d+)/g;
 
 function normalizeDecimals(value) {
-  return value.replace(RE_DECIMAL, (_match, sign, intPart, fracPart) => {
+  return value.replace(RE_DECIMAL, (_match, intPart, fracPart) => {
     const trimmedFrac = fracPart.replace(/0+$/, '');
     const int = intPart === '' ? '0' : intPart;
-    if (trimmedFrac === '') return `${sign}${int}`;
-    return `${sign}${int === '0' ? '' : int}.${trimmedFrac}`;
+    if (trimmedFrac === '') return int;
+    return `${int === '0' ? '' : int}.${trimmedFrac}`;
   });
 }
 
@@ -292,7 +292,7 @@ const PROPERTY_ALIASES = {
   'grid-column-gap': 'column-gap',
 };
 
-// Per run (see `src/caches.js`). One cache per mode rather than one keyed by
+// Per run (see `caches.js`). One cache per mode rather than one keyed by
 // mode plus name: building that composite key would allocate per lookup.
 const propCacheDefault = new Map();
 const propCacheAggressive = new Map();
@@ -375,7 +375,7 @@ export function normalizeValue(prop, rawValue, aggressive = false) {
 
   value = value.replace(RE_OPAQUE_PLACEHOLDER, (_match, index) => opaques[index]);
 
-  if (ZERO_IS_NONE_PROPS.has(propNormalized) && (value === '0' || value === 'none')) {
+  if (ZERO_IS_NONE_PROPS.has(propNormalized) && value === '0') {
     value = 'none';
   }
 

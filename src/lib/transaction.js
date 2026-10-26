@@ -179,7 +179,7 @@ export function snapshot(root, scope, rules) {
     // itself is state a rollback has to restore
     scopeRules: scope.rules.slice(),
     containers: affectedContainers(rules).map(container => ({ container, nodes: container.nodes.slice() })),
-    rules: rules.map(rule => ({ entry: captureNode(rule), parent: rule.parent })),
+    rules: rules.map(captureNode),
   };
 }
 
@@ -280,10 +280,7 @@ export function rollback(snap, scope) {
     forgetSeparator(container);
   }
 
-  for (const { entry, parent } of snap.rules) {
-    restoreNode(entry);
-    entry.node.parent = parent;
-  }
+  for (const entry of snap.rules) restoreNode(entry);
 
   scope.rules.length = 0;
   scope.rules.push(...snap.scopeRules);

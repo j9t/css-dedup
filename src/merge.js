@@ -73,7 +73,7 @@ export function removeRedundantDuplicates(ctx, container, scopeLabel, selectors)
 
     const last = decls.at(-1);
     const value = shortestValue(decls);
-    if (last.value !== value) last.value = value;
+    last.value = value;
 
     for (const decl of decls) {
       if (decl !== last) decl.remove();
@@ -104,7 +104,7 @@ function isOverlappingExtra(ctx, node, propNormalized, excludeKey) {
 //
 // `exemptRules` covers the group’s whole entangled cluster—a fellow member is
 // being absorbed into the same coordinated merge, not staying behind.
-export function findBlockingRule(ctx, scope, distinctRules, exemptRules, firstIndex, lastIndex, propNormalized) {
+function findBlockingRule(ctx, scope, distinctRules, exemptRules, firstIndex, lastIndex, propNormalized) {
   // Only rules actually inside the span can block; walking the whole scope to
   // skip everything outside it made this quadratic in the scope’s rule count.
   // The group’s own selector list is likewise only needed once something in
@@ -204,7 +204,7 @@ export function foldSameSelectorRules(ctx, scope) {
 // declarations always need to move, overlapping or not, while a non-target
 // occurrence’s extra only needs to move if it overlaps the shared property and
 // was declared after it.
-export function mergeSoloGroup(ctx, scope, group) {
+function mergeSoloGroup(ctx, scope, group) {
   const { key, occurrences, distinctRules, propNormalized } = group;
   const target = distinctRules.at(-1);
 
@@ -238,7 +238,7 @@ export function mergeSoloGroup(ctx, scope, group) {
 
   const value = shortestValue(occurrenceDecls(occurrences));
   const targetDecl = declFor(occurrences, target);
-  if (targetDecl.value !== value) targetDecl.value = value;
+  targetDecl.value = value;
 
   for (const rule of distinctRules) {
     if (rule === target) continue;
@@ -294,7 +294,7 @@ export function mergeSoloGroup(ctx, scope, group) {
 //
 // Solo groups only—in a multi-group cluster a partial merge could relocate a
 // shared rule’s selector out from under the other groups.
-export function mergePartialGroup(ctx, scope, group, reason) {
+function mergePartialGroup(ctx, scope, group, reason) {
   const { key, occurrences, distinctRules, propNormalized } = group;
   const exempt = new Set(distinctRules);
 
@@ -362,7 +362,7 @@ function mergeTwinRules(ctx, scope, cluster, ruleKeyCounts) {
     const key = ctx.keyOf(decl);
     const group = cluster.find(candidate => candidate.key === key);
     const value = shortestValue(occurrenceDecls(group.occurrences));
-    if (decl.value !== value) decl.value = value;
+    decl.value = value;
 
     ctx.applied.push({ scope: scope.label, key, selectors: mergedSelectors, value });
   }
@@ -433,7 +433,7 @@ function mergeClusterGroupRuns(ctx, scope, group) {
     mergedRule.selector = joinSelectors(mergedSelectors, lastRule, ctx.multilineSelectors, ctx.spacedCommas);
     const lastDecl = declFor(runOccurrences, lastRule);
     lastDecl.remove();
-    if (lastDecl.value !== value) lastDecl.value = value;
+    lastDecl.value = value;
     mergedRule.append(lastDecl);
     lastRule.after(mergedRule);
     recordInsertion(mergedRule);
@@ -501,7 +501,7 @@ function splitStarHub(ctx, scope, cluster, hub) {
     ));
 
     const value = shortestValue(occurrenceDecls(occurrences));
-    if (sharedDecl.value !== value) sharedDecl.value = value;
+    sharedDecl.value = value;
 
     const anchorRule = hub.clone({ nodes: [] });
     anchorRule.selector = joinSelectors(mergedSelectors, hub, ctx.multilineSelectors, ctx.spacedCommas);
@@ -587,7 +587,7 @@ function mergeCluster(ctx, scope, cluster) {
       hubCandidates++;
     }
   }
-  const isStar = hub !== null && hubCandidates === 1 && [...ruleKeyCounts.values()].every(keysHere => (
+  const isStar = hubCandidates === 1 && [...ruleKeyCounts.values()].every(keysHere => (
     keysHere.size === clusterSize || keysHere.size === 1
   ));
 
@@ -661,7 +661,7 @@ function gated(ctx, scope, keys, rules, apply) {
   // block behind.
   ctx.settle();
 
-  const snap = snapshot(ctx.root, scope, [...new Set(rules)]);
+  const snap = snapshot(ctx.root, scope, rules);
   const appliedBefore = ctx.applied.length;
 
   apply();

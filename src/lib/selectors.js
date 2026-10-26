@@ -3,7 +3,7 @@ import { memoized } from './util.js';
 // One depth/quote/escape-aware scan of a selector list, answering both
 // questions anything here asks of it: where its top-level commas are, and
 // whether the first is followed by whitespace. Memoized per run (see
-// `src/caches.js`)—the same handful of selector strings get split repeatedly
+// caches.js)—the same handful of selector strings get split repeatedly
 // within a run (eligibility filtering, merge-safety scans, occurrence
 // reporting), but selector text is unbounded across runs.
 //

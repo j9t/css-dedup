@@ -15,7 +15,7 @@ export default function cssdedup(options = {}) {
           root.warn(result, `${withheld.count} merge${withheld.count !== 1 ? 's' : ''} withheld (\`savingsOnly\`): applying ${withheld.count !== 1 ? 'them' : 'it'} would make the style sheet ${Math.abs(withheld.bytes.saved)} bytes bigger`);
         }
         for (const item of skipped) {
-          root.warn(result, `Duplicate \`${item.key}\` left unmerged (${item.scope === 'root' ? 'root' : item.scope}): ${item.reason}`);
+          root.warn(result, `Duplicate \`${item.key}\` left unmerged (${item.scope}): ${item.reason}`);
         }
         return;
       }
@@ -23,7 +23,7 @@ export default function cssdedup(options = {}) {
       const { findings } = analyzeRoot(root, options);
       for (const finding of findings) {
         if (finding.repeated) {
-          root.warn(result, `Selector \`${finding.key}\` written ${finding.occurrences.length} times in its scope (${finding.scope === 'root' ? 'root' : finding.scope})`);
+          root.warn(result, `Selector \`${finding.key}\` written ${finding.occurrences.length} times in its scope (${finding.scope})`);
           continue;
         }
 

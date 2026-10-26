@@ -156,7 +156,7 @@ export function runPool(slots, settings, onOutcome) {
 
     // Every worker starts before anything is dispatched, so a pool that can’t
     // start at all has yet to write a file or print a line
-    const size = Math.min(poolSize(queue.length), queue.length);
+    const size = poolSize(queue.length);
     try {
       for (let i = 0; i < size; i++) {
         const worker = new Worker(new URL(import.meta.url), {

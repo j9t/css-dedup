@@ -64,7 +64,7 @@ export function describeScope(container) {
 // and merging those two boundaries would report duplicates across unrelated
 // scopes. `JSON.stringify` over the segment array can’t be spelled by
 // the segments.
-export function scopeKey(container) {
+function scopeKey(container) {
   if (container.type === 'root') return 'root';
   return JSON.stringify(scopeSegments(container));
 }
@@ -156,7 +156,7 @@ export function atRuleLabel(atrule) {
 // whitespace-insensitive—`.b, .a` matches the same elements with the same
 // specificities as `.a, .b`. Whitespace is only collapsed outside quotes:
 // `[data-x="a  b"]` and `[data-x="a b"]` are different selectors.
-export function selectorSetKey(rule) {
+function selectorSetKey(rule) {
   return splitSelectors(rule.selector)
     .map(selector => selector.replace(/("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\s+/g, (match, quoted) => quoted ?? ' '))
     .sort()

@@ -4,6 +4,12 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+* Removed dead and no-op code across the engine, CLI, and plugin (redundant guards, unread fields and arguments, identical-branch conditionals, unused exports)
+
 ## [1.13.3] - 2026-09-24
 
 ### Changed

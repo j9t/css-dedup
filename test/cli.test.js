@@ -5,7 +5,7 @@ import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { poolSize, shouldParallelize } from '../src/cli/pool.js';
 import { dedup } from '../src/index.js';
-import { BEST_CELL, RE_MERGED_AB, RE_MERGED_AC, RE_PAYOFF_FIX, RE_SYNTAX_ERROR, RE_SYNTAX_ERROR_UNCLOSED, RE_WITHHELD_ONE, cssAggressiveCostlierMerge, cssGrowing, cssGrowingAggressive, cssMixed, cssShrinkingAggressive, dirTest, findingsRow, fixturesDir, makeTempDir, run, runColor, runTty } from './helpers.js';
+import { BEST_CELL, RE_MERGED_AB, RE_MERGED_AC, RE_PAYOFF_FIX, RE_SYNTAX_ERROR, RE_SYNTAX_ERROR_UNCLOSED, RE_WITHHELD_ONE, cssAggressiveCostlierMerge, cssGrowing, cssGrowingAggressive, cssMixed, cssShrinkingAggressive, findingsRow, fixturesDir, makeTempDir, run, runColor, runTty } from './helpers.js';
 
 describe('CLI', () => {
   test('Shows help with `--help`', () => {
@@ -583,7 +583,7 @@ describe('CLI', () => {
   });
 
   test('Disambiguates same-named files in the all-files table by extending just enough of their path', () => {
-    const dirTemp = path.join(dirTest, 'temp_multi_summary_collision');
+    const dirTemp = makeTempDir('temp_multi_summary_collision');
     const dirA = path.join(dirTemp, 'components');
     const dirB = path.join(dirTemp, 'pages');
     fs.mkdirSync(dirA, { recursive: true });
@@ -606,7 +606,7 @@ describe('CLI', () => {
   });
 
   test('Wraps a File cell too long for the terminal at a path separator, keeping every column flush', () => {
-    const dirTemp = path.join(dirTest, 'temp_multi_summary_wrap');
+    const dirTemp = makeTempDir('temp_multi_summary_wrap');
     const dirA = path.join(dirTemp, 'aa', 'bb', 'cc');
     const dirB = path.join(dirTemp, 'aa', 'dd', 'cc');
     fs.mkdirSync(dirA, { recursive: true });
@@ -727,7 +727,7 @@ describe('CLI', () => {
   });
 
   test('Recursively finds `.css` files under a directory, skipping `node_modules` and dotfolders', () => {
-    const dirTemp = path.join(dirTest, 'temp_dir_scan');
+    const dirTemp = makeTempDir('temp_dir_scan');
     fs.mkdirSync(path.join(dirTemp, 'sub', 'node_modules'), { recursive: true });
     fs.mkdirSync(path.join(dirTemp, 'sub', '.hidden'), { recursive: true });
     fs.writeFileSync(path.join(dirTemp, 'one.css'), '.a { color: red; }\n.b { color: red; }\n');
@@ -986,7 +986,7 @@ describe('CLI', () => {
   });
 
   test('Excludes a file via `--ignore-path`/`-p`, matched against the path relative to the working directory', () => {
-    const dirTemp = path.join(dirTest, 'temp_ignore_path');
+    const dirTemp = makeTempDir('temp_ignore_path');
     fs.mkdirSync(path.join(dirTemp, 'dist'), { recursive: true });
     fs.mkdirSync(path.join(dirTemp, 'src'), { recursive: true });
     fs.writeFileSync(path.join(dirTemp, 'dist', 'bundle.css'), '.a { color: red; }\n.b { color: red; }\n');
@@ -1021,7 +1021,7 @@ describe('CLI', () => {
   });
 
   test('Excludes a file matching `ignorePaths` from the config file', () => {
-    const dirTemp = path.join(dirTest, 'temp_config_ignore_path');
+    const dirTemp = makeTempDir('temp_config_ignore_path');
     fs.mkdirSync(path.join(dirTemp, 'dist'), { recursive: true });
     fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { ignorePaths: [/dist\\//] };\n');
     fs.writeFileSync(path.join(dirTemp, 'dist', 'bundle.css'), '.a { color: red; }\n.b { color: red; }\n');

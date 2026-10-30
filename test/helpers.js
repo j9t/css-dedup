@@ -2,6 +2,7 @@
 // files below use.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -9,16 +10,10 @@ import { stripVTControlCharacters } from 'node:util';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// This directory—where the scratch dirs below are created
-export const dirTest = __dirname;
-
-// A scratch directory under `test/`, created empty. Callers remove it in a
-// `finally` block.
+// A fresh scratch directory in the system temp folder;
+// callers remove it in a `finally` block
 export function makeTempDir(name) {
-  const dir = path.join(dirTest, name);
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  return fs.mkdtempSync(path.join(os.tmpdir(), `css-dedup-${name}-`));
 }
 export const scriptPath = path.join(__dirname, '..', 'bin', 'css-dedup.js');
 export const fixturesDir = path.join(__dirname, 'fixtures');

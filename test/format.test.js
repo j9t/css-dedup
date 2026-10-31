@@ -330,7 +330,7 @@ describe('Report table layout', () => {
     assert.strictEqual(new Set(offsets).size, 1, `columns drifted: ${JSON.stringify(lines)}`);
   });
 
-  test('Never sizes the wrap column below its own header, however tight the budget', () => {
+  test('Does not size the wrap column below its own header, however tight the budget', () => {
     // Only reachable with a wrap-column header longer than the 8-character
     // budget floor—`File` never binds here, so this pins the guard rather than
     // any behavior the shipped table produces
@@ -365,7 +365,7 @@ describe('File label disambiguation', () => {
     );
   });
 
-  test('Never grows a label that is already unique, so one long outlier path doesn’t drag the others out', () => {
+  test('Does not grow a label that is already unique, so one long outlier path doesn’t drag the others out', () => {
     assert.deepStrictEqual(
       disambiguateLabels([at('x', 'deep', 'nest', 'button.css'), at('y', 'button.css'), at('solo.css')]),
       ['nest/button.css', 'y/button.css', 'solo.css'],

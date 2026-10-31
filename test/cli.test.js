@@ -64,7 +64,7 @@ describe('CLI', () => {
 
   const skipFileModeTest = process.platform === 'win32' ? 'POSIX file modes are not available on Windows' : false;
 
-  test('`--fix` atomically replaces a file while preserving its mode', { skip: skipFileModeTest }, () => {
+  test('Atomically replaces a file with `--fix` while preserving its mode', { skip: skipFileModeTest }, () => {
     const dirTemp = makeTempDir('temp_atomic_fix');
     const file = path.join(dirTemp, 'executable.css');
     fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n');
@@ -83,7 +83,7 @@ describe('CLI', () => {
 
   const skipSymlinkFixTest = process.platform === 'win32' ? 'creating symlinks requires extra Windows privileges' : false;
 
-  test('`--fix` follows a symlink target instead of replacing the link', { skip: skipSymlinkFixTest }, () => {
+  test('Follows a symlink target with `--fix` instead of replacing the link', { skip: skipSymlinkFixTest }, () => {
     const dirTemp = makeTempDir('temp_atomic_fix_symlink');
     const target = path.join(dirTemp, 'target.css');
     const link = path.join(dirTemp, 'linked.css');
@@ -184,7 +184,7 @@ describe('CLI', () => {
     assert.ok(stderr.includes('`--savings-only` only applies together with `--fix`'));
   });
 
-  test('`--fix --savings-only` leaves a file untouched when consolidation would grow it', () => {
+  test('Leaves a file untouched with `--fix --savings-only` when consolidation would grow it', () => {
     const dirTemp = makeTempDir('temp_savings_only');
     const file = path.join(dirTemp, 'grow.css');
     const source = cssGrowing;
@@ -201,7 +201,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix --savings-only` still writes a file whose consolidation shrinks it', () => {
+  test('Still writes a file whose consolidation shrinks it with `--fix --savings-only`', () => {
     const dirTemp = makeTempDir('temp_savings_only_shrink');
     const file = path.join(dirTemp, 'shrink.css');
     fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n');
@@ -217,7 +217,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix --aggressive --savings-only` withholds a growing aggressive merge', () => {
+  test('Withholds a growing aggressive merge with `--fix --aggressive --savings-only`', () => {
     const dirTemp = makeTempDir('temp_savings_only_aggressive');
     const file = path.join(dirTemp, 'grow.css');
     const source = cssGrowingAggressive;
@@ -235,7 +235,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix` prints the skipped-group detail before the counts summary, so the outcome survives at the end of a long list', () => {
+  test('Prints the skipped-group detail before the counts summary with `--fix`, so the outcome survives at the end of a long list', () => {
     const dirTemp = makeTempDir('temp_summary_order');
     const file = path.join(dirTemp, 'mixed.css');
     // Combines `cssGrowing` (withheld under `--savings-only`, since the
@@ -260,7 +260,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix --savings-only` keeps the merges that pay for themselves and reports the rest as withheld', () => {
+  test('Keeps the merges that pay for themselves with `--fix --savings-only` and reports the rest as withheld', () => {
     const dirTemp = makeTempDir('temp_savings_partial');
     const file = path.join(dirTemp, 'mixed.css');
     fs.writeFileSync(file, cssMixed);
@@ -282,7 +282,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix --savings-only` distinguishes a partly consolidated file from an untouched one in the overall summary', () => {
+  test('Distinguishes a partly consolidated file from an untouched one in the overall summary with `--fix --savings-only`', () => {
     const dirTemp = makeTempDir('temp_multi_summary_partial');
     const filePartial = path.join(dirTemp, 'partial.css');
     const fileGrow = path.join(dirTemp, 'grow.css');
@@ -300,7 +300,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix --savings-only -` still writes the untouched style sheet to STDOUT when withholding', () => {
+  test('Still writes the untouched style sheet to STDOUT when withholding with `--fix --savings-only -`', () => {
     const source = cssGrowing;
     const { stdout, stderr, status } = run(['--fix', '-s', '-'], { input: source });
     assert.strictEqual(status, 1);
@@ -465,7 +465,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix` consolidates each of multiple files independently', () => {
+  test('Consolidates each of multiple files independently with `--fix`', () => {
     const dirTemp = makeTempDir('temp_multi_dedup');
     const fileA = path.join(dirTemp, 'a.css');
     const fileB = path.join(dirTemp, 'b.css');
@@ -564,7 +564,7 @@ describe('CLI', () => {
     }
   });
 
-  test('The all-files table’s `-s` Total is `n/a` only when nothing would be saved anywhere in the run, not just because one file declined', () => {
+  test('Shows `n/a` as the all-files table’s `-s` Total only when nothing would be saved anywhere in the run, not just because one file declined', () => {
     const dirTemp = makeTempDir('temp_multi_summary_all_decline');
     const fileA = path.join(dirTemp, 'a.css');
     const fileB = path.join(dirTemp, 'b.css');
@@ -668,7 +668,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--fix --savings-only` reports withheld files in the overall summary', () => {
+  test('Reports withheld files in the overall summary with `--fix --savings-only`', () => {
     const dirTemp = makeTempDir('temp_multi_summary_withheld');
     const fileShrink = path.join(dirTemp, 'shrink.css');
     const fileGrow = path.join(dirTemp, 'grow.css');
@@ -790,7 +790,7 @@ describe('CLI', () => {
     }
   });
 
-  test('A skipped preprocessor source does not stop a `.css` file named alongside it', () => {
+  test('Does not let a skipped preprocessor source stop a `.css` file named alongside it', () => {
     const dirTemp = makeTempDir('temp_preprocessor_multi');
     const fileScss = path.join(dirTemp, 'theme.scss');
     const fileCss = path.join(dirTemp, 'main.css');
@@ -808,7 +808,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--exit-zero` does not forgive a skipped preprocessor source', () => {
+  test('Does not forgive a skipped preprocessor source with `--exit-zero`', () => {
     const dirTemp = makeTempDir('temp_preprocessor_exit_zero');
     const fileScss = path.join(dirTemp, 'theme.scss');
     const fileCss = path.join(dirTemp, 'main.css');
@@ -823,7 +823,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`--ignore-path` excludes a preprocessor source before it is reported as skipped', () => {
+  test('Excludes a preprocessor source with `--ignore-path` before it is reported as skipped', () => {
     const dirTemp = makeTempDir('temp_preprocessor_ignore_path');
     const fileScss = path.join(dirTemp, 'theme.scss');
     const fileCss = path.join(dirTemp, 'main.css');
@@ -871,7 +871,7 @@ describe('CLI', () => {
     }
   });
 
-  test('A syntax error in one file does not stop the others from being processed', () => {
+  test('Does not let a syntax error in one file stop the others from being processed', () => {
     const dirTemp = makeTempDir('temp_syntax_error_multi');
     fs.writeFileSync(path.join(dirTemp, 'bad.css'), '.a { color XP_WIN, }\n');
     fs.writeFileSync(path.join(dirTemp, 'good.css'), '.a { color: red; }\n.b { color: red; }\n');
@@ -892,13 +892,13 @@ describe('CLI', () => {
     assert.match(stdout, findingsRow(1));
   });
 
-  test('`--fix -` writes the consolidated CSS to stdout, and status to STDERR', () => {
+  test('Writes the consolidated CSS to STDOUT and status to STDERR with `--fix -`', () => {
     const { stdout, stderr } = run(['--fix', '-'], { input: '.a { color: red; }\n.b { color: red; }\n' });
     assert.match(stdout, /^\.a, \.b \{\s*color: red;\s*\}\s*$/);
     assert.ok(stderr.includes('1 declaration consolidated'));
   });
 
-  test('`--fix -` still writes the full style sheet to STDOUT when nothing is consolidated', () => {
+  test('Still writes the full style sheet to STDOUT with `--fix -` when nothing is consolidated', () => {
     const input = '.a { color: red; }\n.b { color: blue; }\n';
     const { stdout, stderr } = run(['--fix', '-'], { input });
     assert.strictEqual(stdout, input);
@@ -948,12 +948,12 @@ describe('CLI', () => {
     }
   });
 
-  test('An absent `css-dedup.config.js` is silently ignored', () => {
+  test('Silently ignores an absent `css-dedup.config.js`', () => {
     const { stdout } = run([path.join(fixturesDir, 'hacks.css')]);
     assert.ok(stdout.includes('No duplicate declarations found.'));
   });
 
-  test('`-a` is the short flag for `--aggressive` (with `--fix`, since report mode always shows both variants)', () => {
+  test('Accepts `-a` as the short flag for `--aggressive` (with `--fix`, since report mode always shows both variants)', () => {
     const dirTemp = makeTempDir('temp_short_aggressive');
     const file = path.join(dirTemp, 'aggressive.css');
     fs.copyFileSync(path.join(fixturesDir, 'aggressive.css'), file);
@@ -1063,7 +1063,7 @@ describe('CLI', () => {
     }
   });
 
-  test('`dedup()` reports a stale source map only when it rewrote a style sheet that references one', () => {
+  test('Reports a stale source map from `dedup()` only when it rewrote a style sheet that references one', () => {
     const annotation = '\n/*# sourceMappingURL=bundle.css.map */\n';
     assert.equal(dedup(`.a { color: red; }\n.b { color: red; }${annotation}`).sourceMapStale, true);
     // Nothing to consolidate, so the style sheet—and the map—stay as they were
@@ -1120,18 +1120,18 @@ describe('CLI', () => {
 });
 
 describe('Exit code', () => {
-  test('Report mode exits 0 despite findings', () => {
+  test('Exits 0 in report mode despite findings', () => {
     const { stdout, status } = run(['--exit-zero', path.join(fixturesDir, 'merge-safety.css')]);
     assert.match(stdout, findingsRow(2));
     assert.strictEqual(status, 0);
   });
 
-  test('`-z` is the short form', () => {
+  test('Accepts `-z` as the short form', () => {
     const { status } = run(['-z', path.join(fixturesDir, 'merge-safety.css')]);
     assert.strictEqual(status, 0);
   });
 
-  test('`--fix` exits 0 despite a group skipped as unsafe, and still applies the safe merge', () => {
+  test('Exits 0 with `--fix` despite a group skipped as unsafe, and still applies the safe merge', () => {
     const dirTemp = makeTempDir('temp_exit_zero_fix');
     const file = path.join(dirTemp, 'merge-safety.css');
     fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
@@ -1146,7 +1146,7 @@ describe('Exit code', () => {
     }
   });
 
-  test('`--fix --savings-only` exits 0 despite a withheld file', () => {
+  test('Exits 0 with `--fix --savings-only` despite a withheld file', () => {
     const dirTemp = makeTempDir('temp_exit_zero_withheld');
     const file = path.join(dirTemp, 'grow.css');
     fs.writeFileSync(file, cssGrowing);
@@ -1200,7 +1200,7 @@ describe('Exit code', () => {
     }
   });
 
-  test('A read/parse failure still fails the run even alongside a clean file', () => {
+  test('Still fails the run on a read/parse failure, even alongside a clean file', () => {
     const dirTemp = makeTempDir('temp_exit_zero_error_multi');
     const fileGood = path.join(dirTemp, 'good.css');
     const fileBad = path.join(dirTemp, 'bad.css');
@@ -1216,7 +1216,7 @@ describe('Exit code', () => {
     }
   });
 
-  test('A missing file still fails the run, even with `--exit-zero`', () => {
+  test('Still fails the run on a missing file, even with `--exit-zero`', () => {
     const dirTemp = makeTempDir('temp_exit_zero_missing');
     const file = path.join(dirTemp, 'missing.css');
 
@@ -1244,7 +1244,7 @@ describe('Exit code', () => {
     }
   });
 
-  test('`--no-exit-zero` overrides `exitZero: true` from the config file', () => {
+  test('Lets `--no-exit-zero` override `exitZero: true` from the config file', () => {
     const dirTemp = makeTempDir('temp_config_no_exit_zero');
     fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { exitZero: true };\n');
     const file = path.join(dirTemp, 'merge-safety.css');
@@ -1258,7 +1258,7 @@ describe('Exit code', () => {
     }
   });
 
-  test('`-e` is the short form for `--no-exit-zero`', () => {
+  test('Accepts `-e` as the short form for `--no-exit-zero`', () => {
     const dirTemp = makeTempDir('temp_config_no_exit_zero_short');
     fs.writeFileSync(path.join(dirTemp, 'css-dedup.config.js'), 'export default { exitZero: true };\n');
     const file = path.join(dirTemp, 'merge-safety.css');
@@ -1272,7 +1272,7 @@ describe('Exit code', () => {
     }
   });
 
-  test('Help text lists `-z, --exit-zero` and `-e, --no-exit-zero`', () => {
+  test('Lists `-z, --exit-zero` and `-e, --no-exit-zero` in the help text', () => {
     const { stdout, status } = run(['--help']);
     assert.strictEqual(status, 0);
     assert.ok(stdout.includes('-z, --exit-zero'));
@@ -1281,7 +1281,7 @@ describe('Exit code', () => {
 });
 
 describe('Quiet mode', () => {
-  test('Report mode: suppresses the findings and skipped-group detail, keeps the summary table', () => {
+  test('Suppresses the findings and skipped-group detail in report mode, keeping the summary table', () => {
     const file = path.join(fixturesDir, 'merge-safety.css');
     const plain = run([file]);
     assert.ok(plain.stdout.includes('duplicate   color: red'));
@@ -1296,7 +1296,7 @@ describe('Quiet mode', () => {
     assert.ok(stdout.includes(`Summary for ${file}:`));
   });
 
-  test('`--fix --quiet`: suppresses the skipped-group detail listing, keeps the summary bullets', () => {
+  test('Suppresses the skipped-group detail listing with `--fix --quiet`, keeping the summary bullets', () => {
     const dirTemp = makeTempDir('temp_quiet_fix');
     const file = path.join(dirTemp, 'merge-safety.css');
     fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
@@ -1312,7 +1312,7 @@ describe('Quiet mode', () => {
     }
   });
 
-  test('Multi-file `--quiet` run: suppresses each file’s path header, keeps per-file and overall summaries', () => {
+  test('Suppresses each file’s path header in a multi-file `--quiet` run, keeping per-file and overall summaries', () => {
     const dirTemp = makeTempDir('temp_quiet_multi');
     const fileA = path.join(dirTemp, 'a.css');
     const fileB = path.join(dirTemp, 'b.css');
@@ -1331,13 +1331,13 @@ describe('Quiet mode', () => {
     }
   });
 
-  test('`-q` is the short form for `--quiet`', () => {
+  test('Accepts `-q` as the short form for `--quiet`', () => {
     const file = path.join(fixturesDir, 'merge-safety.css');
     const { stdout } = run(['-q', file]);
     assert.ok(!stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
   });
 
-  test('Help text lists `-q, --quiet`', () => {
+  test('Lists `-q, --quiet` in the help text', () => {
     const { stdout, status } = run(['--help']);
     assert.strictEqual(status, 0);
     assert.ok(stdout.includes('-q, --quiet'));
@@ -1348,49 +1348,49 @@ describe('Quiet mode', () => {
 // output—the rest of this file already pins down what that output says
 
 describe('Fixtures', () => {
-  test('basic.css reports the expected duplicate count', () => {
+  test('Reports the expected duplicate count for basic.css', () => {
     const { stdout, status } = run([path.join(fixturesDir, 'basic.css')]);
     assert.strictEqual(status, 1);
     assert.match(stdout, findingsRow(3));
   });
 
-  test('media-queries.css only flags the duplicate inside the shared `@media` scope', () => {
+  test('Only flags the duplicate inside the shared `@media` scope of media-queries.css', () => {
     const { stdout } = run([path.join(fixturesDir, 'media-queries.css')]);
     assert.match(stdout, findingsRow(1));
     assert.ok(stdout.includes('min-width: 768px'));
   });
 
-  test('nesting.css flags the duplicate between nested rules, not against the parent’s own declaration', () => {
+  test('Flags the duplicate between nested rules of nesting.css, not against the parent’s own declaration', () => {
     const { stdout } = run([path.join(fixturesDir, 'nesting.css')]);
     assert.match(stdout, findingsRow(1));
     assert.ok(stdout.includes('&:hover'));
     assert.ok(stdout.includes('&:focus'));
   });
 
-  test('layers.css flags the duplicate inside the shared `@layer` block and doesn’t crash on the statement form', () => {
+  test('Flags the duplicate inside the shared `@layer` block of layers.css and doesn’t crash on the statement form', () => {
     const { stdout, status } = run([path.join(fixturesDir, 'layers.css')]);
     assert.strictEqual(status, 1);
     assert.match(stdout, findingsRow(1));
     assert.ok(stdout.includes('@layer reset'));
   });
 
-  test('hacks.css reports no findings once hack selectors are excluded', () => {
+  test('Reports no findings for hacks.css once hack selectors are excluded', () => {
     const { stdout, status } = run([path.join(fixturesDir, 'hacks.css')]);
     assert.ok(stdout.includes('No duplicate declarations found.'));
     assert.strictEqual(status, 0);
   });
 
-  test('hacks.css reports a finding with `--no-ignore-selectors-defaults`', () => {
+  test('Reports a finding for hacks.css with `--no-ignore-selectors-defaults`', () => {
     const { stdout } = run(['--no-ignore-selectors-defaults', path.join(fixturesDir, 'hacks.css')]);
     assert.match(stdout, findingsRow(1));
   });
 
-  test('hacks.css reports a finding with `-n`', () => {
+  test('Reports a finding for hacks.css with `-n`', () => {
     const { stdout } = run(['-n', path.join(fixturesDir, 'hacks.css')]);
     assert.match(stdout, findingsRow(1));
   });
 
-  test('merge-safety.css report mode explains the unsafe group, then closes with the summary table', () => {
+  test('Explains the unsafe group of merge-safety.css in report mode, then closes with the summary table', () => {
     const { stdout } = run([path.join(fixturesDir, 'merge-safety.css')]);
     assert.match(stdout, RE_PAYOFF_FIX);
     assert.ok(stdout.includes('1 duplicate group considered unsafe to auto-merge:'));
@@ -1406,7 +1406,7 @@ describe('Fixtures', () => {
     assert.match(stdout, /2 \(2\) {2,}-\d+(?:\.\d+)? (?:B|KB|MB) \(-\d+\.\d%\) {2,}-\d+(?:\.\d+)? (?:B|KB|MB) \(-\d+\.\d%\) {2,}-\d+(?:\.\d+)? (?:B|KB|MB) \(-\d+\.\d%\) {2,}-\d+(?:\.\d+)? (?:B|KB|MB) \(-\d+\.\d%\)/);
   });
 
-  test('merge-safety.css --fix consolidates the safe pair and skips the unsafe one', () => {
+  test('Consolidates the safe pair of merge-safety.css with `--fix` and skips the unsafe one', () => {
     const dirTemp = makeTempDir('temp_merge_safety');
     const file = path.join(dirTemp, 'merge-safety.css');
     fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
@@ -1426,7 +1426,7 @@ describe('Fixtures', () => {
     }
   });
 
-  test('`--fix` omits the “unsafe to auto-merge” qualifier when nothing was skipped', () => {
+  test('Omits the “unsafe to auto-merge” qualifier with `--fix` when nothing was skipped', () => {
     const dirTemp = makeTempDir('temp_nothing_skipped');
     const file = path.join(dirTemp, 'clean.css');
     fs.writeFileSync(file, '.a { color: red; }\n.b { color: red; }\n');
@@ -1441,12 +1441,12 @@ describe('Fixtures', () => {
     }
   });
 
-  test('basic.css report mode suggests the byte savings from running `--fix`', () => {
+  test('Suggests the byte savings from running `--fix` for basic.css in report mode', () => {
     const { stdout } = run([path.join(fixturesDir, 'basic.css')]);
     assert.match(stdout, RE_PAYOFF_FIX);
   });
 
-  test('aggressive.css finds nothing under default rules, but the report table still quotes the aggressive column', () => {
+  test('Finds nothing in aggressive.css under default rules, but still quotes the aggressive column in the report table', () => {
     const { stdout, status } = run([path.join(fixturesDir, 'aggressive.css')]);
     // Nothing for `--fix` (no `--aggressive`) to act on by default, so this
     // doesn’t count against the exit code the way a default-mode finding would
@@ -1455,7 +1455,7 @@ describe('Fixtures', () => {
     assert.match(stdout, /0 \(1\)/);
   });
 
-  test('aggressive.css lists the aggressive-only duplicate in detail even though report mode ignores `--aggressive`', () => {
+  test('Lists the aggressive-only duplicate of aggressive.css in detail even though report mode ignores `--aggressive`', () => {
     const { stdout } = run([path.join(fixturesDir, 'aggressive.css')]);
     assert.ok(stdout.includes('duplicate   color: hsl(0 0% 100%)'));
     // `-f`/`-f -s` read `n/a`, not `0 B (0.0%)`—there are 0 findings under
@@ -1469,7 +1469,7 @@ describe('Fixtures', () => {
     assert.ok(stderr.includes('`--aggressive` only applies together with `--fix`'));
   });
 
-  test('A column reads `n/a`, not `0 B (0.0%)`, when its own mode has 0 findings', () => {
+  test('Shows `n/a`, not `0 B (0.0%)`, in a column whose own mode has 0 findings', () => {
     const { stdout } = run([path.join(fixturesDir, 'aggressive.css')]);
     // `-f`/`-f -s` belong to default rules, which find nothing here—`-f -a`/
     // `-f -a -s` belong to aggressive rules, which do, so only those two
@@ -1477,7 +1477,7 @@ describe('Fixtures', () => {
     assert.match(stdout, /0 \(1\) {2,}n\/a {2,}n\/a {2,}-[\d.]+ (?:B|KB|MB) \(-\d+\.\d%\)/);
   });
 
-  test('A column reads `n/a` when its findings are all unsafe, even though `findings > 0`', () => {
+  test('Shows `n/a` in a column whose findings are all unsafe, even though `findings > 0`', () => {
     const dirTemp = makeTempDir('temp_all_unsafe');
     const file = path.join(dirTemp, 'all-unsafe.css');
     // The one duplicate here is blocked by the intervening `.mid` rule under
@@ -1537,7 +1537,7 @@ describe('Fixtures', () => {
     assert.strictEqual(winners.length, 10);
   });
 
-  test('aggressive.css --fix --aggressive merges across the blocks, drops the emptied one, and suggests testing', () => {
+  test('Merges across the blocks of aggressive.css with `--fix --aggressive`, drops the emptied one, and suggests testing', () => {
     const dirTemp = makeTempDir('temp_aggressive');
     const file = path.join(dirTemp, 'aggressive.css');
     fs.copyFileSync(path.join(fixturesDir, 'aggressive.css'), file);
@@ -1555,7 +1555,7 @@ describe('Fixtures', () => {
     }
   });
 
-  test('merge-safety.css --fix without `--aggressive` notes what a re-run with it would add', () => {
+  test('Notes what a re-run with `--aggressive` would add when fixing merge-safety.css without it', () => {
     const dirTemp = makeTempDir('temp_merge_safety_hint');
     const file = path.join(dirTemp, 'merge-safety.css');
     fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
@@ -1569,7 +1569,7 @@ describe('Fixtures', () => {
     }
   });
 
-  test('merge-safety.css -f consolidates the safe pair (short flag)', () => {
+  test('Consolidates the safe pair of merge-safety.css with `-f` (short flag)', () => {
     const dirTemp = makeTempDir('temp_merge_safety_short');
     const file = path.join(dirTemp, 'merge-safety.css');
     fs.copyFileSync(path.join(fixturesDir, 'merge-safety.css'), file);
@@ -1641,31 +1641,31 @@ describe('Parallel runs', () => {
     assert.deepStrictEqual(parallel.files, sequential.files);
   }
 
-  test('Report mode: output is identical to the same run on one thread', () => {
+  test('Produces output identical to the same run on one thread in report mode', () => {
     const results = compare('report', 6, []);
     assert.ok(results.parallel.stdout.includes('Summary for all files:'));
     assertSameRun(results);
   });
 
-  test('`--fix`: output and the files written are identical to the same run on one thread', () => {
+  test('Produces output and files identical to the same run on one thread with `--fix`', () => {
     const results = compare('fix', 6, ['--fix']);
     assert.ok(results.parallel.stdout.includes('* Wrote '));
     assertSameRun(results);
   });
 
-  test('`--fix --aggressive` and `--fix --savings-only`: identical to the same runs on one thread', () => {
+  test('Produces results identical to the same runs on one thread with `--fix --aggressive` and `--fix --savings-only`', () => {
     assertSameRun(compare('fix_agg', 6, ['--fix', '--aggressive']));
     assertSameRun(compare('fix_savings', 6, ['--fix', '--savings-only']));
   });
 
-  test('`--quiet`: identical to the same run on one thread', () => {
+  test('Produces results identical to the same run on one thread with `--quiet`', () => {
     assertSameRun(compare('quiet', 6, ['--quiet']));
   });
 
   // The first file is by far the slowest, so it is dispatched first and lands
   // last, forcing every later result to be buffered. Equally-sized files would
   // often finish in order and pass without exercising `deliver()` at all.
-  test('Per-file reports stay in file order, however the workers finish', () => {
+  test('Keeps per-file reports in file order, however the workers finish', () => {
     const cssSlow = Array.from({ length: 600 }, (_, i) => `.slow-${i} { color: red; margin: 0; padding: 0; }`).join('\n');
     withCorpus('order', 8, dir => {
       const { stdout } = runWithWorkers(4, [dir]);
@@ -1676,7 +1676,7 @@ describe('Parallel runs', () => {
 
   // Everything above sets `CSS_DEDUP_WORKERS`, which bypasses both floors—so
   // without this, the default branch every real run takes goes untested
-  test('Auto: a run over both floors uses the pool with `CSS_DEDUP_WORKERS` unset', () => {
+  test('Uses the pool for a run over both floors with `CSS_DEDUP_WORKERS` unset', () => {
     // Bytes PostCSS parses but barely consolidates: big without being slow
     const padding = `/* ${'-'.repeat(50_000)} */\n`;
     const body = () => padding + cssPerFile;
@@ -1691,7 +1691,7 @@ describe('Parallel runs', () => {
     }
   });
 
-  test('A run under either floor stays on one thread', () => {
+  test('Stays on one thread for a run under either floor', () => {
     // Enough files, but nowhere near enough CSS
     assert.strictEqual(shouldParallelize(60, 191_999), false);
     // Plenty of CSS, but too few files
@@ -1700,7 +1700,7 @@ describe('Parallel runs', () => {
     assert.strictEqual(shouldParallelize(4, 192_000), poolSize(4) > 1);
   });
 
-  test('`CSS_DEDUP_WORKERS` overrides both the pool size and the floors', () => {
+  test('Lets `CSS_DEDUP_WORKERS` override both the pool size and the floors', () => {
     const previous = process.env.CSS_DEDUP_WORKERS;
     try {
       process.env.CSS_DEDUP_WORKERS = '3';
@@ -1725,7 +1725,7 @@ describe('Parallel runs', () => {
     }
   });
 
-  test('Auto: the pool leaves one core to the main thread', () => {
+  test('Leaves one core to the main thread when sizing the pool automatically', () => {
     const previous = process.env.CSS_DEDUP_WORKERS;
     delete process.env.CSS_DEDUP_WORKERS;
     try {
@@ -1737,7 +1737,7 @@ describe('Parallel runs', () => {
 
   // A failure keeps its place in the output rather than surfacing wherever its
   // worker happened to give up
-  test('A file that fails to parse fails only itself, in place', () => {
+  test('Reports a file that fails to parse in place, failing only that file', () => {
     const dirTemp = makeTempDir('temp_parallel_broken');
     for (const name of ['a.css', 'b.css', 'c.css', 'e.css']) {
       fs.writeFileSync(path.join(dirTemp, name), cssPerFile);
@@ -1757,7 +1757,7 @@ describe('Parallel runs', () => {
     }
   });
 
-  test('`CSS_DEDUP_WORKERS` is listed in the help text', () => {
+  test('Lists `CSS_DEDUP_WORKERS` in the help text', () => {
     const { stdout, status } = run(['--help']);
     assert.strictEqual(status, 0);
     assert.ok(stdout.includes('CSS_DEDUP_WORKERS'));

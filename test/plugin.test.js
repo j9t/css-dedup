@@ -43,14 +43,14 @@ describe('Plugin: Dedup', () => {
     assert.match(result.warnings()[0].text, /left unmerged/);
   });
 
-  test('`savingsOnly: true` leaves the CSS untouched when consolidation would grow it, and warns', async () => {
+  test('Leaves the CSS untouched with `savingsOnly: true` when consolidation would grow it, and warns', async () => {
     const input = '.very-long-selector-name-one { color: red; font-weight: bold; }\n.b { color: red; }\n';
     const result = await postcss([cssdedup({ fix: true, savingsOnly: true })]).process(input, { from: undefined });
     assert.strictEqual(result.css, input);
     assert.ok(result.warnings().some(warning => /1 merge withheld \(`savingsOnly`\): applying it would make the style sheet \d+ bytes bigger/.test(warning.text)));
   });
 
-  test('`savingsOnly: true` still applies a shrinking consolidation', async () => {
+  test('Still applies a shrinking consolidation with `savingsOnly: true`', async () => {
     const result = await postcss([cssdedup({ fix: true, savingsOnly: true })]).process('.a { color: red; }\n.b { color: red; }\n', { from: undefined });
     assert.match(result.css, RE_MERGED_AB);
     assert.strictEqual(result.warnings().length, 0);
@@ -67,7 +67,7 @@ describe('Plugin: PostCSS integration', () => {
     assert.strictEqual(cssdedup.postcss, true);
   });
 
-  test('A later plugin in the same pipeline sees the deduped output', async () => {
+  test('Passes the deduped output to a later plugin in the same pipeline', async () => {
     let ruleCountSeen;
     const collector = () => ({
       postcssPlugin: 'collector',
@@ -82,7 +82,7 @@ describe('Plugin: PostCSS integration', () => {
     assert.match(result.css, RE_MERGED_AB);
   });
 
-  test('Fix mode is idempotent: A second pass over its own output finds nothing to warn about', async () => {
+  test('Leaves nothing to warn about on a second pass over its own fix-mode output (idempotent)', async () => {
     const input = '.a { color: red; }\n.b { color: red; }\n';
     const first = await postcss([cssdedup({ fix: true })]).process(input, { from: undefined });
     const second = await postcss([cssdedup()]).process(first.css, { from: undefined });

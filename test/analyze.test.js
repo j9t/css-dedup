@@ -130,7 +130,7 @@ describe('Selector—likely disjoint', () => {
     assert.strictEqual(selectorsLikelyDisjoint('.a', 'div'), false);
   });
 
-  test('Only the subject compound counts, not ancestor compounds', () => {
+  test('Counts only the subject compound, not ancestor compounds', () => {
     // Both selectors’ subjects are `p`—the differing ancestors don’t make
     // them disjoint (the same `p` can sit inside both wrappers)
     assert.strictEqual(selectorsLikelyDisjoint('.x p', '.y p'), false);
@@ -500,7 +500,7 @@ describe('Analysis', () => {
     assert.strictEqual(findings.length, 0);
   });
 
-  test('`ignoreSelectorsDefaults: false` disables the built-in hack list', () => {
+  test('Disables the built-in hack list with `ignoreSelectorsDefaults: false`', () => {
     const { findings } = analyze('.a { color: red; } * html .b { color: red; }', {
       ignoreSelectorsDefaults: false,
     });

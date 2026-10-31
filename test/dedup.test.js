@@ -138,13 +138,13 @@ describe('Deduplication', () => {
     assert.strictEqual(css, input);
   });
 
-  test('Never merges selector hack rules', () => {
+  test('Does not merge selector hack rules', () => {
     const { applied, css } = dedup('.a { color: red; }\n* html .b { color: red; }\n');
     assert.strictEqual(applied.length, 0);
     assert.match(css, /\*\s*html \.b/);
   });
 
-  test('Never merges a rule with a mixed hack/normal selector list, and never drops its hack selector', () => {
+  test('Does not merge a rule with a mixed hack/normal selector list, and never drops its hack selector', () => {
     const input = '.a, * html .b { color: red; }\n.c { color: red; }\n';
     const { applied, css } = dedup(input);
     assert.strictEqual(applied.length, 0);
@@ -549,7 +549,7 @@ describe('Deduplication', () => {
     assert.strictEqual(applied.length, 1);
   });
 
-  test('Never touches a same-rule duplicate on a selector hack rule', () => {
+  test('Does not touch a same-rule duplicate on a selector hack rule', () => {
     const input = '* html .a { color: red; color: red; }\n';
     const { css, applied } = dedup(input);
     assert.strictEqual(css, input);
@@ -692,7 +692,7 @@ describe('Aggressive mode', () => {
     assert.strictEqual(f2.applied.length, 0);
   });
 
-  test('Never merges across anonymous `@layer` blocks (each is its own layer)', () => {
+  test('Does not merge across anonymous `@layer` blocks (each is its own layer)', () => {
     const css = '@layer { .a { color: red; } }\n@layer { .c { color: blue; } }\n@layer { .a2 { color: red; } }';
     assert.strictEqual(dedup(css, { aggressive: true }).applied.length, 0);
     // Named layers with the same name are one layer, so those still merge
@@ -700,7 +700,7 @@ describe('Aggressive mode', () => {
     assert.strictEqual(named.applied.length, 1);
   });
 
-  test('A namespaced type or attribute selector never counts as likely disjoint', () => {
+  test('Does not count a namespaced type or attribute selector as likely disjoint', () => {
     assert.strictEqual(selectorsLikelyDisjoint('rect', 'svg|rect'), false);
     assert.strictEqual(selectorsLikelyDisjoint('.card', '[xlink|href="a.zzz"]'), false);
 
@@ -776,7 +776,7 @@ describe('Savings only', () => {
     assert.strictEqual(bytes.after, Buffer.byteLength(output, 'utf8'));
   });
 
-  test('Never grows the style sheet, whichever mix of merges a file offers', () => {
+  test('Does not grow the style sheet, whichever mix of merges a file offers', () => {
     const cases = [cssGrowing, cssGrowingAggressive, cssMixed, '.a { color: red; }\n.b { color: red; }\n'];
     for (const aggressive of [false, true]) {
       for (const css of cases) {
@@ -805,7 +805,7 @@ describe('Savings only', () => {
     assert.strictEqual(withheld, undefined);
   });
 
-  test('Declining a merge on a nesting host still merges the rules nested inside it', () => {
+  test('Still merges the rules nested inside a nesting host when declining a merge on it', () => {
     // The inner scope is collected before the outer merge runs, so a rollback
     // that replaced `.a`’s children with copies would leave that scope
     // merging a subtree no longer attached to the style sheet
@@ -918,7 +918,7 @@ describe('Savings only', () => {
     }
   });
 
-  test('Declining a merge leaves the merges around it byte-identical to an ungated run', () => {
+  test('Leaves the merges around a declined merge byte-identical to an ungated run', () => {
     // The gate must not perturb what it does not decline: The shrinking
     // cluster has to come out exactly as it would on its own
     const shrinkingAlone = '.p { margin: 0; padding: 0; }\n.q { margin: 0; top: 0; }\n.r { margin: 0; left: 0; }\n';

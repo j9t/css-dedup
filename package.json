@@ -34,6 +34,7 @@
   "homepage": "https://github.com/j9t/css-dedup",
   "keywords": [
     "css",
+    "css-dedup",
     "deduplication",
     "dry",
     "maintainability",

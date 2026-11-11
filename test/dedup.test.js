@@ -138,6 +138,21 @@ describe('Deduplication', () => {
     assert.strictEqual(css, input);
   });
 
+  test('Leaves the file untouched when nothing is applied, even where PostCSS wouldn’t round-trip it byte for byte', () => {
+    const input = '.a { background: url(data:image/svg+xml,<svg><!--x--></svg>); }\n.b { color: blue; }\n';
+    const { css, bytes } = dedup(input, { savingsOnly: true });
+    assert.strictEqual(css, input);
+    assert.deepStrictEqual(bytes, { before: Buffer.byteLength(input, 'utf8'), after: Buffer.byteLength(input, 'utf8'), saved: 0 });
+  });
+
+  test('Measures bytes against the input, not PostCSS’s re-serialization of it', () => {
+    const input = '.a { background: url(data:image/svg+xml,<svg><!--x--></svg>); }\n.b { color: red; }\n.c { color: red; }\n';
+    const { css, bytes } = dedup(input);
+    assert.strictEqual(bytes.before, Buffer.byteLength(input, 'utf8'));
+    assert.strictEqual(bytes.after, Buffer.byteLength(css, 'utf8'));
+    assert.strictEqual(bytes.saved, bytes.before - bytes.after);
+  });
+
   test('Does not merge selector hack rules', () => {
     const { applied, css } = dedup('.a { color: red; }\n* html .b { color: red; }\n');
     assert.strictEqual(applied.length, 0);

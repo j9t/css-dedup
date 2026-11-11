@@ -2,9 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/css-dedup.svg)](https://www.npmjs.com/package/css-dedup) [![Build status](https://github.com/j9t/css-dedup/workflows/Tests/badge.svg)](https://github.com/j9t/css-dedup/actions) [![Socket](https://badge.socket.dev/npm/package/css-dedup)](https://socket.dev/npm/package/css-dedup) [![GitHub Sponsors](https://badgen.net/static/Support/Open%20Source/cyan)](https://github.com/sponsors/j9t)
 
-CSS Dedup is a CSS maintainability and performance optimization tool that finds—and, when requested and where safe, consolidates—duplicate CSS declarations. It implements the technique of [using declarations just once (“UDJO”)](https://webglossary.info/terms/udjo/) as [described in 2008](https://meiert.com/blog/css-organization-and-efficiency/) and [detailed in 2017](https://meiert.com/blog/dry-css/): the same normalized property–value pair shouldn’t appear in more than one rule within the same scope. Where it does, CSS Dedup reports it—and allows to optimize the respective style sheet.
-
-**Note: CSS Dedup is still brand-new 🆕 and needs to be battle-tested 🧪. Please [report any issues](https://github.com/j9t/css-dedup/issues).**
+CSS Dedup is a CSS maintainability and performance optimization tool that finds—and, when requested and where safe, consolidates—duplicate CSS declarations. It implements the technique of [using declarations just once (“UDJO”)](https://webglossary.info/terms/udjo/) as [described in 2008](https://meiert.com/blog/css-organization-and-efficiency/) and [detailed in 2017](https://meiert.com/blog/dry-css/): the same normalized property–value pair shouldn’t appear in more than one rule within the same scope. Where it does, CSS Dedup reports it—and can optimize the respective style sheet.
 
 ## Example Optimization
 
@@ -56,9 +54,9 @@ Summary:
 * Wrote default.css
 ```
 
-Since duplicate declarations cost bytes wherever they live—in the style sheet itself, and (uncompressed) over the wire—the byte counts reflect two payoffs at once: less to maintain, and less to transfer.
+Since duplicate declarations cost bytes, the byte counts reflect two payoffs at once: less to maintain, and less for browsers to download and parse. The download part may be smaller than the counts suggest, though: Gzip and Brotli encode repeated declarations cheaply, so most of a raw saving may disappear under compression (check, therefore, [where to run CSS Dedup](#where-to-run-css-dedup)).
 
-The two aren’t always aligned, though: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. CSS Dedup’s two modes call this out, so it’s a decision you can make consciously—it’s worth it if you value using declarations once for maintainability, yet not if you’re optimizing purely for transfer size. (`--fix --savings-only` automates that call, merge by merge: Every consolidation that would grow the style sheet is left out, and the ones that pay for themselves still apply.)
+Less to maintain and less to transfer aren’t always aligned, however: Folding a declaration into a shared selector list adds that list’s bytes back, so consolidating one that only has a couple of long, otherwise-unrelated selectors in common can end up costing more than it removes. CSS Dedup’s two modes call this out, so you can decide consciously—it’s worth it if you value using declarations once for maintainability, yet not if you’re optimizing purely for transfer size. (`--fix --savings-only` automates that call, merge by merge: Every consolidation that would grow the style sheet is left out, and the ones that pay for themselves still apply.)
 
 ## Usage
 
@@ -162,7 +160,7 @@ Both functions accept an options object:
 
 `dedup()` returns `{ css, applied, skipped, bytes }`: `css` is the rewritten style sheet; `applied` lists what it did—each entry has `redundant: true` if it just dropped a same-rule (or same-at-rule-block) duplicate, `folded: true` if it folded a rule repeating the same selector into a later one, absent if it folded selectors from separate rules into one; `skipped` lists duplicate groups (and blocked same-selector folds) it left untouched along with why; and `bytes` is `{ before, after, saved }`—UTF-8 byte counts of the style sheet before and after, since that’s what changes over the wire, not the character count, covering everything `--fix` did as one net figure.
 
-`saved` is `before - after`, so it’s negative on the rare file where the added selector-list text outweighs the removed declarations—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. With `savingsOnly: true`, each merge that would make `saved` more negative is withheld on its own, leaving the rest in place: `css` comes back with whatever paid for itself applied, `bytes` reports what actually happened, and the declined merges arrive as `withheld: { count, bytes }`—how many, and the byte counts the style sheet would have had with them applied too (`withheld` is absent whenever nothing was withheld). A file offering nothing but growing merges therefore still comes back untouched, with `applied` empty; one that mixes them keeps its savings. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
+`saved` is `before - after`, so it’s negative wherever the added selector-list text outweighs the removed declarations (common in framework and other generated CSS)—dropping a same-rule duplicate never costs bytes, only folding selectors from separate rules can. With `savingsOnly: true`, each merge that would make `saved` more negative is withheld on its own, leaving the rest in place: `css` comes back with whatever paid for itself applied, `bytes` reports what actually happened, and the declined merges arrive as `withheld: { count, bytes }`—how many, and the byte counts the style sheet would have had with them applied too (`withheld` is absent whenever nothing was withheld). A file offering nothing but growing merges therefore still comes back untouched, with `applied` empty; one that mixes them keeps its savings. `dedupRoot()` (the same function, operating on an already-parsed PostCSS root instead of a CSS string) returns the same shape minus `css`.
 
 `dedup()` additionally returns `sourceMapStale: true` when the style sheet passed in carried a `/*# sourceMappingURL=… */` comment _and_ the run actually rewrote it—the CLI’s source map caveat in machine-readable form, so a wrapper can surface it instead of shipping a broken map unnoticed. It’s absent otherwise, including when nothing was applied or every merge was withheld, since the style sheet (and hence the map’s accuracy) is then unchanged. `dedupRoot()` doesn’t report it, deliberately: It’s what [the PostCSS plugin](#postcss-plugin) calls, and that path stringifies through PostCSS, which emits a correct map of its own.
 
@@ -183,7 +181,19 @@ const fixed = await postcss([cssdedup({ fix: true })]).process(css, { from: 'def
 console.log(fixed.css);
 ```
 
-The plugin takes the same options as `analyze()`/`dedup()`, plus `fix: true` to switch it into consolidation mode (`aggressive: true` and `savingsOnly: true` work here, too—withheld merges are left out of the root and surface as a warning). Since CSS Dedup is a source-hygiene tool—more like `stylelint --fix` than a bundle optimizer—it fits well early in a pipeline, on hand-authored CSS, before Autoprefixer and before minification; running it after either may overlap with work those tools do. (CSS Dedup also works as a last step, however, as with applying `--savings-only` optimizations to minified files.)
+The plugin takes the same options as `analyze()`/`dedup()`, plus `fix: true` to switch it into consolidation mode (`aggressive: true` and `savingsOnly: true` work here, too—withheld merges are left out of the root and surface as a warning). Where in the pipeline to place it depends on what it’s for:
+
+### Where to Run CSS Dedup
+
+CSS Dedup can run at three points, depending on your goal:
+
+1. **On source files, for maintainability:** Report mode (say, in CI) or `--fix` on hand-authored CSS. That’s where using declarations once pays off, as it’s the code being maintained. It’s the only one of the three placements that changes the files you edit.
+
+2. **In the build, before minification:** The PostCSS plugin with `fix: true` (usually with `savingsOnly: true`) rewrites the build output only, and PostCSS emits one correct source map for the whole pipeline.
+
+3. **After minification, as a last step:** `--fix --savings-only` on the minified files (e.g., `css-dedup dist/ -f -s -z -q`). `--savings-only` then weighs each merge in the bytes that actually ship (though a source map would go stale).
+
+For byte savings, the last two are practically equivalent: Analyzing 1,882 style sheets from 123 websites (November 2026), deduplicating before or after Lightning CSS minification produced the same size for 87% of files, and totals within 0.02% of each other, so you could let the source map decide. The exception is a step that lowers modern syntax for older browsers (like Lightning CSS expanding `light-dark()` for the configured targets): The fallbacks it generates can repeat declarations, which only a pass after that step can consolidate—and those savings tend to hold up under compression. Expect modest results: about 1% raw (2% with `--aggressive`), and next to nothing after Gzip or Brotli, which already exploit repeated declarations (of the files `--savings-only` changed, 45% came out slightly _bigger_ after Brotli). Without `--savings-only`, consolidating built style sheets can grow them (by 13% in total in that sample), usually when framework and generated CSS repeat declarations across long, unrelated selectors.
 
 ## How It Works
 

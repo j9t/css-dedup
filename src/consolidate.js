@@ -201,9 +201,25 @@ function referencesSourceMap(root) {
 
 export function dedup(css, options = {}) {
   const root = postcss.parse(css, { from: options.from });
-  const result = dedupRoot(root, options);
+  const { withheld, ...result } = dedupRoot(root, options);
   // Only a rewrite invalidates the map: a run that applied nothing (or had its
   // consolidation withheld) leaves the style sheet exactly as it was
   const stale = result.applied.length > 0 && referencesSourceMap(root);
-  return { css: root.toString(), ...result, ...(stale && { sourceMapStale: true }) };
+
+  // PostCSS doesn’t round-trip every input byte for byte (it escapes `<!--`
+  // in an unquoted `url()`, for one), so an untouched run hands back the input
+  // itself, and the figures measure against it
+  const output = result.applied.length ? root.toString() : css;
+  const before = Buffer.byteLength(css, 'utf8');
+  const after = Buffer.byteLength(output, 'utf8');
+  const shift = after - result.bytes.after;
+  return {
+    css: output,
+    ...result,
+    bytes: { before, after, saved: before - after },
+    ...(withheld && {
+      withheld: { ...withheld, bytes: { ...withheld.bytes, before: withheld.bytes.before + shift, after: withheld.bytes.after + shift } },
+    }),
+    ...(stale && { sourceMapStale: true }),
+  };
 }

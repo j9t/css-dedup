@@ -4,11 +4,16 @@ All notable changes to CSS Dedup are documented in this file, which is (mostly) 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.13.4] - 2026-11-11
+
+### Fixed
+
+* Made `dedup()` return its input unchanged when nothing applies, and measure bytes against that input: PostCSS doesn’t round-trip every style sheet byte for byte (it escapes `<!--` in an unquoted `url()`), which skewed reported figures
 
 ### Changed
 
 * Removed dead and no-op code across the engine, CLI, and plugin (redundant guards, unread fields and arguments, identical-branch conditionals, unused exports)
+* Documented where to run CSS Dedup depending on the goal, and what compression leaves of its byte savings
 
 ## [1.13.3] - 2026-09-24
 

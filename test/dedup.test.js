@@ -1,5 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
+import postcss from 'postcss';
 import { analyze, dedup } from '../src/index.js';
 import { normalizeValue } from '../src/lib/normalization.js';
 import { selectorsLikelyDisjoint } from '../src/lib/selectors.js';
@@ -140,6 +141,7 @@ describe('Deduplication', () => {
 
   test('Leaves the file untouched when nothing is applied, even where PostCSS wouldn’t round-trip it byte for byte', () => {
     const input = '.a { background: url(data:image/svg+xml,<svg><!--x--></svg>); }\n.b { color: blue; }\n';
+    assert.notStrictEqual(postcss.parse(input).toString(), input, 'fixture should not round-trip through PostCSS');
     const { css, bytes } = dedup(input, { savingsOnly: true });
     assert.strictEqual(css, input);
     assert.deepStrictEqual(bytes, { before: Buffer.byteLength(input, 'utf8'), after: Buffer.byteLength(input, 'utf8'), saved: 0 });
@@ -147,6 +149,9 @@ describe('Deduplication', () => {
 
   test('Measures bytes against the input, not PostCSS’s re-serialization of it', () => {
     const input = '.a { background: url(data:image/svg+xml,<svg><!--x--></svg>); }\n.b { color: red; }\n.c { color: red; }\n';
+    const reserialized = postcss.parse(input).toString();
+    assert.notStrictEqual(reserialized, input, 'fixture should not round-trip through PostCSS');
+    assert.notStrictEqual(Buffer.byteLength(reserialized, 'utf8'), Buffer.byteLength(input, 'utf8'), 'fixture’s re-serialization should differ in bytes');
     const { css, bytes } = dedup(input);
     assert.strictEqual(bytes.before, Buffer.byteLength(input, 'utf8'));
     assert.strictEqual(bytes.after, Buffer.byteLength(css, 'utf8'));

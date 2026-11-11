@@ -321,7 +321,7 @@ test/
   fixtures/            Example style sheets each behavior is exercised against
 ```
 
-The step numbers refer to [How It Works](#how-it-works) above, which is where the behavior itself is described—the modules follow that order. `bin/` holds only the executable, matching the sibling tools; everything the CLI does lives under `src/cli/`.
+The step numbers refer to [how CSS Dedup works](#how-it-works), which is where the behavior itself is described—the modules follow that order. `bin/` holds only the executable, matching the sibling tools; everything the CLI does lives under `src/cli/`.
 
 Memoization is per run throughout: The selector, property, and separator caches are reset at the start of every `analyzeRoot()`/`dedupRoot()` call, so a long-lived process (a PostCSS watch build) doesn’t accumulate every selector it has ever seen.
 

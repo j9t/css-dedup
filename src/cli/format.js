@@ -120,13 +120,13 @@ export function formatOutcomeBullet({ countLabel, tense, filesShrinkLen, shrinkT
 
   if (filesShrinkLen && !filesGrowLen) {
     const saved = tense === 'done' ? 'saved' : 'save';
-    return [`* ${countLabel}: ${reduce} duplication and ${saved} ${formatByteMagnitude(shrinkTotal, totalBefore, '-', { more })}${flagClause}${aggregateNote}`];
+    return [`• ${countLabel}: ${reduce} duplication and ${saved} ${formatByteMagnitude(shrinkTotal, totalBefore, '-', { more })}${flagClause}${aggregateNote}`];
   }
 
   if (!filesShrinkLen && filesGrowLen) {
     const grew = tense === 'done' ? 'grew' : 'grow';
     const conjunction = tense === 'done' ? 'and' : 'but';
-    return [`* ${countLabel}: ${reduce} duplication ${conjunction} ${grew} by ${formatByteMagnitude(growTotal, totalBefore, '+', { more })}${flagClause}${aggregateNote}`];
+    return [`• ${countLabel}: ${reduce} duplication ${conjunction} ${grew} by ${formatByteMagnitude(growTotal, totalBefore, '+', { more })}${flagClause}${aggregateNote}`];
   }
 
   if (filesShrinkLen && filesGrowLen) {
@@ -137,10 +137,10 @@ export function formatOutcomeBullet({ countLabel, tense, filesShrinkLen, shrinkT
     // A gerund list for `--fix`, not “and shrink … but grow …”: the run
     // already applied both changes, so there’s no contrast left to draw
     if (tense === 'done') {
-      return [`* ${countLabel}: Reduced duplication, shrinking ${shrinkClause} and growing ${growClause}${netNote}`];
+      return [`• ${countLabel}: Reduced duplication, shrinking ${shrinkClause} and growing ${growClause}${netNote}`];
     }
     return [
-      `* ${countLabel}: Reduce duplication and shrink ${shrinkClause} but grow ${growClause}${flagClause}${netNote}`,
+      `• ${countLabel}: Reduce duplication and shrink ${shrinkClause} but grow ${growClause}${flagClause}${netNote}`,
       `  - Skip files that grow in size to save ${formatByteMagnitude(shrinkTotal, totalBefore, '-')} in total with \`${skipFlag}\``,
     ];
   }
@@ -160,5 +160,5 @@ export function aggressiveFixCommand(savingsOnly) {
 // on its own.
 export function formatAggressivePreviewLine(aggExtra, aggExtraSaved, before, baseSaved, savingsOnly = false) {
   const label = aggExtra > 0 ? `${aggExtra} more declaration${plural(aggExtra)}` : 'Further consolidation';
-  return `* ${label} in aggressive mode: ${formatReduceClause(aggExtraSaved, before, true)} with \`${aggressiveFixCommand(savingsOnly)}\`${formatAggregateTotalNote(baseSaved + aggExtraSaved, before)}`;
+  return `• ${label} in aggressive mode: ${formatReduceClause(aggExtraSaved, before, true)} with \`${aggressiveFixCommand(savingsOnly)}\`${formatAggregateTotalNote(baseSaved + aggExtraSaved, before)}`;
 }

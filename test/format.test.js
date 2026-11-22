@@ -120,9 +120,9 @@ describe('Summary clauses', () => {
   });
 
   test('Names a declaration count in the aggressive preview, or falls back to “Further consolidation” at zero', () => {
-    assert.match(formatAggressivePreviewLine(3, 100, 1000, 50), /^\* 3 more declarations in aggressive mode: /);
-    assert.match(formatAggressivePreviewLine(1, 100, 1000, 50), /^\* 1 more declaration in aggressive mode: /);
-    assert.match(formatAggressivePreviewLine(0, 100, 1000, 50), /^\* Further consolidation in aggressive mode: /);
+    assert.match(formatAggressivePreviewLine(3, 100, 1000, 50), /^• 3 more declarations in aggressive mode: /);
+    assert.match(formatAggressivePreviewLine(1, 100, 1000, 50), /^• 1 more declaration in aggressive mode: /);
+    assert.match(formatAggressivePreviewLine(0, 100, 1000, 50), /^• Further consolidation in aggressive mode: /);
   });
 
   test('Carries `--savings-only` into the command the aggressive preview suggests', () => {
@@ -153,12 +153,12 @@ describe('Outcome bullets', () => {
   test('Reports an all-shrinking split in past tense for `--fix`, with no flag to suggest', () => {
     const [line, ...rest] = formatOutcomeBullet({ ...base, tense: 'done', filesShrinkLen: 2, shrinkTotal: 200, filesGrowLen: 0, growTotal: 0 });
     assert.strictEqual(rest.length, 0);
-    assert.strictEqual(line, '* 3 declarations consolidated: Reduced duplication and saved 200 bytes (-20.0%)');
+    assert.strictEqual(line, '• 3 declarations consolidated: Reduced duplication and saved 200 bytes (-20.0%)');
   });
 
   test('Recommends the flag in present tense for a preview', () => {
     const [line] = formatOutcomeBullet({ ...base, tense: 'todo', filesShrinkLen: 2, shrinkTotal: 200, filesGrowLen: 0, growTotal: 0, flag: '--fix' });
-    assert.strictEqual(line, '* 3 declarations consolidated: Reduce duplication and save 200 bytes (-20.0%) with `--fix`');
+    assert.strictEqual(line, '• 3 declarations consolidated: Reduce duplication and save 200 bytes (-20.0%) with `--fix`');
   });
 
   test('Uses “and grew” for an applied all-growing split but “but grow” for a preview', () => {
@@ -166,8 +166,8 @@ describe('Outcome bullets', () => {
     const [todo] = formatOutcomeBullet({ ...base, tense: 'todo', filesShrinkLen: 0, shrinkTotal: 0, filesGrowLen: 1, growTotal: 50, flag: '--fix' });
     // “and” for `--fix`, where the growth happened alongside the deduplication
     // rather than despite it; “but” only where the choice is still open
-    assert.strictEqual(done, '* 3 declarations consolidated: Reduced duplication and grew by 50 bytes (+5.0%)');
-    assert.strictEqual(todo, '* 3 declarations consolidated: Reduce duplication but grow by 50 bytes (+5.0%) with `--fix`');
+    assert.strictEqual(done, '• 3 declarations consolidated: Reduced duplication and grew by 50 bytes (+5.0%)');
+    assert.strictEqual(todo, '• 3 declarations consolidated: Reduce duplication but grow by 50 bytes (+5.0%) with `--fix`');
   });
 
   test('Itemizes a mixed split as a gerund list for `--fix`, with no contrast left to draw', () => {

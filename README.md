@@ -50,8 +50,8 @@ Running with `--fix` folds `.a` and `.b` into a single rule for the shared decla
 $ npx css-dedup --fix default.css
 
 Summary:
-* 1 declaration consolidated: Reduced duplication and saved 10 bytes (64 → 54 bytes, -15.6%)
-* Wrote default.css
+• 1 declaration consolidated: Reduced duplication and saved 10 bytes (64 → 54 bytes, -15.6%)
+• Wrote default.css
 ```
 
 Since duplicate declarations cost bytes, the byte counts reflect two payoffs at once: less to maintain, and less for browsers to download and parse. The download part may be smaller than the counts suggest, though: Gzip and Brotli encode repeated declarations cheaply, so most of a raw saving may disappear under compression (check, therefore, [where to run CSS Dedup](#where-to-run-css-dedup)).

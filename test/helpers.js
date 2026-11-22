@@ -123,7 +123,7 @@ export const RE_MERGED_AB = /\.a,\s*\.b\s*{\s*color: red;\s*}/;
 export const RE_MERGED_AC = /\.a,\s*\.c\s*{\s*color: red;\s*}/;
 // The report table’s header row, followed by a data row whose `-f` column
 // (the second cell) shows a save (a leading `-`)—the report-mode analogue
-// of the old `* N findings: Reduce duplication and save …` bullet. Not
+// of the old `• N findings: Reduce duplication and save …` bullet. Not
 // anchored to exact column spacing (that’s computed per run), just that a
 // `Findings -f (-a)` row saves something under plain `-f`.
 export const RE_PAYOFF_FIX = /Findings -f \(-a\).*\n\d+ \(\d+\) {2,}-[\d.]+ (?:B|KB|MB) \(-\d+\.\d%\)/;

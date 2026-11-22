@@ -170,8 +170,8 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run(['--fix', file]);
-      assert.match(stdout, /\* 1 declaration consolidated: Reduced duplication and grew by \d+ bytes \(\d+ → \d+ bytes, \+\d+\.\d%\)/);
-      assert.match(stdout, /\* Worth it for maintainability \(each declaration used once\); skip `--fix` here if you care more about transfer size\./);
+      assert.match(stdout, /• 1 declaration consolidated: Reduced duplication and grew by \d+ bytes \(\d+ → \d+ bytes, \+\d+\.\d%\)/);
+      assert.match(stdout, /• Worth it for maintainability \(each declaration used once\); skip `--fix` here if you care more about transfer size\./);
       assert.ok(fs.readFileSync(file, 'utf8').includes('.very-long-selector-name-one, .b'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -193,7 +193,7 @@ describe('CLI', () => {
     try {
       const { stdout, status } = run(['--fix', '--savings-only', file]);
       assert.strictEqual(status, 1);
-      assert.match(stdout, /\* 0 declarations consolidated, 1 withheld: `savingsOnly` left this file untouched—consolidating would grow by \d+ bytes \(\+\d+\.\d%\)/);
+      assert.match(stdout, /• 0 declarations consolidated, 1 withheld: `savingsOnly` left this file untouched—consolidating would grow by \d+ bytes \(\+\d+\.\d%\)/);
       assert.ok(!stdout.includes('Wrote'));
       assert.strictEqual(fs.readFileSync(file, 'utf8'), source);
     } finally {
@@ -209,7 +209,7 @@ describe('CLI', () => {
     try {
       const { stdout, status } = run(['-f', '-s', file]);
       assert.strictEqual(status, 0);
-      assert.ok(stdout.includes('* 1 declaration consolidated: Reduced duplication and saved'));
+      assert.ok(stdout.includes('• 1 declaration consolidated: Reduced duplication and saved'));
       assert.ok(stdout.includes('Wrote'));
       assert.ok(fs.readFileSync(file, 'utf8').includes('.a, .b'));
     } finally {
@@ -254,7 +254,7 @@ describe('CLI', () => {
       // The counts line—the run’s conclusion—must be among the last things
       // printed, not stranded above the skipped-group detail
       assert.match(stdout, /\d+ more declarations? in aggressive mode/);
-      assert.match(stdout, /\* 0 declarations consolidated, 1 withheld:.*\n\* 1 finding skipped \(considered unsafe to auto-merge\)/);
+      assert.match(stdout, /• 0 declarations consolidated, 1 withheld:.*\n• 1 finding skipped \(considered unsafe to auto-merge\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -269,9 +269,9 @@ describe('CLI', () => {
       const { stdout } = run(['--fix', '--savings-only', file]);
       // The outcome line states what was consolidated, not that the file was
       // left untouched—the gate decides per merge
-      assert.match(stdout, /\* \d+ declarations? consolidated: Reduced duplication and saved \d+ bytes \(\d+ → \d+ bytes, -\d+\.\d%\)/);
+      assert.match(stdout, /• \d+ declarations? consolidated: Reduced duplication and saved \d+ bytes \(\d+ → \d+ bytes, -\d+\.\d%\)/);
       assert.doesNotMatch(stdout, /left this file untouched/);
-      assert.match(stdout, /\* 1 further merge withheld by `savingsOnly`—applying it too would grow by \d+ bytes \(\+\d+\.\d%\)/);
+      assert.match(stdout, /• 1 further merge withheld by `savingsOnly`—applying it too would grow by \d+ bytes \(\+\d+\.\d%\)/);
 
       const output = fs.readFileSync(file, 'utf8');
       assert.match(output, /\.p,\s*\.q,\s*\.r\s*{\s*margin: 0;\s*}/);
@@ -291,8 +291,8 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run(['--fix', '--savings-only', filePartial, fileGrow]);
-      assert.match(stdout, /\* 1 file left untouched by `--savings-only`/);
-      assert.match(stdout, /\* 1 file had further merges withheld by `--savings-only`—applying those too would have added \d+ bytes \(\d+\.\d% overall\) in total/);
+      assert.match(stdout, /• 1 file left untouched by `--savings-only`/);
+      assert.match(stdout, /• 1 file had further merges withheld by `--savings-only`—applying those too would have added \d+ bytes \(\d+\.\d% overall\) in total/);
       assert.strictEqual(fs.readFileSync(fileGrow, 'utf8'), cssGrowing);
       assert.notStrictEqual(fs.readFileSync(filePartial, 'utf8'), cssMixed);
     } finally {
@@ -353,7 +353,7 @@ describe('CLI', () => {
       assert.match(report.stdout, /1 \(1\) {2,}-30 B \(-22\.4%\) {2,}-30 B \(-22\.4%\) {2,}-0\.1 KB \(-55\.2%\) {2,}-0\.1 KB \(-55\.2%\)/);
 
       const fix = run(['--fix', file]);
-      assert.match(fix.stdout, /\* Further consolidation in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
+      assert.match(fix.stdout, /• Further consolidation in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -406,7 +406,7 @@ describe('CLI', () => {
       assert.match(report.stdout, /1 \(1\) {2,}n\/a {2,}n\/a {2,}\+\d+(?:\.\d+)? (?:B|KB|MB) \(\+\d+\.\d%\) {2,}n\/a/);
 
       const fix = run(['--fix', file]);
-      assert.match(fix.stdout, /\* 1 more declaration in aggressive mode: Reduce duplication but grow by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive`/);
+      assert.match(fix.stdout, /• 1 more declaration in aggressive mode: Reduce duplication but grow by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive`/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -657,12 +657,12 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run(['--fix', fileShrink, fileGrow]);
-      assert.ok(stdout.includes(`Summary for ${fileShrink}:\n* 1 declaration consolidated: Reduced duplication and saved`));
-      assert.ok(stdout.includes(`Summary for ${fileGrow}:\n* 1 declaration consolidated: Reduced duplication and grew`));
-      assert.ok(stdout.includes('Summary for all files:\n* 2 declarations consolidated:'));
+      assert.ok(stdout.includes(`Summary for ${fileShrink}:\n• 1 declaration consolidated: Reduced duplication and saved`));
+      assert.ok(stdout.includes(`Summary for ${fileGrow}:\n• 1 declaration consolidated: Reduced duplication and grew`));
+      assert.ok(stdout.includes('Summary for all files:\n• 2 declarations consolidated:'));
       // The growing file (18 bytes) outweighs the shrinking file (15 bytes),
       // so the net (in parentheses) comes out positive—growing, not shrinking
-      assert.match(stdout, /\* 2 declarations consolidated: Reduced duplication, shrinking 1 file by \d+ bytes \(-\d+\.\d%\) and growing 1 file by \d+ bytes \(\+\d+\.\d%\) \(total: \+\d+ bytes \/ \+\d+\.\d%\)/);
+      assert.match(stdout, /• 2 declarations consolidated: Reduced duplication, shrinking 1 file by \d+ bytes \(-\d+\.\d%\) and growing 1 file by \d+ bytes \(\+\d+\.\d%\) \(total: \+\d+ bytes \/ \+\d+\.\d%\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -677,8 +677,8 @@ describe('CLI', () => {
 
     try {
       const { stdout } = run(['--fix', '--savings-only', fileShrink, fileGrow]);
-      assert.match(stdout, /\* 1 declaration consolidated: Reduced duplication and saved \d+ bytes \(-\d+\.\d%\)/);
-      assert.match(stdout, /\* 1 file left untouched by `--savings-only`—consolidating would have made it \d+ bytes \(\d+\.\d% overall\) bigger in total/);
+      assert.match(stdout, /• 1 declaration consolidated: Reduced duplication and saved \d+ bytes \(-\d+\.\d%\)/);
+      assert.match(stdout, /• 1 file left untouched by `--savings-only`—consolidating would have made it \d+ bytes \(\d+\.\d% overall\) bigger in total/);
       assert.ok(fs.readFileSync(fileGrow, 'utf8') === cssGrowing);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -706,7 +706,7 @@ describe('CLI', () => {
       // `--fix` mode’s own bullet is untouched by the report table rework,
       // and its “preview, never yet applied” phrasing is identical whether
       // the base run was report or `--fix` mode
-      const RE_AGGRESSIVE_ROLLUP = /\* 2 more declarations in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(total: [-+]\d+ bytes \/ [-+]\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
+      const RE_AGGRESSIVE_ROLLUP = /• 2 more declarations in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(total: [-+]\d+ bytes \/ [-+]\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
       assert.match(run(['--fix', fileShrink, fileGrow]).stdout, RE_AGGRESSIVE_ROLLUP);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -961,7 +961,7 @@ describe('CLI', () => {
     try {
       const { stdout, status } = run(['-f', '-a', file]);
       assert.strictEqual(status, 0);
-      assert.ok(stdout.includes('* 1 declaration consolidated'));
+      assert.ok(stdout.includes('• 1 declaration consolidated'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -978,7 +978,7 @@ describe('CLI', () => {
       // only `--fix` can demonstrate the config setting actually took—the
       // alias fold below is aggressive-only
       const { stdout } = run(['--fix', file], { cwd: dirTemp });
-      assert.ok(stdout.includes('* 1 declaration consolidated'));
+      assert.ok(stdout.includes('• 1 declaration consolidated'));
       assert.ok(fs.readFileSync(file, 'utf8').includes('.a, .b { overflow-wrap: break-word; }'));
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
@@ -1433,7 +1433,7 @@ describe('Fixtures', () => {
 
     try {
       const { stdout } = run(['--fix', file]);
-      assert.ok(stdout.includes('* 1 declaration consolidated: Reduced duplication and saved'));
+      assert.ok(stdout.includes('• 1 declaration consolidated: Reduced duplication and saved'));
       assert.ok(!stdout.includes('unsafe to auto-merge'));
       assert.ok(!/\d+ skipped/.test(stdout));
     } finally {
@@ -1544,7 +1544,7 @@ describe('Fixtures', () => {
 
     try {
       const { stdout } = run(['--fix', '--aggressive', file]);
-      assert.ok(stdout.includes('* 1 declaration consolidated: Reduced duplication and saved'));
+      assert.ok(stdout.includes('• 1 declaration consolidated: Reduced duplication and saved'));
       assert.match(stdout, /1 of these merges is aggressive-only—probably, but not provably, safe\. Review the diff and test the affected pages\./);
 
       const output = fs.readFileSync(file, 'utf8');
@@ -1563,7 +1563,7 @@ describe('Fixtures', () => {
     try {
       const { stdout } = run(['--fix', file]);
       assert.match(stdout, /intervening `background` declaration in `\.y`.*\(may merge with `--aggressive`\)/);
-      assert.match(stdout, /\* 1 more declaration in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive` \(total: -\d+ bytes \/ -\d+\.\d%\)/);
+      assert.match(stdout, /• 1 more declaration in aggressive mode: Reduce duplication and save \d+ more bytes \(-\d+\.\d%\) with `--fix --aggressive` \(total: -\d+ bytes \/ -\d+\.\d%\)/);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });
     }
@@ -1649,7 +1649,7 @@ describe('Parallel runs', () => {
 
   test('Produces output and files identical to the same run on one thread with `--fix`', () => {
     const results = compare('fix', 6, ['--fix']);
-    assert.ok(results.parallel.stdout.includes('* Wrote '));
+    assert.ok(results.parallel.stdout.includes('• Wrote '));
     assertSameRun(results);
   });
 

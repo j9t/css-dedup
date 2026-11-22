@@ -181,7 +181,7 @@ describe('Outcome bullets', () => {
     const lines = formatOutcomeBullet({ ...base, tense: 'todo', filesShrinkLen: 2, shrinkTotal: 300, filesGrowLen: 1, growTotal: 100, flag: '--fix' });
     assert.strictEqual(lines.length, 2);
     assert.match(lines[0], /Reduce duplication and shrink 2 files .* but grow 1 file /);
-    assert.strictEqual(lines[1], '  - Skip files that grow in size to save 300 bytes (-30.0%) in total with `--fix --savings-only`');
+    assert.strictEqual(lines[1], '  ◦ Skip files that grow in size to save 300 bytes (-30.0%) in total with `--fix --savings-only`');
   });
 
   test('Lets an aggregate note replace the mixed split’s own net, so two differently-scoped “total:” figures never sit back to back', () => {

@@ -141,7 +141,7 @@ export function formatOutcomeBullet({ countLabel, tense, filesShrinkLen, shrinkT
     }
     return [
       `• ${countLabel}: Reduce duplication and shrink ${shrinkClause} but grow ${growClause}${flagClause}${netNote}`,
-      `  - Skip files that grow in size to save ${formatByteMagnitude(shrinkTotal, totalBefore, '-')} in total with \`${skipFlag}\``,
+      `  ◦ Skip files that grow in size to save ${formatByteMagnitude(shrinkTotal, totalBefore, '-')} in total with \`${skipFlag}\``,
     ];
   }
 

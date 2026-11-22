@@ -706,7 +706,7 @@ describe('CLI', () => {
       // `--fix` mode’s own bullet is untouched by the report table rework,
       // and its “preview, never yet applied” phrasing is identical whether
       // the base run was report or `--fix` mode
-      const RE_AGGRESSIVE_ROLLUP = /• 2 more declarations in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(total: [-+]\d+ bytes \/ [-+]\d+\.\d%\)\n {2}- Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
+      const RE_AGGRESSIVE_ROLLUP = /• 2 more declarations in aggressive mode: Reduce duplication and shrink 1 file by \d+ more bytes \(-\d+\.\d%\) but grow 1 file by \d+ more bytes \(\+\d+\.\d%\) with `--fix --aggressive` \(total: [-+]\d+ bytes \/ [-+]\d+\.\d%\)\n {2}◦ Skip files that grow in size to save \d+ bytes \(-\d+\.\d%\) in total with `--fix --aggressive --savings-only`/;
       assert.match(run(['--fix', fileShrink, fileGrow]).stdout, RE_AGGRESSIVE_ROLLUP);
     } finally {
       fs.rmSync(dirTemp, { recursive: true, force: true });

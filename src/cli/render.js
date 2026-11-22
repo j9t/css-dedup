@@ -138,16 +138,16 @@ function renderFixPass(payload, { isStdin, label, multi, flags, savingsOnly }) {
       const share = aggressiveOnly > 0
         ? `${aggressiveOnly} of these merges ${aggressiveOnly !== 1 ? 'are' : 'is'}`
         : 'Some of these merges are';
-      log(styleText('yellow', `• ${share} aggressive-only—probably, but not provably, safe. Review the diff and test the affected pages.`));
+      log(`• ${styleText('yellow', `${share} aggressive-only—probably, but not provably, safe. Review the diff and test the affected pages.`)}`);
     }
     if (payload.wrote) log(`• Wrote ${label}`);
     if (sourceMapStale) {
-      log(styleText('yellow', `• ${isStdin ? 'This style sheet' : label} references a source map (\`sourceMappingURL\`); \`--fix\` doesn’t regenerate it, so the map no longer describes this file and should be rebuilt. To keep maps intact, run CSS Dedup before your minifier, or in-pipeline via \`css-dedup/plugin\`.`));
+      log(`• ${styleText('yellow', `${isStdin ? 'This style sheet' : label} references a source map (\`sourceMappingURL\`); \`--fix\` doesn’t regenerate it, so the map no longer describes this file and should be rebuilt. To keep maps intact, run CSS Dedup before your minifier, or in-pipeline via \`css-dedup/plugin\`.`)}`);
     }
   }
 
   if (skipped.length) {
-    log(styleText('yellow', `• ${skipped.length} finding${plural(skipped.length)} skipped (considered unsafe to auto-merge)`));
+    log(`• ${styleText('yellow', `${skipped.length} finding${plural(skipped.length)} skipped (considered unsafe to auto-merge)`)}`);
   }
   // The opposite-mode pass this was measured against ran under this run’s own
   // `savingsOnly` setting, which is why the suggested command repeats the flag
@@ -302,7 +302,7 @@ function printOverallFixSummary(ok, savingsOnly) {
   }
 
   if (totalSkipped) {
-    console.log(styleText('yellow', `• ${totalSkipped} finding${plural(totalSkipped)} skipped (considered unsafe to auto-merge)`));
+    console.log(`• ${styleText('yellow', `${totalSkipped} finding${plural(totalSkipped)} skipped (considered unsafe to auto-merge)`)}`);
   }
   if (withheldFiles.length) {
     console.log(`• ${withheldFiles.length} file${plural(withheldFiles.length)} left untouched by \`--savings-only\`—consolidating would have made ${withheldFiles.length !== 1 ? 'them' : 'it'} ${formatBytesShareOfTotal(withheldGrowthTotal, totalBeforeAll)} bigger in total`);
